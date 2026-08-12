@@ -26,9 +26,10 @@ A recoverable Clouisle backup includes at least PostgreSQL, Qdrant, upload stora
 6. Check document status, vector dimensions, Agents, Workflows, and API Keys.
 7. Run one Knowledge Base retrieval and one Agent/Workflow smoke request.
 
-<Callout type="info" title="Image needed: backup and recovery checklist">
-  File: `/images/backup-restore-checklist.png`. Screenshot content: the operations panel or a terminal showing backup files, the database/Qdrant/upload recovery order, and health check results; hide real credentials. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "backup and recovery checklist".
-</Callout>
+<figure>
+  <img src="/images/backup-restore-checklist.svg" alt="Backup and recovery checklist" />
+  <figcaption>Backup and recovery checklist</figcaption>
+</figure>
 
 <Callout type="error">
   Restoring only PostgreSQL leaves resources missing raw files or vectors; restoring only Qdrant leaves vectors that cannot be linked. Metadata, files, and indexes must be handled at the same recovery point.

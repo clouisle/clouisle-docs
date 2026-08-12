@@ -39,6 +39,7 @@ kubectl -n clouisle scale deployment api --replicas=3
 
 `beat` always stays at one replica. With `ReadWriteOnce` local upload volumes, keep the API at a single replica; production with multiple replicas should configure a shared volume or object storage.
 
-<Callout type="info" title="Image needed: Kubernetes resources and Ingress">
-  File: `/images/kubernetes-resources.png`. Screenshot content: relationships among API, Worker, Sandbox Worker, Beat, Frontend, PostgreSQL, Redis, Qdrant, and Ingress resources in the Kubernetes namespace. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "Kubernetes resources and Ingress".
-</Callout>
+<figure>
+  <img src="/images/kubernetes-resources.svg" alt="Kubernetes resources and Ingress" />
+  <figcaption>Kubernetes resources and Ingress</figcaption>
+</figure>

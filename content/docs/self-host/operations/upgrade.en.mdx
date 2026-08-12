@@ -21,9 +21,10 @@ The installer upgrade preserves the existing `.env`, but you still need to revie
 
 Run `helm upgrade` with the same release and namespace, or review and apply newly generated manifests. Update the API and migrations first, then Worker/Beat/Frontend; keep Beat at a single replica during production.
 
-<Callout type="info" title="Image needed: upgrade rollout status">
-  File: `/images/upgrade-rollout-status.png`. Screenshot content: service status, API health, and logs during a Docker Compose or Kubernetes upgrade, marking completed database migrations. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "upgrade rollout status".
-</Callout>
+<figure>
+  <img src="/images/upgrade-rollout-status.svg" alt="Upgrade rollout status" />
+  <figcaption>Upgrade rollout status</figcaption>
+</figure>
 
 ## Rollback
 

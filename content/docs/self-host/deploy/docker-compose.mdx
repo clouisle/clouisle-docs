@@ -39,9 +39,10 @@ curl http://localhost:8000/api/v1/health
 
 将外部反向代理配置为 `/api/*` 到 `api:8000`、`/` 到 `frontend:3000`。浏览器入口默认 `http://localhost:3000`。
 
-<Callout type="info" title="图片待补充：Docker Compose 服务运行状态">
-  文件：`/images/docker-compose-running.png`。截图内容：终端展示 `docker compose ps` 中 frontend、api、worker、sandbox-worker、beat、db、redis、qdrant 均已就绪；隐藏主机和凭据。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Docker Compose 服务运行状态”。
-</Callout>
+<figure>
+  <img src="/images/docker-compose-running.svg" alt="Docker Compose 服务运行状态" />
+  <figcaption>Docker Compose 服务运行状态</figcaption>
+</figure>
 
 ## 常用操作
 

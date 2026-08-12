@@ -42,6 +42,7 @@ Paginated data lives in `data.items` and includes `total`, `page`, `page_size`.
 `401`/`2000`-`2002`: refresh the login or replace the API Key; `403`/`3000`: check roles, teams, and resource scopes; `4000`/`6000`: confirm IDs and resource statuses; `5400` or provider quota errors: back off and retry; document/workflow failures: first check resource-level error details, fix the configuration, then reprocess or rerun.
 
 
-<Callout type="info" title="Image needed: API error response">
-  File: `/images/api-error-response.png`. Screenshot content: an API client showing the unified code/data/msg error structure, with code, HTTP status, and actionable hints marked. Crop the screenshot to the relevant areas and outline key actions with the theme color. Future image `alt` and caption will both use "API error response".
-</Callout>
+<figure>
+  <img src="/images/api-error-response.svg" alt="API error response" />
+  <figcaption>API error response</figcaption>
+</figure>

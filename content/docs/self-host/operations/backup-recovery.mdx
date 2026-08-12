@@ -26,9 +26,10 @@ Clouisle 的可恢复备份至少包含 PostgreSQL、Qdrant、上传存储和部
 6. 检查文档状态、向量维度、Agent、工作流和 API Key。
 7. 运行一条知识库检索和一条 Agent/工作流冒烟请求。
 
-<Callout type="info" title="图片待补充：备份恢复检查清单">
-  文件：`/images/backup-restore-checklist.png`。截图内容：运维面板或终端展示备份文件、数据库/Qdrant/上传恢复顺序和健康检查结果；隐藏真实凭据。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“备份恢复检查清单”。
-</Callout>
+<figure>
+  <img src="/images/backup-restore-checklist.svg" alt="备份恢复检查清单" />
+  <figcaption>备份恢复检查清单</figcaption>
+</figure>
 
 <Callout type="error">
   仅恢复 PostgreSQL 会留下缺少原始文件或向量的资源；仅恢复 Qdrant 会留下无法关联的向量。必须按同一恢复点处理元数据、文件和索引。

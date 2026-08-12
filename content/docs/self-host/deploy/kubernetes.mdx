@@ -39,6 +39,7 @@ kubectl -n clouisle scale deployment api --replicas=3
 
 `beat` 始终保持一个副本。使用 `ReadWriteOnce` 本地上传卷时，API 保持单副本；生产多副本应配置共享卷或对象存储。
 
-<Callout type="info" title="图片待补充：Kubernetes 资源与 Ingress">
-  文件：`/images/kubernetes-resources.png`。截图内容：Kubernetes namespace 中 API、Worker、Sandbox Worker、Beat、Frontend、PostgreSQL、Redis、Qdrant 和 Ingress 资源关系。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Kubernetes 资源与 Ingress”。
-</Callout>
+<figure>
+  <img src="/images/kubernetes-resources.svg" alt="Kubernetes 资源与 Ingress" />
+  <figcaption>Kubernetes 资源与 Ingress</figcaption>
+</figure>

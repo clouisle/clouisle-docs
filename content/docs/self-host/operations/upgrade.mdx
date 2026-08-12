@@ -21,9 +21,10 @@ icon: RefreshCw
 
 使用相同 release 和 namespace 执行 `helm upgrade`，或审阅新生成 manifest 后 apply。先更新 API 与迁移，再更新 Worker/Beat/Frontend；生产期间保持 Beat 单副本。
 
-<Callout type="info" title="图片待补充：升级滚动状态">
-  文件：`/images/upgrade-rollout-status.png`。截图内容：Docker Compose 或 Kubernetes 升级期间的服务状态、API 健康和日志，标出数据库迁移完成。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“升级滚动状态”。
-</Callout>
+<figure>
+  <img src="/images/upgrade-rollout-status.svg" alt="升级滚动状态" />
+  <figcaption>升级滚动状态</figcaption>
+</figure>
 
 ## 回滚
 

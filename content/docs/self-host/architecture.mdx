@@ -23,9 +23,10 @@ Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 
 
 外部反向代理或 Ingress 负责路由：`/api/*` 到 `api:8000`，其余 `/` 到 `frontend:3000`。前端镜像不包含 Nginx；`deploy/nginx/default.conf` 只是可选的外部示例。
 
-<Callout type="info" title="图片待补充：Clouisle 部署架构">
-  文件：`/images/self-host-architecture.png`。截图内容：展示浏览器、外部反向代理、frontend、api、worker、sandbox-worker、beat 与 PostgreSQL/Redis/Qdrant 的请求和任务关系。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Clouisle 部署架构”。
-</Callout>
+<figure>
+  <img src="/images/self-host-architecture.svg" alt="Clouisle 部署架构" />
+  <figcaption>Clouisle 部署架构</figcaption>
+</figure>
 
 ## 持久化数据
 

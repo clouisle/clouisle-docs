@@ -22,6 +22,7 @@ icon: CodeXml
   源码启动命令会随项目开发变化；以根目录 README、`backend/pyproject.toml`、`frontend/package.json` 和当前脚本为准。部署生产环境使用发布镜像或 Compose/Helm，不要把开发服务器暴露到公网。
 </Callout>
 
-<Callout type="info" title="图片待补充：源码开发服务拓扑">
-  文件：`/images/source-development-topology.png`。截图内容：终端分屏展示 frontend、api、worker/beat 与 PostgreSQL/Redis/Qdrant 的本地开发进程；隐藏用户名和路径。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“源码开发服务拓扑”。
-</Callout>
+<figure>
+  <img src="/images/source-development-topology.svg" alt="源码开发服务拓扑" />
+  <figcaption>源码开发服务拓扑</figcaption>
+</figure>

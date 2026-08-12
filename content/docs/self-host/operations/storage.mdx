@@ -17,9 +17,10 @@ Clouisle 的持久化数据分布在 PostgreSQL、Qdrant、Redis 和上传存储
 - `redis_data`：Redis 持久化数据和任务/会话状态。
 - `uploads_data`：用户上传和沙箱产物。
 
-<Callout type="info" title="图片待补充：存储设置与部署卷">
-  文件：`/images/storage-settings-and-volumes.png`。截图内容：站点存储设置页与 Compose/Kubernetes 持久化卷关系图；截图隐藏桶名、密钥和真实路径。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“存储设置与部署卷”。
-</Callout>
+<figure>
+  <img src="/images/storage-settings-and-volumes.svg" alt="存储设置与部署卷" />
+  <figcaption>存储设置与部署卷</figcaption>
+</figure>
 
 ## 扩展规则
 

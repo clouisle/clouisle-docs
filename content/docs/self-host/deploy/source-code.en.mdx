@@ -22,6 +22,7 @@ In `frontend/`, install the Bun dependencies, set `NEXT_PUBLIC_API_URL=http://lo
   Source startup commands change as the project develops; follow the root README, `backend/pyproject.toml`, `frontend/package.json`, and current scripts. For production deployments, use released images or Compose/Helm, and do not expose a development server to the public internet.
 </Callout>
 
-<Callout type="info" title="Image needed: source development service topology">
-  File: `/images/source-development-topology.png`. Screenshot content: split terminal showing local development processes for frontend, api, worker/beat, and PostgreSQL/Redis/Qdrant; hide usernames and paths. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "source development service topology".
-</Callout>
+<figure>
+  <img src="/images/source-development-topology.svg" alt="Source development service topology" />
+  <figcaption>Source development service topology</figcaption>
+</figure>

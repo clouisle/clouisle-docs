@@ -23,9 +23,10 @@ Clouisle runs 5 application services using 3 images. `clouisle-backend` provides
 
 An external reverse proxy or Ingress routes requests: `/api/*` to `api:8000`, everything else under `/` to `frontend:3000`. The frontend image does not include Nginx; `deploy/nginx/default.conf` is only an optional external example.
 
-<Callout type="info" title="Image needed: Clouisle deployment architecture">
-  File: `/images/self-host-architecture.png`. Screenshot content: shows the browser, external reverse proxy, frontend, api, worker, sandbox-worker, beat, and PostgreSQL/Redis/Qdrant request and task relationships. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "Clouisle deployment architecture".
-</Callout>
+<figure>
+  <img src="/images/self-host-architecture.svg" alt="Clouisle deployment architecture" />
+  <figcaption>Clouisle deployment architecture</figcaption>
+</figure>
 
 ## Persisted data
 
