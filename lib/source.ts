@@ -10,7 +10,9 @@ const docs = defineDocs({
   docs: {
     schema: pageSchema,
     postprocess: {
-      includeProcessedMarkdown: true,
+      // 不存储 processed markdown：页面数据会序列化进 Worker bundle，双份全文显著增加体积。
+      // LLM 文本导出改用原始 markdown（getText('raw')），内容一致。
+      includeProcessedMarkdown: false,
     },
   },
   meta: {
@@ -45,7 +47,7 @@ export function getPageMarkdownUrl(page: (typeof source)['$inferPage']) {
 }
 
 export async function getLLMText(page: (typeof source)['$inferPage']) {
-  const processed = await page.data.getText('processed');
+  const processed = await page.data.getText('raw');
 
   return `# ${page.data.title} (${page.url})
 
