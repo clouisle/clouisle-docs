@@ -38,41 +38,41 @@ import {
             <p className="mt-5 max-w-2xl text-base leading-7 text-fd-muted-foreground sm:text-lg">{'Clouisle is an open-source enterprise knowledge base and intelligent AI Agent platform — build, deploy, and manage AI applications with RAG retrieval, visual workflow orchestration, and enterprise-grade security.'}</p>
           </div>
           <div className="mt-8 flex flex-wrap gap-3">
-            <a href="/usage/quick-start" className="group inline-flex items-center gap-2 rounded-lg bg-[#1687a7] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#126f8a]">
+            <Link href="/usage/quick-start" className="group inline-flex items-center gap-2 rounded-lg bg-[#1687a7] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#126f8a]">
               {'Get Started'}
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-            </a>
-            <a href="/api/get-started" className="inline-flex items-center gap-2 rounded-lg border border-fd-border bg-fd-background/80 px-4 py-2.5 text-sm font-semibold text-fd-foreground transition hover:border-[#2091B2] hover:text-[#146b83] dark:hover:text-[#7ed6e5]">
+            </Link>
+            <Link href="/api/get-started" className="inline-flex items-center gap-2 rounded-lg border border-fd-border bg-fd-background/80 px-4 py-2.5 text-sm font-semibold text-fd-foreground transition hover:border-[#2091B2] hover:text-[#146b83] dark:hover:text-[#7ed6e5]">
               {'Call the API'}
               <CodeXml className="size-4" aria-hidden="true" />
-            </a>
+            </Link>
           </div>
         </div>
       </div>
 
-      <a href="/usage/quick-start" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
+      <Link href="/usage/quick-start" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
         <div className="flex items-start justify-between"><Rocket className="size-6 text-[#2091B2]" aria-hidden="true" /><ArrowRight className="size-4 text-fd-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#2091B2]" aria-hidden="true" /></div>
         <h3 className="mt-6 font-semibold text-fd-foreground">{'First time here'}</h3>
         <p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Sign in, pick a team, confirm a model, and run your first Agent conversation.'}</p>
-      </a>
-      <a href="/usage/guides" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
+      </Link>
+      <Link href="/usage/guides" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
         <div className="flex items-start justify-between"><Compass className="size-6 text-[#2091B2]" aria-hidden="true" /><ArrowRight className="size-4 text-fd-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#2091B2]" aria-hidden="true" /></div>
         <h3 className="mt-6 font-semibold text-fd-foreground">{'Build applications'}</h3>
         <p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Orchestrate Agents and workflows, connect knowledge bases and tools, then publish.'}</p>
-      </a>
+      </Link>
     </div>
 
     <div className="mt-4 grid gap-4 sm:grid-cols-2">
-      <a href="/api" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
+      <Link href="/api" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
         <div className="flex items-start justify-between"><Terminal className="size-6 text-[#2091B2]" aria-hidden="true" /><ArrowRight className="size-4 text-fd-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#2091B2]" aria-hidden="true" /></div>
         <h3 className="mt-6 font-semibold text-fd-foreground">{'Integrate with the API'}</h3>
         <p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Create an API Key, send chat requests, consume SSE, and handle errors.'}</p>
-      </a>
-      <a href="/self-host" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
+      </Link>
+      <Link href="/self-host" className="group rounded-2xl border border-fd-border bg-fd-card p-6 transition hover:-translate-y-0.5 hover:border-[#2091B2] hover:shadow-lg hover:shadow-[#2091B2]/8">
         <div className="flex items-start justify-between"><Server className="size-6 text-[#2091B2]" aria-hidden="true" /><ArrowRight className="size-4 text-fd-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#2091B2]" aria-hidden="true" /></div>
         <h3 className="mt-6 font-semibold text-fd-foreground">{'Deploy and operate'}</h3>
         <p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Deploy with Compose or Kubernetes, and manage configuration, backup, upgrade, and monitoring.'}</p>
-      </a>
+      </Link>
     </div>
   </section>
 
@@ -82,14 +82,14 @@ import {
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2091B2]">Platform map</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-fd-foreground">{'One platform, five key building blocks'}</h2>
       </div>
-      <a href="/usage/concepts" className="inline-flex items-center gap-1 text-sm font-semibold text-[#146b83] dark:text-[#7ed6e5] hover:underline">{'Start with core concepts'} <ArrowRight className="size-4" aria-hidden="true" /></a>
+      <Link href="/usage/concepts" className="inline-flex items-center gap-1 text-sm font-semibold text-[#146b83] dark:text-[#7ed6e5] hover:underline">{'Start with core concepts'} <ArrowRight className="size-4" aria-hidden="true" /></Link>
     </div>
     <div className="mt-8 grid gap-x-8 gap-y-7 sm:grid-cols-2 lg:grid-cols-5">
-      <a href="/usage/concepts/agent" className="group"><Bot className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">Agent</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Complete tasks with prompts, memory, knowledge, and tools.'}</p></a>
-      <a href="/usage/concepts/workflow" className="group"><Workflow className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Workflow'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Connect inputs, decisions, executions, and outputs into a flow.'}</p></a>
-      <a href="/usage/concepts/knowledge-base" className="group"><Database className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Knowledge Base'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Import documents and build searchable team knowledge.'}</p></a>
-      <a href="/usage/concepts/model" className="group"><Network className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Model'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Manage model providers by capability and quota.'}</p></a>
-      <a href="/usage/concepts/security" className="group"><ShieldCheck className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Security & governance'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Protect applications with teams, roles, permissions, and audit.'}</p></a>
+      <Link href="/usage/concepts/agent" className="group"><Bot className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">Agent</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Complete tasks with prompts, memory, knowledge, and tools.'}</p></Link>
+      <Link href="/usage/concepts/workflow" className="group"><Workflow className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Workflow'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Connect inputs, decisions, executions, and outputs into a flow.'}</p></Link>
+      <Link href="/usage/concepts/knowledge-base" className="group"><Database className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Knowledge Base'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Import documents and build searchable team knowledge.'}</p></Link>
+      <Link href="/usage/concepts/model" className="group"><Network className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Model'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Manage model providers by capability and quota.'}</p></Link>
+      <Link href="/usage/concepts/security" className="group"><ShieldCheck className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">{'Security & governance'}</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">{'Protect applications with teams, roles, permissions, and audit.'}</p></Link>
     </div>
   </section>
 
@@ -98,7 +98,7 @@ import {
       <div className="flex items-center gap-3"><BookOpen className="size-5 text-[#7ed6e5]" aria-hidden="true" /><p className="text-sm font-semibold text-[#b8e8ee]">{'Suggested reading order'}</p></div>
       <h2 className="mt-5 text-2xl font-semibold tracking-tight">{'Start with one application, then master the platform'}</h2>
       <ol className="mt-7 grid gap-5 sm:grid-cols-3">
-        <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">01</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Complete the '}<a href="/usage/quick-start" className="text-[#a8e1e8] underline underline-offset-2">{'Quick Start'}</a>{', then run your first conversation.'}</span></li>
+        <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">01</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Complete the '}<Link href="/usage/quick-start" className="text-[#a8e1e8] underline underline-offset-2">{'Quick Start'}</Link>{', then run your first conversation.'}</span></li>
         <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">02</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Read the Agent, Knowledge Base, and Workflow concepts.'}</span></li>
         <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">03</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Dive into the guides, API, or deployment docs as needed.'}</span></li>
       </ol>
@@ -107,15 +107,15 @@ import {
       <div className="flex items-center gap-3"><Settings2 className="size-5 text-[#2091B2]" aria-hidden="true" /><p className="text-sm font-semibold text-fd-foreground">{'Documentation index'}</p></div>
       <p className="mt-4 text-sm leading-6 text-fd-muted-foreground">{'Need field defaults, error codes, or request formats? Jump straight to the reference and API docs.'}</p>
       <div className="mt-6 grid gap-3 text-sm font-medium">
-        <a href="/reference" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">{'Configuration reference'} <ArrowRight className="size-4" aria-hidden="true" /></a>
-        <a href="/api" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">{'API reference'} <ArrowRight className="size-4" aria-hidden="true" /></a>
-        <a href="/self-host" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">{'Deployment docs'} <ArrowRight className="size-4" aria-hidden="true" /></a>
+        <Link href="/reference" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">{'Configuration reference'} <ArrowRight className="size-4" aria-hidden="true" /></Link>
+        <Link href="/api" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">{'API reference'} <ArrowRight className="size-4" aria-hidden="true" /></Link>
+        <Link href="/self-host" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">{'Deployment docs'} <ArrowRight className="size-4" aria-hidden="true" /></Link>
       </div>
     </div>
   </section>
 
   <section className="mt-14 flex flex-col gap-4 border-t border-fd-border pt-8 sm:flex-row sm:items-center sm:justify-between">
     <div><p className="font-semibold text-fd-foreground">{'Get involved with Clouisle'}</p><p className="mt-1 text-sm text-fd-muted-foreground">{'Read the source, report issues, or follow product and community updates.'}</p></div>
-    <div className="flex flex-wrap gap-4 text-sm font-semibold"><a href="https://github.com/clouisle/Clouisle" className="inline-flex items-center gap-1 text-[#146b83] dark:text-[#7ed6e5] hover:underline"><Star className="size-4" aria-hidden="true" />GitHub</a><a href="https://clouisle.asia" className="inline-flex items-center gap-1 text-[#146b83] dark:text-[#7ed6e5] hover:underline"><Globe className="size-4" aria-hidden="true" />{'Official website'}</a></div>
+    <div className="flex flex-wrap gap-4 text-sm font-semibold"><Link href="https://github.com/clouisle/Clouisle" className="inline-flex items-center gap-1 text-[#146b83] dark:text-[#7ed6e5] hover:underline"><Star className="size-4" aria-hidden="true" />GitHub</Link><Link href="https://clouisle.asia" className="inline-flex items-center gap-1 text-[#146b83] dark:text-[#7ed6e5] hover:underline"><Globe className="size-4" aria-hidden="true" />{'Official website'}</Link></div>
   </section>
 </div>

@@ -1,22 +1,15 @@
-import { headers } from 'next/headers';
-import { RootProvider } from 'fumadocs-ui/provider/next';
 import './global.css';
 import { Inter } from 'next/font/google';
-import { i18n } from '@/lib/i18n';
 
 const inter = Inter({
   subsets: ['latin'],
 });
 
-export default async function Layout({ children }: LayoutProps<'/'>) {
-  const h = await headers();
-  const locale = h.get('x-locale') ?? i18n.defaultLanguage;
-
+export default function Layout({ children }: LayoutProps<'/'>) {
+  // html lang 由 [lang]/layout 内的客户端组件同步（服务端初值见 [lang]/layout）
   return (
-    <html lang={locale} className={inter.className} suppressHydrationWarning>
-      <body>
-        <RootProvider i18n={i18n.provider(locale)}>{children}</RootProvider>
-      </body>
+    <html lang="zh" className={inter.className} suppressHydrationWarning>
+      <body>{children}</body>
     </html>
   );
 }

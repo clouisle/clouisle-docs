@@ -9,25 +9,29 @@ import type { LinkItemType } from 'fumadocs-ui/layouts/shared';
 
 function navLinks(locale: string): LinkItemType[] {
   const prefix = locale === i18n.defaultLanguage ? '' : `/${locale}`;
+  const labels =
+    locale === 'en'
+      ? { usage: 'Usage', reference: 'Reference', api: 'API', deploy: 'Deployment' }
+      : { usage: '使用', reference: '参考', api: 'API', deploy: '部署' };
 
   return [
     {
-      text: '使用',
+      text: labels.usage,
       url: `${prefix}/usage`,
       active: 'nested-url',
     },
     {
-      text: '参考',
+      text: labels.reference,
       url: `${prefix}/reference`,
       active: 'nested-url',
     },
     {
-      text: 'API',
+      text: labels.api,
       url: `${prefix}/api`,
       active: 'nested-url',
     },
     {
-      text: '部署',
+      text: labels.deploy,
       url: `${prefix}/self-host`,
       active: 'nested-url',
     },

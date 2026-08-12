@@ -49,6 +49,8 @@ export function getMDXComponents(page: Page, components?: MDXComponents) {
     ...defaultMdxComponents,
     Card: LocaleCard,
     a: LocaleLink,
+    // 大写组件形式：mdx-js 只对大写标签走组件表，JSX 里用 <Link> 才能 locale 化
+    Link: LocaleLink,
     ...components,
   } satisfies MDXComponents;
 }
