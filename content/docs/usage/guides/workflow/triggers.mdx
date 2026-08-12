@@ -1,0 +1,48 @@
+---
+title: 触发器与运行
+description: 通过手动、API、Webhook 和 Cron 启动工作流
+icon: Webhook
+---
+
+工作流触发方式在**工作流设置**中配置。发布前可调试草稿，正式调用要求工作流已发布。
+
+## 手动与 API 运行
+
+编辑器内选择**运行**，填入输入变量后启动。API 运行使用：
+
+```bash
+curl -X POST "$CLOUISLE_API/api/v1/workflows/<workflow_id>/run" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs":{"query":"检查订单状态"}}'
+```
+
+请求体中的 `inputs` 默认是空对象。响应返回运行 ID；使用运行查询接口获取状态和结果。
+
+## Webhook
+
+1. 在**工作流设置**选择**Webhook**。
+2. 保存后生成 Webhook Token 和 URL。
+3. 在**访问 API**页复制 URL，使用 API Key 的 Bearer 认证调用。
+4. 请求 JSON 直接提供工作流输入字段。
+
+Webhook 工作流必须已发布且启用对应触发器。初始响应包含运行 ID、状态和 `stream_url`；连接该 URL 可通过 SSE 查看节点事件。
+
+```bash
+curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"检查订单状态"}'
+```
+
+## Cron
+
+选择按间隔、每天、每周、每月或自定义 Cron。自定义格式为“分 时 日 月 周”。只有保存并发布后的工作流会由调度器执行。
+
+<Callout type="info" title="图片待补充：工作流触发器设置">
+  文件：`/images/workflow-trigger-settings.png`。截图内容：工作流设置抽屉的触发方式区域，展示手动、Webhook、定时任务和 Cron 表达式字段。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“工作流触发器设置”。
+</Callout>
+
+## 状态与取消
+
+运行状态包括 `pending`、`running`、`completed`、`failed`、`cancelled` 和 `timeout`。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。查看[工作流 API](/api/workflow)获取流式运行事件。

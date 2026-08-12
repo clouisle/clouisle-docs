@@ -1,0 +1,32 @@
+---
+title: 配置模型供应商
+description: 注册对话、嵌入、重排序和媒体模型
+icon: Network
+---
+
+模型供应商配置位于管理后台的**模型**。管理员先创建全局模型，再在团队管理中授权。Clouisle 内置供应商标识包括 `openai`、`openai_responses`、`anthropic`、`google`、`azure_openai`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`runway`、`pika`、`luma`、`kling`、`stability`、`midjourney` 和 `custom`。
+
+## 创建模型
+
+1. 选择**添加模型**。
+2. 选择供应商和模型类型。
+3. 填写显示名称（`1-100` 字符）与 `model_id`（`1-100` 字符）。
+4. 按供应商填写 `base_url` 和 API Key；本地供应商可以不填 API Key。
+5. 设置上下文长度、最大输出 Token、默认参数和能力标记。
+6. 选择**测试连接**，确认成功后保存。
+
+<Callout type="info" title="图片待补充：创建模型对话框">
+  文件：`/images/admin-model-create-dialog.png`。截图内容：管理后台模型创建表单，标出供应商、模型类型、模型 ID、端点、凭据、能力和测试连接按钮。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“创建模型对话框”。
+</Callout>
+
+## 模型类型与能力
+
+模型类型包括：对话、嵌入、重排序、TTS、STT、音频生成、文生图和文生视频。能力标记由 `capabilities` JSON 保存，例如视觉、函数调用和流式输出。Agent 启用工具前，应确认所选对话模型支持函数调用。
+
+## 端点安全
+
+站点设置的**模型端点白名单**按 Origin 精确匹配协议、主机名和端口，忽略路径。空列表会阻止所有模型端点。不要把供应商密钥写入文档、前端代码或 Git。
+
+## 修改模型
+
+更新 API Key 时使用编辑表单并重新测试。API 返回只说明 `has_api_key`，不会回显密钥。更新 `model_id` 或类型应视为新模型配置，并重新检查已授权团队和知识库索引兼容性。

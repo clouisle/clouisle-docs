@@ -1,0 +1,63 @@
+---
+title: 环境变量参考
+description: 查阅 Clouisle 部署环境变量、默认值、优先级和密钥要求
+icon: Settings
+---
+
+以下值以根目录和 `deploy/.env.example`、后端 `Settings` 为准。Compose 内部地址使用 `api`、`db`、`redis` 和 `qdrant`；源码开发通常使用 `localhost`。
+
+## 应用与网络
+
+| 变量 | 默认/示例 | 说明 |
+| --- | --- | --- |
+| `PROJECT_NAME` | `Clouisle` | 站点/应用名称 |
+| `SECRET_KEY` | 示例占位 | JWT 签名和部分内部签名，生产必换 |
+| `TIMEZONE` | `Asia/Shanghai` | 时区 |
+| `API_BASE_URL` | Compose `http://api:8000` | 服务端 API 地址 |
+| `PUBLIC_API_URL` | 空 | 需要绝对公开 URL 时使用 |
+| `FRONTEND_URL` | `http://localhost:3000` | 公开前端/SSO 回调基址 |
+| `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | JSON 数组，允许的前端 Origin |
+| `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | 浏览器 API 基路径 |
+| `BACKEND_INTERNAL_URL` | `http://api:8000` | 前端服务端访问 API |
+
+## 数据依赖
+
+| 变量 | Compose 默认 | 说明 |
+| --- | --- | --- |
+| `POSTGRES_SERVER` | `db` | PostgreSQL 主机 |
+| `POSTGRES_PORT` | `5432` | PostgreSQL 端口 |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / 空 / `clouisle` | 数据库凭据 |
+| `DATABASE_URL` | 自动拼接 | 非空时优先于分字段 |
+| `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis 连接 |
+| `REDIS_PASSWORD` | 空 | 生产建议设置 |
+| `QDRANT_URL` | `http://qdrant:6333` | 向量库地址 |
+| `QDRANT_API_KEY` | 空 | 生产建议设置 |
+| `VECTOR_BACKEND` | `qdrant` | 向量后端 |
+| `QDRANT_COLLECTION_PREFIX` | `kb_dim` | 集合名前缀 |
+| `QDRANT_DISTANCE` | `Cosine` | 距离函数 |
+
+## 内部网关与 Sandbox
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `INTERNAL_API_TOKEN` | 空 | Worker 访问 API 文件网关，必须与 API 共享 |
+| `INTERNAL_API_TOKEN_FILE` | 空 | 从文件读取内部 Token |
+| `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox 产物上传地址 |
+| `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | 空 | 可替代默认内部签名 |
+| `SANDBOX_RUNTIME_ENABLED` | `true` | 启用沙箱 |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | Compose `true` | 启用文件系统隔离 |
+| `SANDBOX_MAX_DISK_MB` | `8192` | 沙箱最大磁盘 |
+| `SANDBOX_SESSION_TTL_HOURS` | `24` | 会话保留 |
+| `SANDBOX_RESULT_TTL_SECONDS` | `86400` | 结果保留 |
+| `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` | `10` | 单产物限制 |
+| `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB` | `10` | 总产物限制 |
+
+## 检索与外部服务
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `RETRIEVAL_HYBRID_KILL_SWITCH` | `false` | 紧急强制向量检索 |
+| `RETRIEVAL_SHADOW_ENABLED` | `false` | 混合检索影子运行 |
+| `TAVILY_API_KEY` | 空 | 网页搜索内置工具 |
+
+修改服务端环境变量后重启对应服务。`NEXT_PUBLIC_*` 在前端构建时注入，修改后必须重新构建前端。

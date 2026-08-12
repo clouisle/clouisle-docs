@@ -1,0 +1,40 @@
+---
+title: 故障排查
+description: 按症状定位 API、数据库、队列、Sandbox、模型和检索问题
+icon: CircleAlert
+---
+
+先确认服务状态和最近配置变更，再从最早失败组件开始排查。
+
+## API 无法连接数据库
+
+检查 `POSTGRES_SERVER`、`POSTGRES_PORT`、数据库密码和 PostgreSQL 就绪状态。Compose 使用 `db`，源码开发使用 `localhost`。确认 pg_search 与 `pg_stat_statements` 已预加载，并重启数据库后再检查扩展。
+
+## 前端无法访问 API
+
+确认外部代理将 `/api/*` 路由到 `api:8000`，浏览器构建时 `NEXT_PUBLIC_API_URL`正确。不要在容器内将 API 地址设置为浏览器无法解析的内部主机，也不要把 `localhost` 用作 Sandbox Worker 的 API 地址。
+
+## Worker 不处理任务
+
+检查 Redis 连接、密码、队列名称和 Worker 日志。知识库使用 Celery 后台处理；`beat` 只能运行一个副本。清理或重启 Worker 前先确认没有正在处理的生产文档。
+
+## Sandbox 产物上传失败
+
+确认 `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`、API 与 Sandbox Worker 使用相同签名配置，或配置专用 `SANDBOX_ARTIFACT_UPLOAD_API_KEY`。检查产物路径是否位于 `/workspace`、文件是否超过 `10MB` 默认上限。
+
+## 检索失败
+
+1. 文档状态必须是 `completed`。
+2. 嵌入模型必须存在、授权且向量维度一致。
+3. Qdrant 必须可连接。
+4. 混合/全文检索需要 PostgreSQL 与 pg_search。
+5. 重排序失败时检查 rerank 模型凭据和供应商配额。
+6. 读取检索实验室的 diagnostics 与 timings。
+
+## 模型调用失败
+
+检查模型 `is_enabled`、团队授权、端点白名单、API Key、上下文长度、供应商限速和类型能力。错误码 `6103` 表示配额超限，`6104` 表示未授权。
+
+<Callout type="info" title="图片待补充：服务日志与检索诊断">
+  文件：`/images/troubleshooting-logs-and-diagnostics.png`。截图内容：终端服务日志与检索实验室诊断并排展示；标出第一条失败、错误类别和恢复建议，隐藏敏感内容。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“服务日志与检索诊断”。
+</Callout>

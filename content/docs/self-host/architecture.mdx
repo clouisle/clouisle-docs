@@ -1,0 +1,36 @@
+---
+title: 部署架构
+description: 理解 Clouisle 服务拓扑、请求路由、依赖和持久化数据
+icon: Network
+---
+
+Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 `api`、`worker` 和 `beat`；`clouisle-sandbox-worker` 提供 `sandbox-worker`；`clouisle-frontend` 提供 Next.js 前端。
+
+## 服务拓扑
+
+| 服务 | 镜像 | 作用 | 端口 |
+| --- | --- | --- | --- |
+| `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
+| `api` | clouisle-backend | FastAPI API | `8000` |
+| `worker` | clouisle-backend | Celery `default`、`knowledge`、`workflow` 队列 | 无 |
+| `sandbox-worker` | sandbox-worker | 沙箱队列与产物上传 | 无 |
+| `beat` | clouisle-backend | Celery Beat 调度器，必须单副本 | 无 |
+| `db` | PostgreSQL 17 + pg_search | 业务、全文检索和审计数据 | `5432` |
+| `redis` | Redis 7 | 队列、缓存、会话 | `6379` |
+| `qdrant` | Qdrant 1.18.3 | 向量索引 | `6333` |
+
+## 请求路由
+
+外部反向代理或 Ingress 负责路由：`/api/*` 到 `api:8000`，其余 `/` 到 `frontend:3000`。前端镜像不包含 Nginx；`deploy/nginx/default.conf` 只是可选的外部示例。
+
+<Callout type="info" title="图片待补充：Clouisle 部署架构">
+  文件：`/images/self-host-architecture.png`。截图内容：展示浏览器、外部反向代理、frontend、api、worker、sandbox-worker、beat 与 PostgreSQL/Redis/Qdrant 的请求和任务关系。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Clouisle 部署架构”。
+</Callout>
+
+## 持久化数据
+
+Compose 默认卷：`postgres_data`、`redis_data`、`qdrant_data` 和 `uploads_data`。多 API 副本使用本地上传存储时需要 `ReadWriteMany`；只有 `ReadWriteOnce` 时保持一个 API 副本，Worker 和 Sandbox Worker 仍可独立扩展。
+
+## 内部地址
+
+容器内使用服务名，不要使用 `localhost`：`POSTGRES_SERVER=db`、`REDIS_HOST=redis`、`QDRANT_URL=http://qdrant:6333`、`API_BASE_URL=http://api:8000`。Sandbox Worker 产物上传地址应保持 `http://api:8000`。

@@ -1,7 +1,14 @@
 {
-  "title": "自部署",
+  "title": "部署",
   "root": true,
   "description": "部署、运维与环境变量",
   "icon": "Server",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "architecture",
+    "deploy",
+    "configuration",
+    "operations",
+    "faq"
+  ]
 }

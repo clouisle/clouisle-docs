@@ -247,18 +247,13 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 ## 国际化（i18n）
 
-**当前状态：本项目未启用 i18n。** 证据：`lib/source.ts` 的 `defineDocs`/`loader()` 无 `i18n` 配置、无 `proxy.ts` 中间件、无 `app/[lang]` 路由、package.json 无 next-intl。
+**当前状态：已启用。** 配置：`lib/i18n.ts` 用 `defineI18nUI`（`fumadocs-ui/i18n`）——`defaultLanguage: 'zh'`、`languages: ['zh', 'en']`、`hideLocale: 'default-locale'`（中文 URL 无前缀，英文 `/en` 前缀），UI 文案翻译（zh 中文 / en English displayName）在同一文件。
 
-**当前写文档时**：不要写带 locale 后缀的文件，不要用 `DynamicLink`，普通相对链接即可。
-
-**启用 i18n 后**（写多语言配置文档时的规范）：
-
-- 文件命名（默认 dot parser）：`page.cn.mdx` = 中文版，`page.mdx` = 默认语言版；`meta.cn.json` 同规则。`my-page.$.md` / `meta.$.json` = 所有语言共享。
-- 配置链路（Next.js）：`lib/i18n.ts` `defineI18n({ defaultLanguage, languages, hideLocale, fallbackLanguage })` → `proxy.ts` `createI18nMiddleware` → `app/[lang]/` 目录 → `loader({ i18n })` → `source.getPageTree(lang)` / `source.getPage(slug, lang)` / `source.getPages(lang)` / `generateParams('slug','lang')`。
-- `hideLocale`：`always`（cookie 检测，不适合静态站）/ `default-locale`（隐藏默认语言前缀）/ `never`（默认）。
-- `fallbackLanguage`：某语言缺失时回退；设为 `null` 关闭回退（此时用 `$` 共享文件）。
-- 页面内链接：i18n 场景用 `<DynamicLink href="/[lang]/another-page">`（`fumadocs-core/dynamic-link`），自动补 locale 前缀；UI 布局其他位置手动拼 `/${lang}/...`。
-- UI 文案翻译：`lib/layout.shared.tsx` `i18n.translations().extend(uiTranslations()).add({ cn: {...} })` + `<RootProvider i18n={i18nProvider(translations, locale)}>`；语言包可用 `@fumadocs/language/zh-tw`（需安装）。
+- 文件命名（默认 dot parser）：`page.mdx` = **中文**（默认语言，无后缀），`page.en.mdx` = 英文版；`meta.json` / `meta.en.json` 同规则。`page.$.md` / `meta.$.json` = 所有语言共享。
+- 路由：`proxy.ts` `createI18nMiddleware`（无前缀 URL rewrite 到 `/zh`，`/zh/*` 重定向去前缀）→ `app/[lang]/`（`(docs)` 路由组放 DocsLayout + `[[...slug]]` 文档页，`[lang]/page.tsx` 首页）→ `loader({ i18n })` → `source.getPageTree(lang)` / `source.getPage(slug, lang)` / `source.getPages(lang)` / `generateParams('slug', 'lang')`。
+- 页面内链接：跨语言用 `<DynamicLink href="/[lang]/another-page">`（`fumadocs-core/dynamic-link`），自动补 locale 前缀；同一语言内相对链接 `[示例](./examples.mdx)`（`createRelativeLink` 语言感知）。UI 导航等手动拼前缀（`locale === 'zh' ? '' : '/' + locale`）。
+- 首页导航 links 按 locale 生成前缀（见 `app/[lang]/page.tsx` 的 `navLinks`）。
+- og/llms.mdx 导出的 segments 含 locale 段（`lib/source.ts` 的 `getPageImageUrl`/`getPageMarkdownUrl`），路由解析时 `const [locale, ...rest] = slug`。
 
 ## LLM 内容消费（本项目已启用）
 

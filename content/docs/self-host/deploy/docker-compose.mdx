@@ -1,0 +1,56 @@
+---
+title: Docker Compose 部署
+description: 在单台服务器上启动 Clouisle 全部服务
+icon: Container
+---
+
+Docker Compose 适合单机部署。需要 Docker 和 Docker Compose v2。
+
+## 引导式安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | bash
+```
+
+选择 Docker Compose，确认安装目录和域名，安装器会下载文件、生成强密钥、校验 Compose、拉取镜像并启动服务。
+
+## 手动安装
+
+```bash
+cd deploy
+cp .env.example .env
+internal_api_token="$(openssl rand -hex 32)"
+sed -i.bak "s/^INTERNAL_API_TOKEN=.*/INTERNAL_API_TOKEN=${internal_api_token}/" .env
+rm .env.bak
+unset internal_api_token
+docker compose pull
+docker compose up -d
+```
+
+macOS 的 BSD `sed` 与 GNU `sed` 参数不同；在 macOS 上可直接编辑 `.env` 或使用安装器生成 Token。
+
+## 检查服务
+
+```bash
+docker compose ps
+docker compose logs -f api
+curl http://localhost:8000/api/v1/health
+```
+
+将外部反向代理配置为 `/api/*` 到 `api:8000`、`/` 到 `frontend:3000`。浏览器入口默认 `http://localhost:3000`。
+
+<Callout type="info" title="图片待补充：Docker Compose 服务运行状态">
+  文件：`/images/docker-compose-running.png`。截图内容：终端展示 `docker compose ps` 中 frontend、api、worker、sandbox-worker、beat、db、redis、qdrant 均已就绪；隐藏主机和凭据。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Docker Compose 服务运行状态”。
+</Callout>
+
+## 常用操作
+
+```bash
+docker compose logs -f worker
+docker compose restart api
+docker compose up -d --scale worker=4
+docker compose up -d --scale sandbox-worker=2
+docker compose down
+```
+
+`beat` 必须保持一个副本。`docker compose down -v` 会删除数据卷，执行前必须完成备份。

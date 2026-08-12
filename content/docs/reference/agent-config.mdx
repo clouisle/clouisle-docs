@@ -1,0 +1,53 @@
+---
+title: Agent 配置参考
+description: 查阅 Agent 字段、默认值、取值范围和能力开关
+icon: Bot
+---
+
+Agent 创建和更新接口对应编辑器中的基础设置与编排卡片。名称必填且为 `1-100` 字符，描述最长 `500` 字符。
+
+## 基础与运行
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 必填 | Agent 名称，`1-100` 字符 |
+| `description` | string 或 null | null | 最长 `500` 字符 |
+| `model_id` | UUID | null | 当前团队授权的对话模型 |
+| `system_prompt` | string 或 null | null | 支持 `{{变量名}}` |
+| `max_iterations` | integer | `5` | 工具调用轮次，`1-200` |
+| `visibility` | `private` 或 `team` | `team`（创建接口） | 访问范围 |
+| `status` | `draft` 或 `published` | `draft` | 发布接口切换状态 |
+
+## RAG 与工具
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `rag_mode` | `off`、`auto` 或 `agentic` | `agentic` | 关闭、自动检索或 Agent 决策检索 |
+| `knowledge_base_configs` | array | `[]` | 每项含知识库、检索方式、Top K 和阈值 |
+| `tools_config` | array | `[]` | 内置、custom、MCP 或 Skill |
+| `variables` | array | `[]` | 用户输入字段 |
+| `enable_user_input_request` | boolean | `false` | 允许对话中请求结构化输入 |
+
+## 记忆、压缩与附件
+
+| 字段 | 类型 | 默认值 | 限制/说明 |
+| --- | --- | --- | --- |
+| `enable_memory` | boolean | `false` | 开启跨会话记忆 |
+| `max_memories_per_retrieval` | integer | `10` | `1-50` |
+| `auto_extract` | boolean | `true` | 自动提取重要信息 |
+| `context_compression_config.enabled` | boolean | `true` | 请求前上下文压缩 |
+| `recent_raw_turns` | integer | `3` | `1-12` |
+| `warning_ratio` / `auto_compact_trigger_ratio` / `blocking_ratio` | number | `0.7 / 0.8 / 0.92` | `0.1-1.0`；目标比率必须低于触发比率 |
+| `enable_attachments` | boolean | `false` | 允许文件和图片 |
+| `max_file_size` | bytes | `10MB` | `1KB-50MB` |
+| `max_files` | integer | `5` | `1-10` |
+| `max_content_length` | integer | `100000` | `1000-500000` 字符 |
+
+## 媒体生成
+
+图片默认 `1024×1024`、单次最多 `4` 张；视频默认 `5` 秒、最大 `10` 秒、宽高比 `16:9`，轮询间隔 `3000ms`、同步等待 `120s`。所有媒体模型都必须由当前团队授权。
+
+
+<Callout type="info" title="图片待补充：Agent 配置字段总览">
+  文件：`/images/agent-config-reference.png`。截图内容：Agent 编辑器编排页与设置抽屉拼接图，标出本页覆盖的字段组；正式截图需分成基础、知识/工具、记忆/媒体三张图。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Agent 配置字段总览”。
+</Callout>

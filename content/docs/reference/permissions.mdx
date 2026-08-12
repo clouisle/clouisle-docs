@@ -1,0 +1,32 @@
+---
+title: 权限与角色参考
+description: 查阅资源权限代码、团队角色和作用域检查规则
+icon: ShieldCheck
+---
+
+权限由后端统一检查。前端菜单隐藏只是体验层；API 仍会返回权限错误。
+
+## 常用权限
+
+| 资源 | 常用权限 |
+| --- | --- |
+| Agent | `agent:read`、`agent:create`、`agent:update`、`agent:publish`、`agent:chat` |
+| 工作流 | `workflow:read`、`workflow:create`、`workflow:update`、`workflow:publish`、`workflow:run` |
+| 知识库 | `kb:read`、`kb:create`、`kb:update`、`kb:delete` |
+| 工具 | `tool:read`、`tool:create`、`tool:update`、`tool:execute` |
+| API Key | `apikey:read` |
+| 管理 | `admin:dashboard:access`、`admin:model:*`、`admin:settings:*` |
+| 审计 | `audit:read` |
+
+## 检查顺序
+
+超级管理员直接通过。管理类权限使用全局角色；普通资源权限还需检查团队/资源作用域角色。资源不属于当前团队、用户不是成员、用户状态无效或 API Key 未列出目标资源时，请求会失败。
+
+## 角色限制
+
+系统角色和系统权限不能删除；默认团队、所有者和超级管理员有额外保护。所有权转让、移除所有者、修改系统权限等操作会被明确拒绝。
+
+
+<Callout type="info" title="图片待补充：按权限过滤的管理导航">
+  文件：`/images/permission-guarded-navigation.png`。截图内容：不同权限用户看到的工作台侧栏对比，标出被隐藏的管理项；截图不得展示真实用户数据。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“按权限过滤的管理导航”。
+</Callout>

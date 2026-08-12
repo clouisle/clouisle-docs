@@ -1,0 +1,47 @@
+---
+title: 状态与错误参考
+description: 查阅资源状态、运行状态和错误码族
+icon: CircleAlert
+---
+
+Clouisle API 成功和失败都使用统一响应结构：
+
+```json
+{"code": 0, "data": {}, "msg": "success"}
+```
+
+分页数据位于 `data.items`，并包含 `total`、`page`、`page_size`。
+
+## 常见资源状态
+
+| 资源 | 状态 |
+| --- | --- |
+| Agent/工作流 | `draft`、`published` |
+| 知识库 | `active`、`processing`、`error`、`archived` |
+| 文档 | `pending`、`processing`、`completed`、`error` |
+| 工作流运行 | `pending`、`running`、`completed`、`failed`、`cancelled`、`timeout` |
+| 节点执行 | `pending`、`running`、`success`、`failed`、`cancelled`、`timeout`、`skipped` |
+| API Key | active、inactive、expired |
+
+## 错误码族
+
+| 范围 | 含义 |
+| --- | --- |
+| `1000-1999` | 通用校验与服务器错误 |
+| `2000-2999` | 认证、Token 和账户状态 |
+| `3000-3999` | 权限、团队成员和管理员要求 |
+| `4000-4999` | 用户、角色、团队等资源不存在 |
+| `5000-5499` | 注册、安全验证码、TOTP 和限速 |
+| `6000-6099` | 知识库、文档和分块 |
+| `6100-6199` | 模型、授权、配额和能力 |
+| `6200-6299` | Agent、会话和消息 |
+| `6300-6399` | SSO 配置、认证和会话 |
+
+## 恢复原则
+
+`401`/`2000`-`2002`：刷新登录或替换 API Key；`403`/`3000`：检查角色、团队和资源范围；`4000`/`6000`：确认 ID 和资源状态；`5400` 或供应商配额错误：退避重试；文档/工作流失败：先查看资源级错误详情，修复配置后重新处理或运行。
+
+
+<Callout type="info" title="图片待补充：API 错误响应">
+  文件：`/images/api-error-response.png`。截图内容：API 客户端展示统一 code/data/msg 错误结构，标出 code、HTTP 状态和可行动提示。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“API 错误响应”。
+</Callout>

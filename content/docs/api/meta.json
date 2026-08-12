@@ -3,5 +3,15 @@
   "root": true,
   "description": "API 快速上手与端点参考",
   "icon": "CodeXml",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "get-started",
+    "chat",
+    "workflow",
+    "conversations",
+    "knowledge",
+    "streaming",
+    "errors",
+    "admin"
+  ]
 }

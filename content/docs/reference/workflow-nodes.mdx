@@ -1,0 +1,39 @@
+---
+title: 工作流节点参考
+description: 查阅节点类型、字段默认值、运行限制和验证规则
+icon: Workflow
+---
+
+工作流定义当前使用 `schema_version: 2`。以下字段来自后端节点配置 Schema 和前端编辑器注册表。
+
+## 节点字段
+
+| 节点 | 核心字段 | 默认值/限制 |
+| --- | --- | --- |
+| LLM | `model_id`、`prompt`、`temperature`、`max_tokens`、`top_p` | `temperature=0.7`，范围 `0-2`；`top_p` 范围 `0-1` |
+| Agent | `agent_id`、`message` | Agent 必须存在且可访问 |
+| 知识库检索 | `knowledge_base_id`、`query`、`top_k`、`score_threshold` | Top K 默认 `5`，`1-100`；阈值默认 `0.3`，`0-1` |
+| 条件分支 | `expression`、`true_output`、`false_output` | 两个输出默认 `true`/`false` |
+| 循环 | `array_expression`、`item_variable`、`index_variable`、`max_iterations` | item=`item`、index=`index`、最大 `100`，`1-1000` |
+| 代码执行 | `language`、`code`、`timeout_seconds` | Python/JavaScript；默认 `30s`，`1-300s` |
+| HTTP 请求 | `method`、`url`、`headers`、`body`、`timeout_seconds` | GET 默认；超时默认 `30s`，`1-300s` |
+| 工具 | `tool_id`、`arguments` | 参数按表达式映射 |
+| 子工作流 | `workflow_id`、输入/输出映射、超时、失败策略 | 超时默认 `300s`；`fail_on_error=true` |
+| 延时 | `seconds` | `0-3600` |
+
+## 编辑器节点
+
+当前界面还注册用户输入、触发器、媒体生成、迭代容器、迭代开始/结束、循环开始/结束、模板转换、文件转 URL、变量聚合、变量赋值、参数提取、问题分类、输出和注释节点。
+
+## 验证
+
+发布前检查会拒绝不存在的变量引用、空提示词、未选择模型/工具/知识库、缺少输入来源、无输出节点、不完整分支和不完整容器。开始节点不能删除。
+
+## 数据格式
+
+`nodes` 与 `edges` 使用 React Flow 结构；`viewport` 默认 `{x: 0, y: 0, zoom: 1}`。版本 2 支持原生对象和数组，节点可保存推断 Schema 和输出类型规格。
+
+
+<Callout type="info" title="图片待补充：节点配置参考">
+  文件：`/images/workflow-node-reference.png`。截图内容：工作流节点面板与三个代表性配置抽屉；图片需分别标注模型、逻辑和转换节点字段。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“节点配置参考”。
+</Callout>

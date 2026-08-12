@@ -1,0 +1,31 @@
+---
+title: 内置工具
+description: 启用和配置 Clouisle 自带的工具能力
+icon: Wrench
+---
+
+内置工具由平台注册，不需要创建或删除。部分工具需要站点级或团队级配置。
+
+| 工具标识 | 用途 | 额外配置 |
+| --- | --- | --- |
+| `get_current_time` | 获取当前时间 | 无 |
+| `format_datetime` | 格式化日期时间 | 无 |
+| `calculate` | 数学计算 | 无 |
+| `unit_convert` | 单位转换 | 无 |
+| `web_search` | 网页搜索 | `TAVILY_API_KEY` |
+| `fetch_webpage` | 抓取网页 | 无 |
+| `markitdown` | 文件/文档转换 | 无 |
+| `generate_image` | 图片生成 | 图片模型 |
+| `generate_video` | 视频生成 | 视频模型 |
+| `artifact` / `bash` / `edit` / `read` / `write` | 沙箱产物与文件操作 | 沙箱运行时 |
+
+在**能力** > **工具**中选择内置工具进行测试。需要配置的工具会显示“需要配置”，选择**配置**填写团队凭据。工具详情会显示参数名、类型、必填、枚举和默认值。
+
+<figure>
+  <img src="/images/builtin-tools-list.png" alt="内置工具列表" />
+  <figcaption>内置工具列表</figcaption>
+</figure>
+
+<Callout type="warn">
+  `web_search` 的凭据来自服务端配置，不应写入 Agent 提示词。沙箱工具的执行结果和产物也应按团队权限访问。
+</Callout>

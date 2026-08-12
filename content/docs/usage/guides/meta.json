@@ -1,0 +1,13 @@
+{
+  "title": "操作指南",
+  "icon": "Map",
+  "pages": [
+    "index",
+    "agent",
+    "workflow",
+    "knowledge",
+    "models",
+    "tools",
+    "administration"
+  ]
+}

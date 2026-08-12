@@ -1,0 +1,64 @@
+---
+title: 教程：工作流自动化
+description: 构建一个接收请求、分类、调用 API 并返回结果的工作流
+icon: GraduationCap
+---
+
+本教程构建一个“工单分流”工作流：接收用户输入，用问题分类节点判断优先级，调用知识库和外部 HTTP API，最后输出工单结果。
+
+<Callout type="info" title="前置条件">
+  当前团队有 `chat` 模型、至少一个已处理知识库和可调用的测试 HTTP 端点。要发布 Webhook，需要创建 API Key 并具备工作流发布权限。
+</Callout>
+
+## 最终结果
+
+已发布工作流拥有输入变量、分类分支、知识库检索、HTTP 请求、输出节点和运行追踪。
+
+<Callout type="info" title="图片待补充：工单分流工作流成品">
+  文件：`/images/tutorial-workflow-final.png`。截图内容：工作流画布全景，展示开始、问题分类、条件分支、知识库检索、HTTP 请求和输出节点。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“工单分流工作流成品”。
+</Callout>
+
+## 步骤 1：定义开始输入
+
+<Callout type="info">明确输入契约，后续节点才能通过变量选择器获得稳定类型。</Callout>
+
+创建工作流并选择**用户输入**开始节点，添加：`customer_id`（文本，必填）、`message`（段落，必填）、`priority`（下拉选项，可选，默认 `normal`）。
+
+## 步骤 2：分类和分支
+
+<Callout type="info">先分类再执行副作用操作，避免把所有请求发送到同一业务队列。</Callout>
+
+1. 添加**问题分类**节点，定义 `billing`、`technical`、`general` 三个类别。
+2. 添加**条件分支**，将高优先级或技术问题导向知识库与 API 分支。
+3. 使用变量选择器连接输入和分类输出。
+
+<Callout type="info" title="图片待补充：工作流条件分支">
+  文件：`/images/tutorial-workflow-branches.png`。截图内容：问题分类和条件分支节点配置，标出分类类别、分支连线和变量引用。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“工作流条件分支”。
+</Callout>
+
+## 步骤 3：检索和调用 HTTP API
+
+<Callout type="info">工具与 HTTP 节点应只接收必要参数，敏感凭据使用工具凭据注入。</Callout>
+
+1. 添加**知识库检索**，查询使用 `{message}`，Top K 使用 `5`。
+2. 添加**HTTP 请求**，选择 `POST`，URL 使用测试端点。
+3. 在请求体中映射 `customer_id`、分类结果和知识库摘要。
+4. 设置超时 `30` 秒并测试失败分支。
+
+## 步骤 4：定义输出并调试
+
+1. 添加**输出**节点，映射 `category`、`ticket_id`、`answer` 和 `sources`。
+2. 打开**检查清单**，修复所有错误。
+3. 选择**调试运行**，分别测试正常请求、未知分类、API 超时和无知识库结果。
+4. 在运行抽屉查看每个节点的输入输出和错误。
+
+## 步骤 5：发布 Webhook
+
+1. 打开**工作流设置**，选择 Webhook 触发器并保存。
+2. 选择**发布**，运行页呈现选择**表单与结果**。
+3. 在**访问 API**复制 URL。
+4. 使用 API Key 发送 JSON 请求，使用 `stream_url` 查看 SSE 执行事件。
+
+<Callout type="success" title="验收标准">
+  正常请求返回工单 ID；条件分支按分类执行；HTTP 失败可在追踪中定位；Webhook 只接受有效 Bearer API Key；运行日志显示节点状态、耗时和输出。
+</Callout>

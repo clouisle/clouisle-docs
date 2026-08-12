@@ -1,0 +1,30 @@
+---
+title: 存储与扩展
+description: 规划数据库、向量、缓存、上传和对象存储容量
+icon: HardDrive
+---
+
+Clouisle 的持久化数据分布在 PostgreSQL、Qdrant、Redis 和上传存储。备份不能只保存数据库。
+
+## 存储后端
+
+站点设置支持**本地文件系统**和**对象存储**。本地模式适合单 API 副本；API 扩展到多个副本时，需要 `ReadWriteMany` 共享卷。对象存储适合多副本和跨节点部署，但必须配置端点、桶、区域、访问密钥、Secret Key、安全和路径风格。
+
+## Compose 卷
+
+- `postgres_data`：业务、审计、配置和元数据。
+- `qdrant_data`：向量集合。
+- `redis_data`：Redis 持久化数据和任务/会话状态。
+- `uploads_data`：用户上传和沙箱产物。
+
+<Callout type="info" title="图片待补充：存储设置与部署卷">
+  文件：`/images/storage-settings-and-volumes.png`。截图内容：站点存储设置页与 Compose/Kubernetes 持久化卷关系图；截图隐藏桶名、密钥和真实路径。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“存储设置与部署卷”。
+</Callout>
+
+## 扩展规则
+
+Worker 和 Sandbox Worker 可独立扩展。`beat` 必须一个副本。API 多副本需要共享上传存储或对象存储；Qdrant 和 PostgreSQL 应按其自身高可用方案扩展。扩展前确认连接池、队列并发、供应商限速和磁盘 I/O。
+
+## 容量检查
+
+监控 PostgreSQL 数据库、pg_search 索引、Qdrant 集合、Redis 内存和上传目录。文档数量增长会同时增加原始文件、分块、Token 统计、向量和全文索引容量。

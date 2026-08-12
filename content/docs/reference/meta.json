@@ -3,5 +3,15 @@
   "root": true,
   "description": "功能配置与参数参考",
   "icon": "BookText",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "agent-config",
+    "workflow-nodes",
+    "knowledge-settings",
+    "model-providers",
+    "site-settings",
+    "api-keys",
+    "permissions",
+    "statuses-errors"
+  ]
 }

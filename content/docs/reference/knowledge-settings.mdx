@@ -1,0 +1,44 @@
+---
+title: 知识库设置参考
+description: 查阅分块、检索、融合、重排序和文档处理字段
+icon: Database
+---
+
+知识库设置同时影响文档处理和运行时检索。创建后嵌入模型与向量维度应保持稳定。
+
+## 分块与重排序
+
+| 字段 | 类型 | 默认值 | 限制 |
+| --- | --- | --- | --- |
+| `chunk_size` | integer | `1000` | `>=100` 字符 |
+| `chunk_overlap` | integer | `100` | `>=0` 字符 |
+| `separator` | string/null | `null` | 自定义文本分隔符 |
+| `rerank_enabled` | boolean | `true` | 是否启用重排序 |
+| `rerank_candidate_k` | integer | `10` | `1-100` |
+| `rerank_score_threshold` | number/null | `null` | `0-1` |
+
+## 检索
+
+| 字段 | 类型 | 默认值 | 限制/说明 |
+| --- | --- | --- | --- |
+| `search_mode` | `vector`、`fulltext` 或 `hybrid` | `null`（知识库设置）；请求默认 `hybrid` | 混合融合向量与全文 |
+| `top_k` | integer/null | `null`（设置）；请求默认 `5` | 请求范围 `1-20`；设置范围 `1-100` |
+| `score_threshold` | number/null | `null`（设置）；请求默认 `0` | `0-1` |
+| `dense_weight` | number/null | `null`（设置）；请求默认 `1.0` | `>=0` |
+| `lexical_weight` | number/null | `null`（设置）；请求默认 `1.0` | `>=0` |
+| `rrf_k` | integer/null | `null`（设置）；请求默认 `60` | `1-1000` |
+
+混合检索要求稠密权重或词法权重至少一个大于 `0`。查询长度为 `1-1000` 字符；批量对比最多 `10` 个配置且 ID 必须唯一。
+
+## 文档与状态
+
+支持 PDF、DOC/DOCX、TXT、Markdown、HTML、CSV、XLS/XLSX、JSON 和 URL。文档状态为 `pending`、`processing`、`completed`、`error`。站点默认单文件上传上限为 `50MB`，可在 `1-1024MB` 范围修改。
+
+## 失败诊断
+
+检索响应可能包含 `inactive`、`missing_embedding_model`、`timeout`、`failed` 诊断以及 `recall`、`rerank`、`context`、`total` 阶段耗时。生产排障依次检查文档完成状态、嵌入维度、Qdrant、PostgreSQL/pg_search、重排序模型凭据和服务商配额。
+
+
+<Callout type="info" title="图片待补充：知识库设置参考">
+  文件：`/images/knowledge-settings-reference.png`。截图内容：知识库设置抽屉，分为分块、重排序和检索三组；关键字段需用框线标注。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“知识库设置参考”。
+</Callout>

@@ -26,7 +26,7 @@
 
 本仓库有两份互补的写作 skill，写文档前**必须先读对应 skill**：
 
-1. **`.claude/skills/config-docs/SKILL.md`** — 配置类参考页：frontmatter 规范、TypeTable/Markdown 选项表、代码块与 Shiki 行标记、可用组件及其 import 路径、i18n（当前未启用）、LLM 内容消费、验证方式。
+1. **`.claude/skills/config-docs/SKILL.md`** — 配置类参考页：frontmatter 规范、TypeTable/Markdown 选项表、代码块与 Shiki 行标记、可用组件及其 import 路径、i18n（zh 默认 + en，已启用）、LLM 内容消费、验证方式。
 2. **`.claude/skills/docs-writing-style/SKILL.md`** — 通用写作规范与信息架构：页面类型骨架（索引/概念/参考/教程/FAQ）、菜单分栏模式、写作语言规范、**图片放置与 caption 规范**、表格用法、组件映射。
 
 速览：
@@ -36,7 +36,7 @@
 - **组件**：默认可用 Callout/Cards/CodeBlockTabs/表格；Steps、Accordion、Tabs、TypeTable 需按 config-docs 中的路径 import。
 - **图片**：图随文走、一图一事、caption 必写且 `alt` 与 `figcaption` 一致、文件放 `public/images/` 用 kebab-case 命名。base-ui 无 Figure 组件——要么在 `components/mdx.tsx` 注册自定义 Figure，要么用原生 `<figure>/<figcaption>`。
 - **链接**：`createRelativeLink` 已启用，页间链接可用相对文件路径 `[示例](./examples.mdx)`；`a` 标签渲染为 Fumadocs Link。
-- **i18n**：当前未启用。不要写 locale 后缀文件、不要用 DynamicLink。
+- **i18n**：已启用。默认语言 **zh**（URL 无前缀），英文 `/en` 前缀。文件命名：`page.mdx` = 中文（默认），`page.en.mdx` = 英文版；`meta.json`/`meta.en.json` 同规则。跨语言链接用 `<DynamicLink href="/[lang]/xxx">`（`fumadocs-core/dynamic-link`），页内相对链接 `createRelativeLink` 自动带语言。UI 文案翻译在 `lib/i18n.ts`（`defineI18nUI`）。
 - **LLM 消费**：默认值/必填/限制等关键值写进正文，`/llms.mdx/*` 中应完整可读。
 
 ## 开发命令
@@ -55,5 +55,5 @@ npm run lint       # eslint
 
 - **Surgical**：只改目标文件，不顺手重构无关代码。新增 MDX 组件时改 `components/mdx.tsx` 注册即可，不要动 `lib/source.ts` 的加载逻辑。
 - **目录结构**：新栏目用文件夹 + `meta.json`（`pages` 控制顺序与分组，`---Label---` 分隔符）；同一页面 URL 不得重复。
-- **Tab 集合**：`root: true` 的文件夹自动成为 sidebar 顶部 tabs dropdown 的选项（`getLayoutTabs` 生成，`title`/`icon`/`description` 取自 meta.json，`icon` 必填且为 lucide 规范名）。当前集合（按读者分组）：使用（usage，Compass，平台用户）、参考（reference，BookText）、API（api，CodeXml，开发者）、自部署（self-host，Server，开发部署者）；首页 `/` 为文档总览页，不属于任何集合。新增集合 = 建 `root: true` 文件夹，无需改代码。
+- **Tab 集合**：`root: true` 的文件夹自动成为 sidebar 顶部 tabs dropdown 的选项（`getLayoutTabs` 生成，`title`/`icon`/`description` 取自 meta.json，`icon` 必填且为 lucide 规范名）。当前集合（按读者分组）：使用（usage，Compass，平台用户）、参考（reference，BookText）、API（api，CodeXml，开发者）、部署（self-host，Server，开发部署者）；首页 `/` 为文档总览页，不属于任何集合。新增集合 = 建 `root: true` 文件夹，无需改代码。
 - **站点身份**：`lib/shared.ts` 的 `appName`（Clouisle）与 `gitConfig`（clouisle/Clouisle, main）为文档站真实身份，改动前先确认。

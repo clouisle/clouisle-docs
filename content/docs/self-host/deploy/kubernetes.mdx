@@ -1,0 +1,44 @@
+---
+title: Kubernetes 部署
+description: 使用 Helm 或单文件 manifest 在 Kubernetes 中运行 Clouisle
+icon: Boxes
+---
+
+Kubernetes 部署需要 Kubernetes `1.25+`、配置好的 `kubectl`、Ingress Controller 和可访问镜像仓库；Helm 方式需要 Helm 3。使用本地上传存储扩展 API 副本时需要支持 `ReadWriteMany` 的 StorageClass。
+
+## Helm（推荐）
+
+```bash
+helm lint deploy/helm/clouisle \
+  --set-string secrets.values.INTERNAL_API_TOKEN=lint-only-token
+helm upgrade --install clouisle deploy/helm/clouisle \
+  --namespace clouisle --create-namespace \
+  --set-string secrets.values.INTERNAL_API_TOKEN="$(openssl rand -hex 32)"
+```
+
+生产环境将 `SECRET_KEY`、数据库、Redis、Qdrant、Sandbox 和内部 Token 放入 Kubernetes Secret，并使用 `values-production.yaml`。
+
+## 生成单文件 manifest
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | \
+  CLOUISLE_DEPLOYMENT=k8s CLOUISLE_K8S_MANIFEST="$PWD/clouisle-k8s.yaml" \
+  CLOUISLE_YES=1 bash
+kubectl apply -f ./clouisle-k8s.yaml
+```
+
+生成文件权限为 `0600`，包含 Base64 编码 Secret；安装器不会自动 apply，也不会修改模板。审阅 image、域名、Ingress、存储和 Secret 后再应用。
+
+## 扩展与限制
+
+```bash
+kubectl -n clouisle scale deployment worker --replicas=4
+kubectl -n clouisle scale deployment sandbox-worker --replicas=2
+kubectl -n clouisle scale deployment api --replicas=3
+```
+
+`beat` 始终保持一个副本。使用 `ReadWriteOnce` 本地上传卷时，API 保持单副本；生产多副本应配置共享卷或对象存储。
+
+<Callout type="info" title="图片待补充：Kubernetes 资源与 Ingress">
+  文件：`/images/kubernetes-resources.png`。截图内容：Kubernetes namespace 中 API、Worker、Sandbox Worker、Beat、Frontend、PostgreSQL、Redis、Qdrant 和 Ingress 资源关系。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“Kubernetes 资源与 Ingress”。
+</Callout>

@@ -1,0 +1,35 @@
+---
+title: 连接 MCP 服务
+description: 通过 stdio、SSE 或 HTTP 接入 Model Context Protocol Server
+icon: Plug
+---
+
+MCP 工具在**能力** > **工具** > **创建工具** > **MCP 服务**中配置。保存前使用**获取工具列表**检查服务器是否可达以及暴露了哪些工具。
+
+## 传输方式
+
+| 方式 | 必填连接字段 | 适用场景 |
+| --- | --- | --- |
+| `stdio` | `command`、`args`、`env` | 与本机命令或容器进程通信 |
+| `sse` | `url`、可选 `headers` | 连接 SSE MCP 端点 |
+| `http` | `url`、可选 `headers` | 连接 HTTP MCP 端点 |
+
+1. 填写工具名称和描述。
+2. 选择传输类型并填入连接信息。
+3. 选择**获取工具列表**，确认工具名称、说明和 JSON Schema 参数。
+4. 保存并在工具列表中运行测试。
+
+<Callout type="info" title="图片待补充：MCP 服务配置">
+  文件：`/images/mcp-tool-dialog.png`。截图内容：MCP 服务对话框，展示 stdio/SSE/HTTP 传输切换、连接字段、获取工具列表和返回的工具清单。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“MCP 服务配置”。
+</Callout>
+
+## 安全边界
+
+- 不要把私密 Token 写入公开文档或共享给不需要的团队。
+- 对远程 MCP 端点配置 HTTPS 和最小请求头。
+- 对 `stdio` 命令限制来源，避免通过不受信任的输入拼接命令。
+- MCP 调用超时默认 `60` 秒；失败会记录在 Agent 或工作流运行追踪中。
+
+## 常见错误
+
+`获取工具列表失败`通常表示命令不存在、进程退出、URL 不可访问、协议类型不匹配或请求头无效。先在服务端日志确认连接错误，再在 Clouisle 中重新加载工具。

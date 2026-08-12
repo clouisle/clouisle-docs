@@ -1,0 +1,33 @@
+---
+title: API 密钥参考
+description: 查阅 API Key 的认证格式、资源范围、过期和速率限制
+icon: KeyRound
+---
+
+API Key 用于程序化调用 Agent、工作流和其他受保护 API。完整密钥只在创建响应中显示一次，后续列表只显示 `key_prefix`。
+
+## 字段
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 必填 | `1-100` 字符 |
+| `scopes` | string[] | `["chat"]` | 权限作用域；以实际后端权限为准 |
+| `rate_limit` | integer | `1000` | 每分钟请求数；`0` 表示无限制 |
+| `expires_at` | datetime/null | null | null 表示永不过期 |
+| `agent_ids` | UUID[] | `[]` | 空列表允许访问全部 Agent |
+| `workflow_ids` | UUID[] | `[]` | 空列表允许访问全部工作流 |
+| `is_active` | boolean | true（创建后） | 禁用后认证失败 |
+
+## 认证
+
+把完整 Key 放入：
+
+```http
+Authorization: Bearer clou_your_api_key_here
+```
+
+服务端先识别 `clou_` 前缀，再校验哈希、活跃状态、过期时间和关联用户。JWT 与 API Key 都使用 Bearer 格式，但 API Key 的资源范围由 Key 本身限制。
+
+## 生命周期
+
+创建后立即复制并存入 Secret 管理器。编辑可以修改名称、作用域、限速、过期时间、资源范围和启用状态，但不能恢复已丢失的完整密钥。删除不可撤销；轮换应创建新 Key、迁移调用、再禁用旧 Key。

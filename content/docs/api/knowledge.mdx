@@ -1,0 +1,40 @@
+---
+title: 知识库 API
+description: 管理知识库、文档、分块和检索请求
+icon: Database
+---
+
+知识库资源端点基础路径为 `/api/v1/knowledge-bases`。
+
+## 资源端点
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET/POST | `/knowledge-bases` | 分页查询/创建知识库 |
+| GET/PUT/DELETE | `/knowledge-bases/{kb_id}` | 详情/更新/删除 |
+| GET | `/knowledge-bases/{kb_id}/stats` | 统计 |
+| GET | `/knowledge-bases/{kb_id}/documents` | 文档列表 |
+| POST | `/knowledge-bases/{kb_id}/documents/upload` | 上传文件 |
+| POST | `/knowledge-bases/{kb_id}/documents/url` | 导入 URL |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process` | 处理文档 |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/preview-chunks` | 预览分块 |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | 重新处理 |
+| GET/PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | 查询/编辑分块 |
+| POST | `/knowledge-bases/{kb_id}/search` | 单次检索 |
+| POST | `/knowledge-bases/{kb_id}/search/batch` | 多配置对比 |
+
+## 检索请求
+
+```json
+{
+  "query": "如何重置密码？",
+  "search_mode": "hybrid",
+  "top_k": 5,
+  "score_threshold": 0,
+  "dense_weight": 1,
+  "lexical_weight": 1,
+  "rrf_k": 60
+}
+```
+
+查询为 `1-1000` 字符；混合权重不能同时为 `0`。结果包含 `chunk_id`、文档名、内容、最终分数以及各阶段排名/分数。

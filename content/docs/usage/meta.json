@@ -3,5 +3,11 @@
   "root": true,
   "description": "快速开始、核心概念与操作教程",
   "icon": "Compass",
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "quick-start",
+    "concepts",
+    "guides",
+    "tutorials"
+  ]
 }

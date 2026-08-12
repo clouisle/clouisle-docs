@@ -1,0 +1,27 @@
+---
+title: 源码开发部署
+description: 从源码启动后端、前端和基础设施依赖
+icon: CodeXml
+---
+
+源码运行适合贡献者和功能开发，不等同于生产部署。后端使用 Python `3.13`、FastAPI、Celery；前端使用 Next.js 16 与 Bun。
+
+## 基础依赖
+
+启动 PostgreSQL 17 + pg_search、Redis 7 和 Qdrant 1.18.3。复制根目录 `.env.example` 为 `.env`，设置数据库、Redis、Qdrant、前后端 URL 和 `NEXT_PUBLIC_API_URL`。
+
+## 后端
+
+在 `backend/` 安装 `pyproject.toml` 中的依赖，初始化数据库后启动 FastAPI API 和 Celery Worker/Beat。开发服务监听 API `8000`，OpenAPI 页面为 `/docs`。
+
+## 前端
+
+在 `frontend/` 安装 Bun 依赖，设置 `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`，运行 Next.js 开发服务，默认端口 `3000`。
+
+<Callout type="warn">
+  源码启动命令会随项目开发变化；以根目录 README、`backend/pyproject.toml`、`frontend/package.json` 和当前脚本为准。部署生产环境使用发布镜像或 Compose/Helm，不要把开发服务器暴露到公网。
+</Callout>
+
+<Callout type="info" title="图片待补充：源码开发服务拓扑">
+  文件：`/images/source-development-topology.png`。截图内容：终端分屏展示 frontend、api、worker/beat 与 PostgreSQL/Redis/Qdrant 的本地开发进程；隐藏用户名和路径。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“源码开发服务拓扑”。
+</Callout>

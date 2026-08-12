@@ -1,0 +1,49 @@
+---
+title: 部署 FAQ
+description: 快速回答安装、服务、存储、升级和安全问题
+icon: CircleAlert
+---
+
+## 安装与服务
+
+### 为什么 API 服务名是 `api` 而不是 `backend`？
+
+当前 Compose、Kubernetes 和路由配置使用 `api`。旧脚本或旧文档中的 `backend` 引用应改为 `api`，例如 `docker compose logs -f api`。
+
+### 为什么前端能打开但请求失败？
+
+检查反向代理是否把 `/api/*` 转到 `api:8000`，并确认 `NEXT_PUBLIC_API_URL` 是浏览器可访问的基路径。
+
+### 为什么 Beat 只能有一个副本？
+
+Beat 是调度器。多个副本会重复投递定时任务，造成重复处理或重复通知。
+
+## 存储与扩展
+
+### API 扩容为什么需要共享卷？
+
+本地上传存储挂载在 API。多个 API 副本必须看到同一目录，因此需要 `ReadWriteMany` 或对象存储；`ReadWriteOnce` 时保持单副本。
+
+### 为什么恢复数据库后文件或检索仍然缺失？
+
+数据库只包含元数据。原始文件在上传存储，向量在 Qdrant；三者必须从一致备份恢复。
+
+## 检索与任务
+
+### 文档上传成功后为什么搜不到？
+
+上传和处理是两个阶段。等待文档进入 `completed`，确认嵌入成功和 Qdrant 可用，再检查 Agent 关联的知识库。
+
+### 混合检索为什么返回校验错误？
+
+混合检索的 `dense_weight` 和 `lexical_weight` 不能同时为 `0`。全文通道还需要 PostgreSQL 的 `pg_search`。
+
+## 安全
+
+### 可以把 `.env` 提交到仓库吗？
+
+不可以。`.env` 包含 JWT、数据库、Redis、Qdrant、模型、SSO 和内部网关密钥。使用 Secret 管理器和最小权限。
+
+### 如何安全轮换 API Key？
+
+创建新 Key、更新调用方、观察用量和错误，再禁用/删除旧 Key。完整 Key 只展示一次。

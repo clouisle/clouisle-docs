@@ -1,0 +1,12 @@
+{
+  "title": "运维",
+  "icon": "Activity",
+  "pages": [
+    "index",
+    "storage",
+    "backup-recovery",
+    "upgrade",
+    "monitoring",
+    "troubleshooting"
+  ]
+}

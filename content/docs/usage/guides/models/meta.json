@@ -1,0 +1,9 @@
+{
+  "title": "模型指南",
+  "icon": "Cpu",
+  "pages": [
+    "index",
+    "providers",
+    "manage-models"
+  ]
+}

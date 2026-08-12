@@ -1,0 +1,46 @@
+---
+title: 站点设置参考
+description: 查阅公开站点、注册、安全、主题、通知和存储字段
+icon: Settings
+---
+
+公开设置由后端 `PublicSiteSettingsResponse` 提供。未配置时使用以下默认值。
+
+## 公开与认证设置
+
+| 字段 | 类型 | 默认值 |
+| --- | --- | --- |
+| `site_name` | string | `Clouisle` |
+| `site_description` / `site_url` / `site_icon` | string | 空 |
+| `auth_page_layout` | `centered` 或 `split` | `centered` |
+| `theme_mode` | `system`、`light` 或 `dark` | `system` |
+| `theme_branding_display` | `full`、`name_only`、`icon_only` 或 `hidden` | `full` |
+| `allow_registration` | boolean | `true` |
+| `require_approval` | boolean | `false` |
+| `email_verification` | boolean | `true` |
+| `enable_captcha` | boolean | `false` |
+| `sso_enabled` | boolean | `false` |
+| `sso_allow_password_login` | boolean | `true` |
+| `allow_account_deletion` | boolean | `true` |
+| `require_terms_acceptance_on_register` | boolean | `false` |
+
+## 知识库上传
+
+`kb_document_max_upload_size_mb` 默认 `50`，有效范围 `1-1024`。后端上传接口实时读取该值，超过限制返回校验错误。
+
+## 主题颜色
+
+主题支持页面、卡片、边框、侧边栏、顶部导航、强调色、弱化色和图表色。颜色使用十六进制格式，例如 `#3b82f6` 或带透明度的 `#3b82f680`。
+
+## 安全与运维字段
+
+安全设置还包括密码最小长度、复杂度、过期与历史、会话超时、单一会话、最大登录尝试、锁定时长、验证码和 TOTP。存储设置支持本地文件系统和对象存储；审计日志支持保留天数与归档路径。
+
+## 通知渠道
+
+邮件使用 SMTP 主机、端口、加密、用户名、密码、发件人名称和地址；钉钉、企业微信、飞书、Slack 支持 Webhook 或企业应用字段；通用 Webhook 支持自定义请求头、正文模板和 HMAC 密钥。
+
+
+<Callout type="info" title="图片待补充：站点设置字段总览">
+  文件：`/images/site-settings-reference.png`。截图内容：站点设置常规、安全、存储和通知页面的字段分组；正式素材应拆成主题、安全和渠道三张图。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“站点设置字段总览”。
+</Callout>

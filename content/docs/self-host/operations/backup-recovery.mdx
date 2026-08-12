@@ -1,0 +1,35 @@
+---
+title: 备份与恢复
+description: 备份 Clouisle 元数据、索引、队列和上传资产
+icon: ArchiveRestore
+---
+
+Clouisle 的可恢复备份至少包含 PostgreSQL、Qdrant、上传存储和部署配置/Secret。Redis 主要保存队列、缓存和会话状态，是否备份取决于组织对未完成任务的恢复要求。
+
+## 备份内容
+
+| 内容 | 作用 | 建议 |
+| --- | --- | --- |
+| PostgreSQL | 用户、团队、资源、配置、审计、文档元数据 | 每日全量 + 持续归档 |
+| Qdrant | 文档向量 | 与数据库备份协调 |
+| 上传存储 | 原始文档、附件、媒体和沙箱产物 | 与 PostgreSQL 元数据保持同一时间点 |
+| `.env`/Kubernetes Secret | 连接和签名配置 | 加密保管，不提交仓库 |
+| Redis | Celery/缓存/会话 | 按任务恢复要求决定 |
+
+## 恢复顺序
+
+1. 恢复 PostgreSQL 和依赖扩展。
+2. 恢复 Qdrant 集合和上传文件。
+3. 恢复 Secret 与环境变量，确认 `SECRET_KEY` 保持一致。
+4. 启动 API，确认健康和数据库迁移。
+5. 启动 Worker、Sandbox Worker 和唯一 Beat。
+6. 检查文档状态、向量维度、Agent、工作流和 API Key。
+7. 运行一条知识库检索和一条 Agent/工作流冒烟请求。
+
+<Callout type="info" title="图片待补充：备份恢复检查清单">
+  文件：`/images/backup-restore-checklist.png`。截图内容：运维面板或终端展示备份文件、数据库/Qdrant/上传恢复顺序和健康检查结果；隐藏真实凭据。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“备份恢复检查清单”。
+</Callout>
+
+<Callout type="error">
+  仅恢复 PostgreSQL 会留下缺少原始文件或向量的资源；仅恢复 Qdrant 会留下无法关联的向量。必须按同一恢复点处理元数据、文件和索引。
+</Callout>

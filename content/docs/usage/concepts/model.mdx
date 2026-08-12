@@ -1,0 +1,21 @@
+---
+title: 模型
+description: 理解模型注册、能力标记与团队授权
+icon: Cpu
+---
+
+模型采用两级管理：管理员在全局模型注册表中保存供应商连接和模型能力；团队所有者或管理员再把模型授权给具体团队。平台用户只能看到当前团队已授权且启用的模型。
+
+### 模型类型
+
+Clouisle 支持 `chat`、`embedding`、`rerank`、`tts`、`stt`、`audio_generation`、`text_to_image` 与 `text_to_video`。不同资源需要匹配类型：Agent 使用对话模型，知识库使用嵌入与可选重排模型，媒体节点使用图片或视频模型。
+
+### 凭据与端点
+
+API Key 由后端保存，读取模型时只返回 `has_api_key`，不会返回明文凭据。管理员可在保存前测试连接；支持的 OpenAI 兼容端点受站点的**模型端点白名单**限制。
+
+### 团队配额
+
+授权可配置每日/月度 Token 与请求限额；`null` 表示无限制，`0` 是一个有效的零限额。优先级数值越大，同类型模型排序越靠前。超过配额时返回业务错误 `6103`。
+
+相关内容：[管理模型](../guides/models/manage-models.mdx)、[模型供应商参考](/reference/model-providers)。

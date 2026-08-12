@@ -1,0 +1,30 @@
+---
+title: 升级 Clouisle
+description: 安全更新镜像、迁移数据并在异常时回滚
+icon: RefreshCw
+---
+
+升级前先阅读目标版本 CHANGELOG，确认数据库迁移、工作流定义、模型适配器和部署 manifest 变化。
+
+## Compose 升级
+
+1. 备份 PostgreSQL、Qdrant、上传卷和 `.env`。
+2. 拉取新镜像：`docker compose pull`。
+3. 逐个检查服务配置和镜像标签。
+4. 执行 `docker compose up -d`，先观察 `api` 和 Worker 日志。
+5. 检查 `/api/v1/health`、登录、模型列表、知识库检索和一个已发布 Agent。
+6. 检查工作流旧定义是否需要重新保存 `schema_version: 2`。
+
+安装器升级会保留现有 `.env`，但仍需审阅新增变量和默认值。
+
+## Kubernetes 升级
+
+使用相同 release 和 namespace 执行 `helm upgrade`，或审阅新生成 manifest 后 apply。先更新 API 与迁移，再更新 Worker/Beat/Frontend；生产期间保持 Beat 单副本。
+
+<Callout type="info" title="图片待补充：升级滚动状态">
+  文件：`/images/upgrade-rollout-status.png`。截图内容：Docker Compose 或 Kubernetes 升级期间的服务状态、API 健康和日志，标出数据库迁移完成。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“升级滚动状态”。
+</Callout>
+
+## 回滚
+
+回滚镜像前确认数据库迁移是否可逆。若迁移不可逆，不要只切回旧镜像；恢复备份到隔离环境验证。工作流版本可在产品 UI 单独恢复，但这不等同于服务回滚。

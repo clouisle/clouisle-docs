@@ -3,10 +3,12 @@ import { source } from '@/lib/source';
 import { baseOptions } from '@/lib/layout.shared';
 import type { CSSProperties } from 'react';
 
-export default function Layout({ children }: LayoutProps<'/[...slug]'>) {
+export default async function Layout({ children, ...props }: LayoutProps<'/[lang]'>) {
+  const params = await props.params;
+
   return (
     <DocsLayout
-      tree={source.getPageTree()}
+      tree={source.getPageTree(params.lang)}
       {...baseOptions()}
       tabs={{
         transform(option, node) {

@@ -1,0 +1,29 @@
+---
+title: 团队与安全
+description: 理解多租户资源边界、角色权限、认证与审计
+icon: ShieldCheck
+---
+
+Clouisle 以团队隔离 Agent、工作流、知识库、模型授权、工具与 Skills。当前团队决定平台工作台查询和创建资源的边界。
+
+### 团队角色
+
+团队角色为所有者、管理员、成员和观察者。所有者负责所有权转让，不能被移除或直接离开；管理员可管理团队资源；更细的操作由全局角色权限和作用域角色共同决定。
+
+### 权限
+
+后端权限代码采用 `resource:action` 或 `admin:resource:action`。超级管理员绕过权限检查。非管理类资源还可通过团队或资源作用域角色授权。前端根据权限隐藏菜单，但后端仍会对每次请求检查权限。
+
+### 认证与账户安全
+
+站点可组合密码登录、邮箱验证、管理员审批、点击式验证码、密码策略、密码过期、单一会话、TOTP 和 SSO。SSO 支持多个连接；管理员可以禁用密码登录。
+
+### API 密钥
+
+API 密钥以 `clou_` 开头，通过 `Authorization: Bearer` 发送。密钥可限制 Agent、工作流、过期时间和每分钟请求数；未限制资源时允许访问全部相应资源。
+
+### 审计与通知
+
+管理后台记录资源操作、操作者和变更快照，并提供按事件、用户、团队和时间筛选。通知可在站内显示，也可通过邮件、钉钉、企业微信、飞书、Slack 或 Webhook 外发。
+
+相关内容：[团队管理](../guides/administration/teams.mdx)、[角色与权限](../guides/administration/roles-permissions.mdx)、[登录与账户](../guides/administration/authentication.mdx)。

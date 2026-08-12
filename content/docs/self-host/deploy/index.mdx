@@ -1,0 +1,21 @@
+---
+title: 部署方式
+description: 选择引导式安装、Docker Compose、Helm 或 Kubernetes manifest
+icon: Rocket
+---
+
+Clouisle 提供引导式安装器、手动 Docker Compose、Helm、生成单文件 Kubernetes manifest、手动 Kubernetes 模板和源码运行方式。
+
+<Cards>
+  <Card title="Docker Compose" href="/self-host/deploy/docker-compose">单机部署，包含 API、Worker、数据库、缓存和向量库。</Card>
+  <Card title="Kubernetes" href="/self-host/deploy/kubernetes">使用 Helm 或生成/手动 manifest 部署集群。</Card>
+  <Card title="源码运行" href="/self-host/deploy/source-code">为开发和贡献者启动后端、前端及依赖。</Card>
+</Cards>
+
+## 引导式安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | bash
+```
+
+安装器提供 Docker Compose、Kubernetes Helm 和安全单文件 manifest 选项。Docker 默认目录为 `/opt/clouisle`；升级时保留已有 `.env`。单文件 manifest 默认只生成 `./clouisle-k8s.yaml`，不会自动 `kubectl apply`。

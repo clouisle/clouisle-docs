@@ -1,7 +1,21 @@
 ---
 title: API
-description: Clouisle API 快速上手与端点参考
+description: 通过 API Key 集成 Agent、工作流、会话和知识库
 icon: CodeXml
 ---
 
-API 内容待补充。
+Clouisle API 的基础路径为 `/api/v1`。请求使用 JSON，响应使用统一 `code`、`data`、`msg` 结构。需要认证的请求在 `Authorization` 请求头中使用 `Bearer` JWT 或以 `clou_` 开头的 API Key。
+
+<Cards>
+  <Card title="开始使用" href="/api/get-started">创建 API Key、设置基础 URL 并发送第一个请求。</Card>
+  <Card title="Agent 聊天" href="/api/chat">发送消息、附件、变量并消费流式响应。</Card>
+  <Card title="工作流执行" href="/api/workflow">运行、Webhook、取消和订阅节点事件。</Card>
+  <Card title="会话" href="/api/conversations">查询、更新、删除和管理消息版本。</Card>
+  <Card title="知识库" href="/api/knowledge">管理文档、分块和检索测试。</Card>
+  <Card title="流式事件" href="/api/streaming">解析 Agent 与工作流的 SSE 事件。</Card>
+  <Card title="错误处理" href="/api/errors">按 HTTP 状态和业务错误码恢复。</Card>
+</Cards>
+
+<Callout type="warn">
+  `/api/v1/admin/*` 是管理后台使用的受保护端点，不等同于稳定的第三方公共 API。集成优先使用本栏列出的资源端点，并为版本变化保留兼容策略。
+</Callout>

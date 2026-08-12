@@ -1,0 +1,36 @@
+---
+title: API 快速开始
+description: 创建最小权限 API Key 并发送第一个 Agent 请求
+icon: Rocket
+---
+
+## 前置条件
+
+需要已部署的 Clouisle API 地址、一个已发布 Agent，以及对该 Agent 可用的 API Key。API Key 默认每分钟 `1000` 次请求，留空过期时间表示永不过期；完整密钥只显示一次。
+
+## 创建 API Key
+
+1. 前往**API 密钥** > **创建密钥**。
+2. 设置名称、`chat` 作用域、可选过期时间和速率限制。
+3. 可选地只绑定目标 Agent；空绑定列表表示允许访问全部已发布 Agent。
+4. 创建后立即复制完整 Key，并写入本地环境变量：
+
+```bash
+export CLOUISLE_API_KEY='clou_replace_me'
+export CLOUISLE_API_BASE='https://your-clouisle.example.com/api/v1'
+```
+
+## 发送第一个请求
+
+```bash
+curl -N "$CLOUISLE_API_BASE/agents/<agent_id>/chat/stream" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"你好，请介绍你的职责","conversation_id":null,"variables":{}}'
+```
+
+响应为 `text/event-stream`。读取 `message_start` 得到 `conversation_id`，后续消息传回该 ID 即可保持上下文。
+
+## 验收
+
+收到 `content_delta` 和 `message_end`，且 `message_end` 包含 Token 用量与耗时。若返回 `6202`，Agent 尚未发布；若返回 `3000`，检查 API Key 作用域和资源绑定。

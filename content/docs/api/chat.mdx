@@ -1,0 +1,39 @@
+---
+title: Agent 聊天 API
+description: 发送 Agent 消息并接收正文、来源、工具和媒体结果
+icon: MessagesSquare
+---
+
+## 端点
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/agents/{agent_id}/public` | 获取公开 Agent 基础信息，可选认证 |
+| POST | `/api/v1/agents/{agent_id}/chat` | 非流式聊天 |
+| POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE 流式聊天 |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/regenerate` | 重新生成 |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | 编辑用户消息并生成分支 |
+| GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | 查询消息版本 |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | 切换版本 |
+
+## 请求体
+
+`message` 必填；`conversation_id` 首次可为 `null`；`variables` 用于 Agent 定义的变量；`images` 和 `file_urls` 用于附件。图片对象至少应包含 URL；文件 URL 对象需要 `url`、`filename`、`mime_type` 和 `size`。
+
+```json
+{
+  "message": "请根据资料总结退款规则",
+  "conversation_id": null,
+  "variables": {"customer_type": "enterprise"},
+  "images": [],
+  "file_urls": []
+}
+```
+
+## 非流式响应
+
+成功响应的 `data` 包含会话/消息标识、正文、RAG 上下文、工具调用、媒体结果、Token 用量和耗时。非流式适合短响应；长任务推荐 SSE。
+
+## 访问边界
+
+Agent 必须已发布。API Key 需要对应权限，并且如果绑定了 Agent，只能访问允许列表中的 ID。Agent 的附件限制、工具迭代上限和模型配额仍然生效。

@@ -1,0 +1,16 @@
+---
+title: 配置
+description: 按环境变量、密钥、网络、检索和沙箱分组配置部署
+icon: SlidersHorizontal
+---
+
+部署配置分为根目录源码配置和 `deploy/.env` Compose 配置。Compose 使用服务名；源码开发使用 `localhost`。完整字段见[环境变量参考](./environment-variables.mdx)。
+
+<Cards>
+  <Card title="环境变量" href="/self-host/configuration/environment-variables">按用途查阅默认值、必填关系和安全属性。</Card>
+  <Card title="部署架构" href="/self-host/architecture">确认服务名、端口、内网 URL 和持久化卷。</Card>
+</Cards>
+
+<Callout type="error">
+  `SECRET_KEY`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY`、`SANDBOX_ARTIFACT_UPLOAD_API_KEY` 和 `INTERNAL_API_TOKEN` 必须使用强随机值或 Secret 管理器，不要提交 `.env`。
+</Callout>

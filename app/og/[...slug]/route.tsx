@@ -8,7 +8,8 @@ export const revalidate = false;
 
 export async function GET(_req: Request, { params }: RouteContext<'/og/[...slug]'>) {
   const { slug } = await params;
-  const page = source.getPage(slug.slice(0, -1));
+  const [locale, ...rest] = slug;
+  const page = source.getPage(rest.slice(0, -1), locale);
   if (!page) notFound();
 
   return new ImageResponse(

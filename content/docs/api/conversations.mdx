@@ -1,0 +1,27 @@
+---
+title: 会话 API
+description: 查询、更新、删除会话并处理消息版本
+icon: MessagesSquare
+---
+
+用户会话端点挂载在 `/api/v1/agents` 下，管理员会话端点挂载在 `/api/v1/conversations` 下。管理员端点需要相应管理权限。
+
+## 用户端点
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/agents/conversations/my` | 查询当前用户会话 |
+| GET | `/api/v1/agents/{agent_id}/conversations` | 查询 Agent 会话 |
+| GET | `/api/v1/agents/conversations/{conversation_id}` | 获取会话和消息 |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | 更新标题 |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}` | 删除会话 |
+
+标题长度为 `1-200` 字符。首次聊天时不传会话 ID 会自动创建；后续传回 ID 以延续变量和历史。
+
+## 消息版本
+
+消息可有多个版本，响应包含 `version_number`、`is_active`、父消息/分支关系。编辑或重新生成会创建分支；切换版本只改变活动版本。
+
+## 管理员端点
+
+管理后台可以分页查看团队/用户/Agent 会话，查看详情，单条或批量删除。删除是永久操作，应先按时间、团队、用户和 Agent 筛选。

@@ -1,0 +1,64 @@
+---
+title: 15 分钟快速开始
+description: 登录 Clouisle、选择团队并完成第一次 Agent 对话
+icon: Rocket
+---
+
+完成本页后，你会在团队工作台中打开一个已发布 Agent、发送消息并找到对应会话记录。
+
+<Callout type="info" title="开始之前">
+  需要一个可访问的 Clouisle 站点和有效账户。创建 Agent 还需要团队已获授权的 `chat` 模型；普通成员看不到的菜单由角色与权限决定。
+</Callout>
+
+## 步骤 1：登录并选择团队
+
+1. 打开站点根地址，进入**登录**。
+2. 使用用户名或邮箱与密码登录；站点也可能只开放 SSO。
+3. 若出现邮箱验证、TOTP、密码过期或管理员审核提示，按页面完成后再继续。
+4. 在工作台顶部团队切换器中选择目标团队。Agent、工作流、知识库与模型均按当前团队隔离。
+
+<figure>
+  <img src="/images/quick-start-team-selection.png" alt="选择当前团队" />
+  <figcaption>选择当前团队</figcaption>
+</figure>
+
+## 步骤 2：确认可用模型
+
+前往**模型**。这里仅显示管理员授权给当前团队的模型，可按供应商、模型类型和状态筛选。至少需要一个启用的**对话**模型才能配置 Agent。
+
+<Callout type="warn">
+  如果列表为空，联系团队所有者或管理员在管理后台为团队授权模型。平台用户不能在此页保存供应商凭据。
+</Callout>
+
+## 步骤 3：打开或创建 Agent
+
+1. 前往**应用**，切换到 **Agent**。
+2. 若已有已发布 Agent，打开后选择**对话**。
+3. 若具备 `agent:create` 权限，选择**创建应用** > **Agent**，填写名称后进入编排页。
+4. 在 **Agent 设置**中选择模型；填写提示词并保存。
+5. 发布需要 `agent:publish` 权限。发布后公开页面与 API 才能稳定使用。
+
+<figure>
+  <img src="/images/quick-start-agent-editor.png" alt="Agent 编排与预览" />
+  <figcaption>Agent 编排与预览</figcaption>
+</figure>
+
+## 步骤 4：发送第一条消息
+
+1. 在右侧**调试与预览**输入问题，或通过 Agent 的**公开页面**打开完整对话。
+2. 输入消息并发送。流式响应可能包含思考过程、知识来源、工具执行与媒体结果，显示方式由 Agent 设置控制。
+3. 需要停止时选择输入区的停止按钮。手动停止的轮次会保留终止状态。
+4. 在应用侧栏打开**日志**，确认会话、消息、模型、Token、耗时和知识来源。
+
+<Callout type="info" title="图片待补充：第一次 Agent 对话结果">
+  文件：`/images/quick-start-chat-result.png`。截图内容：已发布 Agent 的聊天页，包含一条用户消息、一条完成的流式回复，并框出来源或 Token 操作栏。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“第一次 Agent 对话结果”。
+</Callout>
+
+## 验收
+
+- 当前团队已选中。
+- **模型**页至少有一个启用的对话模型。
+- Agent 状态为**已发布**，且能返回消息。
+- Agent **日志**中能找到刚才的会话。
+
+下一步：学习[创建与编排 Agent](./guides/agent/create-agent.mdx)或完成[RAG Agent 教程](./tutorials/rag-agent.mdx)。
