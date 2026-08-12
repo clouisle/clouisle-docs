@@ -1,4 +1,5 @@
 export const appName = 'Clouisle';
+export const docsSiteUrl = 'https://docs.clouisle.asia';
 export const docsRoute = '';
 export const docsImageRoute = '/og';
 export const docsContentRoute = '/llms.mdx';

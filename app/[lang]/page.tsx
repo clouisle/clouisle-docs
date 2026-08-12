@@ -2,10 +2,11 @@ import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { source } from '@/lib/source';
 import { getMDXComponents } from '@/components/mdx';
 import { notFound } from 'next/navigation';
-import type { Metadata } from 'next';
 import { baseOptions } from '@/lib/layout.shared';
 import { i18n } from '@/lib/i18n';
 import type { LinkItemType } from 'fumadocs-ui/layouts/shared';
+import { JsonLd } from '@/components/seo/json-ld';
+import { getPageStructuredData } from '@/lib/seo';
 
 function navLinks(locale: string): LinkItemType[] {
   const prefix = locale === i18n.defaultLanguage ? '' : `/${locale}`;
@@ -46,27 +47,15 @@ export default async function Page(props: PageProps<'/[lang]'>) {
   const MDX = page.data.body;
 
   return (
-    <HomeLayout {...baseOptions()} links={navLinks(params.lang)}>
-      <div className="mx-auto flex w-full max-w-(--fd-layout-width) flex-1 flex-col px-4 py-10 sm:py-14">
-        <div className="prose max-w-none">
-          <MDX components={getMDXComponents(page)} />
+    <>
+      <JsonLd data={getPageStructuredData(page, 'WebPage')} />
+      <HomeLayout {...baseOptions()} links={navLinks(params.lang)}>
+        <div className="mx-auto flex w-full max-w-(--fd-layout-width) flex-1 flex-col px-4 py-10 sm:py-14">
+          <div className="prose max-w-none">
+            <MDX components={getMDXComponents(page)} />
+          </div>
         </div>
-      </div>
-    </HomeLayout>
+      </HomeLayout>
+    </>
   );
-}
-
-export function generateStaticParams() {
-  return i18n.languages.map((lang) => ({ lang }));
-}
-
-export async function generateMetadata(props: PageProps<'/[lang]'>): Promise<Metadata> {
-  const params = await props.params;
-  const page = source.getPage([], params.lang);
-  if (!page) notFound();
-
-  return {
-    title: page.data.title,
-    description: page.data.description,
-  };
 }
