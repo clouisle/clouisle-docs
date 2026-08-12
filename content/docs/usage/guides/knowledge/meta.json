@@ -2,7 +2,6 @@
   "title": "知识库指南",
   "icon": "Database",
   "pages": [
-    "index",
     "create-knowledge-base",
     "import-documents",
     "chunking",

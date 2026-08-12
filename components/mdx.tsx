@@ -1,5 +1,6 @@
 import defaultMdxComponents from 'fumadocs-ui/mdx';
 import { Card as BaseCard } from 'fumadocs-ui/components/card';
+import { ImageZoom } from 'fumadocs-ui/components/image-zoom';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
 import type { MDXComponents } from 'mdx/types';
 import { i18n } from '@/lib/i18n';
@@ -51,6 +52,8 @@ export function getMDXComponents(page: Page, components?: MDXComponents) {
     a: LocaleLink,
     // 大写组件形式：mdx-js 只对大写标签走组件表，JSX 里用 <Link> 才能 locale 化
     Link: LocaleLink,
+    ImageZoom,
+    img: (props) => <ImageZoom {...(props as Parameters<typeof ImageZoom>[0])} />,
     ...components,
   } satisfies MDXComponents;
 }

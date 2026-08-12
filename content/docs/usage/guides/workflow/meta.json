@@ -2,7 +2,6 @@
   "title": "工作流指南",
   "icon": "Workflow",
   "pages": [
-    "index",
     "orchestrate",
     "nodes",
     "triggers",

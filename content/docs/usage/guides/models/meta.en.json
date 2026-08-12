@@ -2,7 +2,6 @@
   "title": "Models guide",
   "icon": "Cpu",
   "pages": [
-    "index",
     "providers",
     "manage-models"
   ]

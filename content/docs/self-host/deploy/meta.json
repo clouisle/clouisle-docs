@@ -2,7 +2,6 @@
   "title": "部署",
   "icon": "Rocket",
   "pages": [
-    "index",
     "docker-compose",
     "kubernetes",
     "source-code"

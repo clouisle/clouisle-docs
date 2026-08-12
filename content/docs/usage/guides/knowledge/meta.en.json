@@ -2,7 +2,6 @@
   "title": "Knowledge Base guide",
   "icon": "Database",
   "pages": [
-    "index",
     "create-knowledge-base",
     "import-documents",
     "chunking",

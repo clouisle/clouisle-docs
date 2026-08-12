@@ -60,4 +60,15 @@ icon: Settings
 | `RETRIEVAL_SHADOW_ENABLED` | `false` | 混合检索影子运行 |
 | `TAVILY_API_KEY` | 空 | 网页搜索内置工具 |
 
+## GitHub Discussions 反馈
+
+文档页底部的反馈表单会把同一页面的反馈聚合到 `clouisle/clouisle-docs` 的 GitHub Discussion。仓库必须启用 Discussions，并创建名称为 `Docs Feedback` 的 Discussion category。
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `GITHUB_APP_ID` | 空 | GitHub App 的 App ID。该 App 需要安装到 `clouisle/clouisle-docs`，并拥有 Discussions 的读写权限。 |
+| `GITHUB_APP_PRIVATE_KEY` | 空 | GitHub App 私钥。多行私钥可直接填写，或将换行写成 `\\n`。只在服务端配置，不能使用 `NEXT_PUBLIC_` 前缀。 |
+
+反馈动作会校验页面来源、路径和消息长度；未配置 GitHub 凭据时提交会失败，不会静默丢弃反馈。
+
 修改服务端环境变量后重启对应服务。`NEXT_PUBLIC_*` 在前端构建时注入，修改后必须重新构建前端。

@@ -7,5 +7,8 @@
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
+  },
+  "vars": {
+    "GITHUB_APP_ID": "4572453",
   }
 }

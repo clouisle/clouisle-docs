@@ -2,7 +2,6 @@
   "title": "工具与 Skills 指南",
   "icon": "Wrench",
   "pages": [
-    "index",
     "built-in",
     "custom-tools",
     "mcp",

@@ -2,7 +2,6 @@
   "title": "Agent 指南",
   "icon": "Bot",
   "pages": [
-    "index",
     "create-agent",
     "conversation",
     "memory",

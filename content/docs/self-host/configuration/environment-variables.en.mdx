@@ -60,4 +60,15 @@ The following values follow the root-level `deploy/.env.example` and the backend
 | `RETRIEVAL_SHADOW_ENABLED` | `false` | Shadow-run hybrid retrieval |
 | `TAVILY_API_KEY` | Empty | Web search built-in tool |
 
+## GitHub Discussions Feedback
+
+The feedback form at the bottom of each docs page aggregates feedback for the same page into GitHub Discussions on `clouisle/clouisle-docs`. The repository must have Discussions enabled and a category named `Docs Feedback`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GITHUB_APP_ID` | Empty | The GitHub App's App ID. The App must be installed on `clouisle/clouisle-docs` with read/write access to Discussions. |
+| `GITHUB_APP_PRIVATE_KEY` | Empty | The GitHub App's private key. A multi-line key can be provided directly, or line breaks written as `\\n`. Configure this server-side only; never use a `NEXT_PUBLIC_` prefix. |
+
+The feedback action validates the page origin, path, and message length; submissions fail without GitHub credentials rather than being silently dropped.
+
 Restart the corresponding service after modifying server-side environment variables. `NEXT_PUBLIC_*` variables are injected at frontend build time; rebuild the frontend after changing them.

@@ -39,9 +39,10 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 选择按间隔、每天、每周、每月或自定义 Cron。自定义格式为“分 时 日 月 周”。只有保存并发布后的工作流会由调度器执行。
 
-<Callout type="info" title="图片待补充：工作流触发器设置">
-  文件：`/images/workflow-trigger-settings.png`。截图内容：工作流设置抽屉的触发方式区域，展示手动、Webhook、定时任务和 Cron 表达式字段。截图需裁剪到相关区域，并用主题色框线标出关键操作。未来图片的 `alt` 与 caption 均使用“工作流触发器设置”。
-</Callout>
+<figure>
+  <img src="/images/workflow-trigger-settings.png" alt="工作流触发器设置" />
+  <figcaption>工作流触发器设置</figcaption>
+</figure>
 
 ## 状态与取消
 
