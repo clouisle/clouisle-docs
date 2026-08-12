@@ -25,7 +25,7 @@ The Clouisle documentation website, built with <a href="https://fumadocs.dev">Fu
 
 This repository is the official documentation site for [Clouisle](https://github.com/clouisle/Clouisle) — an enterprise-grade knowledge base and intelligent AI Agent platform.
 
-Docs are written in MDX under `content/docs/`; Fumadocs generates routes, the sidebar, and the table of contents at build time. Page content is also exported for LLM consumption via `/llms.txt`, `/llms-full.txt`, and `/docs/*.md`.
+Docs are written in MDX under `content/docs/`; Fumadocs generates routes, the sidebar, and the table of contents at build time. Page content is also exported for LLM consumption via `/llms.txt`, `/llms-full.txt`, and `/llms.mdx/*`.
 
 ## Quick Start
 
@@ -60,13 +60,15 @@ content/docs/     # Documentation content (.mdx pages + meta.json metadata)
 lib/source.ts     # Content loading: defineDocs + loader() + lucide icon plugin
 lib/shared.ts     # Site name, route constants, GitHub link config
 components/mdx.tsx  # MDX component registration
-app/docs/         # Docs page layout & rendering
+app/layout.tsx    # Root layout: RootProvider + DocsLayout
+app/page.tsx      # Index page (/)
+app/[[...slug]]/  # Doc pages
 app/api/search/   # Site search
-app/og/docs/      # OG image generation
+app/og/           # OG image generation
 app/llms*.txt/    # LLM text export routes
 ```
 
-Route mapping: `content/docs/foo/bar.mdx` → `/docs/foo/bar`; `content/docs/foo/index.mdx` → `/docs/foo`. Ordering and grouping in the sidebar are controlled by `meta.json` in each folder.
+Route mapping: `content/docs/foo/bar.mdx` → `/foo/bar`; `content/docs/foo/index.mdx` → `/foo`; `content/docs/index.mdx` → `/`. Ordering and grouping in the sidebar are controlled by `meta.json` in each folder.
 
 ## Tech Stack
 

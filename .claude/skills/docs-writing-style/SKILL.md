@@ -56,6 +56,10 @@ frontmatter title（栏目名）
 
 副标题示例：「在工作空间中构建、发布并监控 AI 应用」。卡片：编排/知识库/发布/监控/集成/获取帮助。
 
+> **图标（全局统一 lucide）**：每个页面 frontmatter 与每个文件夹 `meta.json` 都配 `icon`（lucide 图标名，PascalCase，如 `BookOpen`/`CodeXml`/`Server`）。页面 icon 显示在侧边栏，`root: true` 集合的 icon 显示在 tabs dropdown。icon 缺失 = 缺陷。注意 lucide 新版重命名（`Home`→`House`、`Code2`→`CodeXml`）：`lucideIconsPlugin` 只认 `lucide-react` 的 `icons` 导出中的规范名，deprecated 别名不生效。
+>
+> **两种 icon 写法**：① frontmatter/meta.json 里写字符串名（`icon: "BookOpen"`），由 `lucideIconsPlugin` 解析；② 组件 props（如 `<Card icon>`）只收 ReactNode——必须 import 组件传 JSX（`import { Rocket } from 'lucide-react'` + `icon={<Rocket />}`），写字符串不会显示。
+
 ### 2. 概念页
 
 ```
@@ -63,7 +67,7 @@ frontmatter title
 > 一句话副标题
 ### 概念一（三级标题）
   定位段：这是什么（1-2 句）
-  关键事实 + 关联链接（[相关页](/docs/xxx) 内链交叉引用）
+  关键事实 + 关联链接（[相关页](/xxx) 内链交叉引用）
   <Callout type="info">补充背景</Callout>
   截图（可选，展示长什么样）
 ### 概念二
@@ -143,7 +147,7 @@ frontmatter title
 5. **数字与单位**：写具体值（默认 `50MB`、`0-1`），不写「较大」「较小」。
 6. **句子**：短句、陈述句、结论在前。每段一个要点。避免「请注意」「值得一提的是」等填充语。
 7. **语气**：直接命令（「前往…」「将…设为…」），不客套。
-8. **内链交叉引用**：相关概念/节点用相对链接互相引用（`[开始节点](/docs/…/start)`），但一页内不重复解释已链接内容。
+8. **内链交叉引用**：相关概念/节点用相对链接互相引用（`[开始节点](/…/start)`），但一页内不重复解释已链接内容。
 9. **中文正文**：界面文本/代码/专名保留英文原样；翻译保持术语统一（一页内同一概念不换译名）。
 
 ## 四、表现组件
@@ -221,5 +225,5 @@ base-ui 16.14.3 无 Frame/Figure 组件，二选一：
 
 - `npm run dev` 后逐页检查：标题+副标题渲染、TOC 层级、侧边栏顺序与分组（meta.json）、卡片网格、表格可滚动、Tabs/Accordion/Steps 交互、图片加载与 caption 显示。
 - 教程页按步骤实际跟做一遍，确认每步结果与截图一致、无缺步骤。
-- 检查 `/llms.txt` 或 `/docs/<路径>.md`：副标题、关键值、图片 alt、折叠内容是否完整可读。
+- 检查 `/llms.txt` 或 `/llms.mdx/<路径>/content.md`：副标题、关键值、图片 alt、折叠内容是否完整可读。
 - 涉及组件 import / mdx.tsx 改动时跑 `npm run types:check`。

@@ -2,6 +2,10 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
+@source "../app";
+@source "../components";
+@source "../lib";
+
 html {
   scrollbar-gutter: stable;
 }

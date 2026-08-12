@@ -1,13 +1,102 @@
 ---
-title: Hello World
-description: Your first document
+title: Clouisle 文档
+description: Clouisle 是一个开源的企业级知识库与智能 AI Agent 平台——构建、部署并管理具备 RAG 知识检索、可视化工作流编排与企业级安全能力的 AI 应用。
+icon: House
 ---
 
-Welcome to the docs! You can start writing documents in `/content/docs`.
+import {
+  BookText,
+  CodeXml,
+  Compass,
+  Globe,
+  Rocket,
+  Server,
+  Star,
+} from 'lucide-react';
 
-## What is Next?
+<div className="not-prose">
+  <a
+    href="/usage"
+    className="flex items-center gap-5 rounded-xl border bg-fd-card p-6 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <Rocket className="size-10 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-1">
+      <span className="text-base font-semibold">构建你的第一个应用</span>
+      <span className="text-sm text-fd-muted-foreground">
+        刚接触 Clouisle？从这里开始：创建一个可运行的 AI 应用，并在过程中掌握核心概念。
+      </span>
+    </span>
+  </a>
+</div>
 
-<Cards>
-  <Card title="Learn more about Next.js" href="https://nextjs.org/docs" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.dev" />
-</Cards>
+## 探索文档
+
+<div className="not-prose grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+  <a
+    href="/usage"
+    className="flex items-center gap-4 rounded-xl border bg-fd-card p-4 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <Compass className="size-8 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-sm font-medium">使用</span>
+      <span className="text-sm text-fd-muted-foreground">快速开始、核心概念与操作教程</span>
+    </span>
+  </a>
+  <a
+    href="/reference"
+    className="flex items-center gap-4 rounded-xl border bg-fd-card p-4 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <BookText className="size-8 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-sm font-medium">参考</span>
+      <span className="text-sm text-fd-muted-foreground">功能配置与参数参考</span>
+    </span>
+  </a>
+  <a
+    href="/api"
+    className="flex items-center gap-4 rounded-xl border bg-fd-card p-4 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <CodeXml className="size-8 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-sm font-medium">API</span>
+      <span className="text-sm text-fd-muted-foreground">API 快速上手与端点参考</span>
+    </span>
+  </a>
+  <a
+    href="/self-host"
+    className="flex items-center gap-4 rounded-xl border bg-fd-card p-4 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <Server className="size-8 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-sm font-medium">自部署</span>
+      <span className="text-sm text-fd-muted-foreground">部署、运维与环境变量</span>
+    </span>
+  </a>
+</div>
+
+## 更多资源
+
+<div className="not-prose grid gap-3 sm:grid-cols-2">
+  <a
+    href="https://github.com/clouisle/Clouisle"
+    className="flex items-center gap-4 rounded-xl border bg-fd-card p-4 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <Star className="size-8 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-sm font-medium">GitHub</span>
+      <span className="text-sm text-fd-muted-foreground">
+        Clouisle 是开源项目（GPLv3）——浏览源码、报告问题或贡献代码。
+      </span>
+    </span>
+  </a>
+  <a
+    href="https://clouisle.asia"
+    className="flex items-center gap-4 rounded-xl border bg-fd-card p-4 text-fd-card-foreground transition-colors hover:border-[#2091B2]"
+  >
+    <Globe className="size-8 shrink-0 text-[#2091B2]" aria-hidden="true" />
+    <span className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-sm font-medium">官方网站</span>
+      <span className="text-sm text-fd-muted-foreground">了解 Clouisle 产品信息、版本动态与社区。</span>
+    </span>
+  </a>
+</div>

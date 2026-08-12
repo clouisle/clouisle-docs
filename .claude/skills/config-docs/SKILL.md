@@ -12,7 +12,7 @@ description: 为 clouisle-docs（Fumadocs 文档站）编写配置文档时使�
 ### 内容与路由
 
 - 内容目录：`content/docs/`。每个 `.mdx` 文件 = 一个页面；文件夹下的 `index.mdx` = 该文件夹索引页。
-- 路由映射：`content/docs/foo/bar.mdx` → `/docs/foo/bar`；`content/docs/foo/index.mdx` → `/docs/foo`。
+- 路由映射：`content/docs/foo/bar.mdx` → `/foo/bar`；`content/docs/foo/index.mdx` → `/foo`；`content/docs/index.mdx` → `/`（首页）。
 - frontmatter schema（默认 `pageSchema`/`metaSchema`）：
   - 页面：`title`（必填）、`description`、`icon`（lucide 图标名，PascalCase，如 `Settings`）、`full`、`toc`。
   - `meta.json`：`title`、`icon`、`description`、`root`、`defaultOpen`、`collapsible`、`pages`、`pagesIndex`。
@@ -26,7 +26,7 @@ description: 为 clouisle-docs（Fumadocs 文档站）编写配置文档时使�
 - **remark-npm 默认启用**：```` ```npm ```` 代码块自动生成 npm / pnpm / yarn / bun 四个 tab。
 - **代码 tab 语法默认启用**：相邻代码块写 `tab="Tab 1"`（首个可加 `tab-group="my-group"` 持久化选中值）自动合并为 CodeBlockTabs；MDX-in-tab（`parseMdx`）默认关闭。
 - **不启用**（用组件替代，勿用语法）：`[step]` 步骤标记（需 remark-steps）→ 用 `<Steps><Step>` 或 `fd-steps` CSS 类；```` ```files ```` 文件树语法（需 remark-mdx-files）→ 用 `<Files>` 组件。
-- `includeProcessedMarkdown: true`：页面会被 stringify 后经 `/llms.txt`、`/llms-full.txt`、`/docs/*.md`（rewrite）暴露给 LLM。
+- `includeProcessedMarkdown: true`：页面会被 stringify 后经 `/llms.txt`、`/llms-full.txt`、`/llms.mdx/*` 暴露给 LLM。
 
 ### MDX 组件注册（components/mdx.tsx）
 
@@ -262,7 +262,7 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 ## LLM 内容消费（本项目已启用）
 
-`includeProcessedMarkdown: true` + `/llms.txt`、`/llms-full.txt`、`/docs/*.md` 路由：页面正文会被 stringify 成纯 Markdown 供 LLM 读取。
+`includeProcessedMarkdown: true` + `/llms.txt`、`/llms-full.txt`、`/llms.mdx/*` 路由：页面正文会被 stringify 成纯 Markdown 供 LLM 读取。
 
 - **关键信息写进正文**，不要只放在组件属性、折叠内容（Accordion）、`<Tab>` 或纯 JSX 中——stringify 后这些可能丢失或不可读。
 - 选项表（TypeTable）在 stringify 时只保留 `description` 里的文本；必填/默认值若只写在组件 props 里，LLM 侧会缺失——正文段落里补一句关键默认值/必填说明。
@@ -282,7 +282,7 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 ## 验证
 
-- `npm run dev` 后访问 `http://localhost:3000/docs/<路径>`：检查渲染、TOC、侧边栏图标与顺序、表格可读性、代码块标记效果（highlight/diff/tabs）。
+- `npm run dev` 后访问 `http://localhost:3000/<路径>`：检查渲染、TOC、侧边栏图标与顺序、表格可读性、代码块标记效果（highlight/diff/tabs）。
 - 新增页面/修改 meta.json 后确认路由正确、页面树无重复 URL、`index.mdx` 仍在 `pages` 里。
-- 检查 `/llms.txt` 或 `/docs/<路径>.md` 中关键配置信息是否完整。
+- 检查 `/llms.txt` 或 `/llms.mdx/<路径>/content.md` 中关键配置信息是否完整。
 - 改动涉及 TS/import 时跑 `npm run types:check` 确认无类型错误。
