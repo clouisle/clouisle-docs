@@ -40,6 +40,6 @@ kubectl -n clouisle scale deployment api --replicas=3
 `beat` always stays at one replica. With `ReadWriteOnce` local upload volumes, keep the API at a single replica; production with multiple replicas should configure a shared volume or object storage.
 
 <figure>
-  <img src="/images/kubernetes-resources.svg" alt="Kubernetes resources and Ingress" />
+  <img src="https://rustfs-endpoint.yhnotes.com/content/kubernetes-resources.svg" alt="Kubernetes resources and Ingress" />
   <figcaption>Kubernetes resources and Ingress</figcaption>
 </figure>

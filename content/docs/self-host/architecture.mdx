@@ -24,7 +24,7 @@ Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 
 外部反向代理或 Ingress 负责路由：`/api/*` 到 `api:8000`，其余 `/` 到 `frontend:3000`。前端镜像不包含 Nginx；`deploy/nginx/default.conf` 只是可选的外部示例。
 
 <figure>
-  <img src="/images/self-host-architecture.svg" alt="Clouisle 部署架构" />
+  <img src="https://rustfs-endpoint.yhnotes.com/content/self-host-architecture.svg" alt="Clouisle 部署架构" />
   <figcaption>Clouisle 部署架构</figcaption>
 </figure>
 

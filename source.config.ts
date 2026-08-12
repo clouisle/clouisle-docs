@@ -52,8 +52,11 @@ function rehypeImageZoom() {
         (n.type === 'mdxJsxTextElement' || n.type === 'mdxJsxFlowElement') &&
         n.name === 'img'
       ) {
-        n.name = 'ImageZoom';
         const src = n.attributes?.find((a) => a.name === 'src')?.value;
+        // 外部 URL 图片无法从本地读取尺寸，保持原生 <img>（不缩放、不受 next/image 宽高限制）
+        if (!(typeof src === 'string' && /^https?:\/\//.test(src))) {
+          n.name = 'ImageZoom';
+        }
         if (typeof src === 'string' && src.startsWith('/')) {
           try {
             const buf = readFileSync(join(projectRoot, 'public', src));
