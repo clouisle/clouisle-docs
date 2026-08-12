@@ -47,7 +47,8 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   // static assets & system routes: skip i18n and markdown rewrites
   if (
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api') ||
+    pathname === '/api/search' ||
+    pathname.startsWith('/api/search/') ||
     pathname.startsWith('/og') ||
     pathname.startsWith('/llms') ||
     pathname === '/icon.svg' ||

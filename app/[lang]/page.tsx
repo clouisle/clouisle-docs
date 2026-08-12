@@ -3,7 +3,6 @@ import { source } from '@/lib/source';
 import { getMDXComponents } from '@/components/mdx';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { baseOptions } from '@/lib/layout.shared';
 import { i18n } from '@/lib/i18n';
 import type { LinkItemType } from 'fumadocs-ui/layouts/shared';
@@ -46,7 +45,7 @@ export default async function Page(props: PageProps<'/[lang]'>) {
     <HomeLayout {...baseOptions()} links={navLinks(params.lang)}>
       <div className="mx-auto flex w-full max-w-(--fd-layout-width) flex-1 flex-col px-4 py-10 sm:py-14">
         <div className="prose max-w-none">
-          <MDX components={getMDXComponents({ a: createRelativeLink(source, page) })} />
+          <MDX components={getMDXComponents(page)} />
         </div>
       </div>
     </HomeLayout>
