@@ -25,12 +25,12 @@ import {
 <div className="not-prose">
   <section className="mt-6">
     <div className="grid gap-4 lg:grid-cols-[1.45fr_0.85fr]">
-      <div className="relative overflow-hidden rounded-3xl border border-[#2091B2]/20 bg-[linear-gradient(135deg,#e8f6f8_0%,#f5fbfc_46%,#f6f4ed_100%)] px-6 py-9 sm:px-10 sm:py-12 lg:row-span-2">
-        <div className="pointer-events-none absolute -right-16 -top-20 size-64 rounded-full border-[18px] border-[#2091B2]/10" />
-        <div className="pointer-events-none absolute -bottom-24 right-20 size-56 rounded-full border-[12px] border-[#d2a84a]/15" />
+      <div className="relative overflow-hidden rounded-3xl border border-[#2091B2]/20 bg-[linear-gradient(135deg,#e8f6f8_0%,#f5fbfc_46%,#f6f4ed_100%)] px-6 py-9 sm:px-10 sm:py-12 lg:row-span-2 dark:border-[#2091B2]/30 dark:bg-[linear-gradient(135deg,#0e2833_0%,#12303c_48%,#1d2f28_100%)]">
+        <div className="pointer-events-none absolute -right-16 -top-20 size-64 rounded-full border-[18px] border-[#2091B2]/10 dark:border-[#2091B2]/20" />
+        <div className="pointer-events-none absolute -bottom-24 right-20 size-56 rounded-full border-[12px] border-[#d2a84a]/15 dark:border-[#d2a84a]/20" />
         <div className="relative flex h-full flex-col justify-between">
           <div>
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#2091B2]/25 bg-fd-background/70 px-3 py-1 text-xs font-medium text-[#146b83]">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#2091B2]/25 bg-fd-background/70 px-3 py-1 text-xs font-medium text-[#146b83] dark:border-[#2091B2]/40 dark:bg-fd-background/60 dark:text-[#7ed6e5]">
               <span className="size-1.5 rounded-full bg-[#2091B2]" />
               企业级 AI 应用平台
             </div>
@@ -42,7 +42,7 @@ import {
               开始使用
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
             </a>
-            <a href="/api/get-started" className="inline-flex items-center gap-2 rounded-lg border border-fd-border bg-fd-background/80 px-4 py-2.5 text-sm font-semibold text-fd-foreground transition hover:border-[#2091B2] hover:text-[#146b83]">
+            <a href="/api/get-started" className="inline-flex items-center gap-2 rounded-lg border border-fd-border bg-fd-background/80 px-4 py-2.5 text-sm font-semibold text-fd-foreground transition hover:border-[#2091B2] hover:text-[#146b83] dark:hover:text-[#7ed6e5]">
               调用 API
               <CodeXml className="size-4" aria-hidden="true" />
             </a>
@@ -82,19 +82,19 @@ import {
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#2091B2]">Platform map</p>
         <h2 className="mt-2 text-2xl font-semibold tracking-tight text-fd-foreground">一套平台，五个关键组成</h2>
       </div>
-      <a href="/usage/concepts" className="inline-flex items-center gap-1 text-sm font-semibold text-[#146b83] hover:underline">先理解核心概念 <ArrowRight className="size-4" aria-hidden="true" /></a>
+      <a href="/usage/concepts" className="inline-flex items-center gap-1 text-sm font-semibold text-[#146b83] dark:text-[#7ed6e5] hover:underline">先理解核心概念 <ArrowRight className="size-4" aria-hidden="true" /></a>
     </div>
     <div className="mt-8 grid gap-x-8 gap-y-7 sm:grid-cols-2 lg:grid-cols-5">
-      <a href="/usage/concepts/agent" className="group"><Bot className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83]">Agent</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">用提示词、记忆、知识和工具完成任务。</p></a>
-      <a href="/usage/concepts/workflow" className="group"><Workflow className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83]">工作流</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">把输入、判断、执行和输出连接成流程。</p></a>
-      <a href="/usage/concepts/knowledge-base" className="group"><Database className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83]">知识库</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">导入文档，建立可检索的团队知识。</p></a>
-      <a href="/usage/concepts/model" className="group"><Network className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83]">模型</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">按能力和配额管理模型供应商。</p></a>
-      <a href="/usage/concepts/security" className="group"><ShieldCheck className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83]">安全治理</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">以团队、角色、权限和审计保护应用。</p></a>
+      <a href="/usage/concepts/agent" className="group"><Bot className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">Agent</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">用提示词、记忆、知识和工具完成任务。</p></a>
+      <a href="/usage/concepts/workflow" className="group"><Workflow className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">工作流</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">把输入、判断、执行和输出连接成流程。</p></a>
+      <a href="/usage/concepts/knowledge-base" className="group"><Database className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">知识库</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">导入文档，建立可检索的团队知识。</p></a>
+      <a href="/usage/concepts/model" className="group"><Network className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">模型</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">按能力和配额管理模型供应商。</p></a>
+      <a href="/usage/concepts/security" className="group"><ShieldCheck className="size-5 text-[#2091B2]" aria-hidden="true" /><h3 className="mt-3 font-semibold group-hover:text-[#146b83] dark:group-hover:text-[#7ed6e5]">安全治理</h3><p className="mt-1 text-sm leading-6 text-fd-muted-foreground">以团队、角色、权限和审计保护应用。</p></a>
     </div>
   </section>
 
   <section className="mt-14 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-    <div className="rounded-2xl bg-[#102d39] p-7 text-[#ecf7f8] sm:p-9">
+    <div className="rounded-2xl bg-[#102d39] p-7 text-[#ecf7f8] sm:p-9 dark:border dark:border-white/10">
       <div className="flex items-center gap-3"><BookOpen className="size-5 text-[#7ed6e5]" aria-hidden="true" /><p className="text-sm font-semibold text-[#b8e8ee]">推荐阅读顺序</p></div>
       <h2 className="mt-5 text-2xl font-semibold tracking-tight">从一个应用开始，逐步掌握平台</h2>
       <ol className="mt-7 grid gap-5 sm:grid-cols-3">
@@ -107,15 +107,15 @@ import {
       <div className="flex items-center gap-3"><Settings2 className="size-5 text-[#2091B2]" aria-hidden="true" /><p className="text-sm font-semibold text-fd-foreground">文档导航</p></div>
       <p className="mt-4 text-sm leading-6 text-fd-muted-foreground">需要字段默认值、错误码或请求格式时，直接进入参考和 API 文档。</p>
       <div className="mt-6 grid gap-3 text-sm font-medium">
-        <a href="/reference" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83]">配置参考 <ArrowRight className="size-4" aria-hidden="true" /></a>
-        <a href="/api" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83]">API 参考 <ArrowRight className="size-4" aria-hidden="true" /></a>
-        <a href="/self-host" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83]">部署文档 <ArrowRight className="size-4" aria-hidden="true" /></a>
+        <a href="/reference" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">配置参考 <ArrowRight className="size-4" aria-hidden="true" /></a>
+        <a href="/api" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">API 参考 <ArrowRight className="size-4" aria-hidden="true" /></a>
+        <a href="/self-host" className="flex items-center justify-between rounded-lg bg-fd-muted/50 px-3 py-2.5 hover:bg-[#2091B2]/10 hover:text-[#146b83] dark:hover:text-[#7ed6e5]">部署文档 <ArrowRight className="size-4" aria-hidden="true" /></a>
       </div>
     </div>
   </section>
 
   <section className="mt-14 flex flex-col gap-4 border-t border-fd-border pt-8 sm:flex-row sm:items-center sm:justify-between">
     <div><p className="font-semibold text-fd-foreground">参与 Clouisle</p><p className="mt-1 text-sm text-fd-muted-foreground">阅读源码、报告问题，或了解产品与社区动态。</p></div>
-    <div className="flex flex-wrap gap-4 text-sm font-semibold"><a href="https://github.com/clouisle/Clouisle" className="inline-flex items-center gap-1 text-[#146b83] hover:underline"><Star className="size-4" aria-hidden="true" />GitHub</a><a href="https://clouisle.asia" className="inline-flex items-center gap-1 text-[#146b83] hover:underline"><Globe className="size-4" aria-hidden="true" />官方网站</a></div>
+    <div className="flex flex-wrap gap-4 text-sm font-semibold"><a href="https://github.com/clouisle/Clouisle" className="inline-flex items-center gap-1 text-[#146b83] dark:text-[#7ed6e5] hover:underline"><Star className="size-4" aria-hidden="true" />GitHub</a><a href="https://clouisle.asia" className="inline-flex items-center gap-1 text-[#146b83] dark:text-[#7ed6e5] hover:underline"><Globe className="size-4" aria-hidden="true" />官方网站</a></div>
   </section>
 </div>
