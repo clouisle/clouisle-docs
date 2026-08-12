@@ -1,0 +1,17 @@
+{
+  "title": "Reference",
+  "root": true,
+  "description": "Feature configuration and parameter reference",
+  "icon": "BookText",
+  "pages": [
+    "index",
+    "agent-config",
+    "workflow-nodes",
+    "knowledge-settings",
+    "model-providers",
+    "site-settings",
+    "api-keys",
+    "permissions",
+    "statuses-errors"
+  ]
+}

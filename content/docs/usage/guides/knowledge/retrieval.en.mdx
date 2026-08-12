@@ -1,0 +1,33 @@
+---
+title: Retrieval and Quality Tuning
+description: Compare vector, full-text, hybrid, and rerank results in the retrieval lab
+icon: SearchCheck
+---
+
+**Hit Testing** (retrieval lab) compares retrieval results without directly modifying the production configuration. It shows stage information for recall, fusion, rerank, and final ranking.
+
+## Running a Query
+
+1. Open the knowledge base details and select **Hit Testing**.
+2. Enter a query of `1-1000` characters.
+3. Select the retrieval method: vector, full-text, or hybrid.
+4. Set Top K (`1-20`, default `5`), dense threshold (`0-1`, default `0`), weights, and `rrf_k` (`1-1000`, default `60`).
+5. Override rerank and the candidate pool size (`1-100`) as needed.
+
+<Callout type="info" title="Image needed: retrieval lab results">
+  File: `/images/retrieval-lab-results.png`. Screenshot content: a query's result list and the right-side detail panel in the retrieval lab, with vector/full-text/hybrid/rerank scores, stage timings, and diagnostics highlighted. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Retrieval lab results".
+</Callout>
+
+## A/B Comparison
+
+A/B comparison accepts up to `10` configurations, and each configuration ID must be unique. Results preserve the success or failure status of each side; a failure on one side does not hide the other side's successful results.
+
+## Reading Diagnostics
+
+Diagnostics may indicate that the knowledge base is not enabled, an embedding model is missing, a timeout occurred, or processing failed. Stage timings are split into `recall`, `rerank`, `context`, and `total`. Hybrid scores use weighted reciprocal rank fusion: `Σ weight × 1/(rrf_k + rank)`.
+
+## Applying Presets
+
+After saving a local preset, select **Apply to Production**. Before applying, confirm the embedding model, index dimensions, and weights; at least one hybrid retrieval weight must be greater than `0`.
+
+Common failures and recovery steps are described in the [Knowledge Base settings reference](/reference/knowledge-settings).

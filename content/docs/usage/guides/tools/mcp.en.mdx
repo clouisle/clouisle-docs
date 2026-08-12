@@ -1,0 +1,35 @@
+---
+title: Connect MCP Servers
+description: Connect a Model Context Protocol Server over stdio, SSE, or HTTP
+icon: Plug
+---
+
+MCP tools are configured in **Capabilities** > **Tools** > **Create Tool** > **MCP Server**. Before saving, use **Fetch Tool List** to check whether the server is reachable and which tools it exposes.
+
+## Transports
+
+| Transport | Required connection fields | Use case |
+| --- | --- | --- |
+| `stdio` | `command`, `args`, `env` | Talk to a local command or container process |
+| `sse` | `url`, optional `headers` | Connect to an SSE MCP endpoint |
+| `http` | `url`, optional `headers` | Connect to an HTTP MCP endpoint |
+
+1. Fill in the tool name and description.
+2. Select the transport type and fill in the connection info.
+3. Select **Fetch Tool List** and confirm the tool names, descriptions, and JSON Schema parameters.
+4. Save and run a test in the tool list.
+
+<Callout type="info" title="Image needed: MCP server configuration">
+  File: `/images/mcp-tool-dialog.png`. Screenshot content: the MCP Server dialog, showing the stdio/SSE/HTTP transport switcher, connection fields, Fetch Tool List, and the returned tool list. Crop the screenshot to the relevant area and outline the key actions with the theme color. The future `alt` and caption for this image will both use "MCP server configuration".
+</Callout>
+
+## Security Boundaries
+
+- Do not write private Tokens into public documents or share them with teams that do not need them.
+- Use HTTPS and minimal headers for remote MCP endpoints.
+- Restrict the source of `stdio` commands and avoid building commands from untrusted input.
+- MCP call timeouts default to `60` seconds; failures are recorded in the Agent or Workflow run trace.
+
+## Common Errors
+
+`Fetch tool list failed` usually means the command does not exist, the process exited, the URL is unreachable, the protocol type does not match, or the headers are invalid. Confirm the connection error in the server logs first, then reload the tool in Clouisle.

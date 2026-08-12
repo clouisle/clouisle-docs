@@ -1,0 +1,32 @@
+---
+title: Permissions & Roles Reference
+description: Look up resource permission codes, team roles, and scope check rules
+icon: ShieldCheck
+---
+
+Permissions are checked uniformly by the backend. Hidden frontend menus are a UX layer only; the API still returns permission errors.
+
+## Common Permissions
+
+| Resource | Common permissions |
+| --- | --- |
+| Agent | `agent:read`, `agent:create`, `agent:update`, `agent:publish`, `agent:chat` |
+| Workflow | `workflow:read`, `workflow:create`, `workflow:update`, `workflow:publish`, `workflow:run` |
+| Knowledge Base | `kb:read`, `kb:create`, `kb:update`, `kb:delete` |
+| Tool | `tool:read`, `tool:create`, `tool:update`, `tool:execute` |
+| API Key | `apikey:read` |
+| Administration | `admin:dashboard:access`, `admin:model:*`, `admin:settings:*` |
+| Audit | `audit:read` |
+
+## Check Order
+
+Super administrators pass directly. Administration permissions use global roles; regular resource permissions additionally check the team/resource scope role. Requests fail when the resource does not belong to the current team, the user is not a member, the user status is invalid, or the API Key does not list the target resource.
+
+## Role Limits
+
+System roles and system permissions cannot be deleted; the default team, owners, and super administrators have additional protection. Operations such as transferring ownership, removing an owner, or modifying system permissions are explicitly rejected.
+
+
+<Callout type="info" title="Image needed: Permission-filtered admin navigation">
+  File: `/images/permission-guarded-navigation.png`. Screenshot content: a comparison of workspace sidebars seen by users with different permissions, highlighting the hidden admin items; the screenshot must not show real user data. Crop the screenshot to the relevant areas and outline key actions with the theme color. Future image `alt` and caption will both use "Permission-filtered admin navigation".
+</Callout>

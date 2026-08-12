@@ -1,0 +1,34 @@
+---
+title: Monitoring and Logs
+description: Observe service health, task queues, runtime metrics, usage, and audit events
+icon: MonitorCog
+---
+
+Operations monitoring is divided into three layers: infrastructure status, product runtime status, and security audit.
+
+## Services and Queues
+
+Continuously check `frontend`, `api`, `worker`, `sandbox-worker`, `beat`, PostgreSQL, Redis, and Qdrant. Pay special attention to API 5xx, database connections, Redis queue backlog, Knowledge Base processing failures, Sandbox timeouts/disk limits, and whether Beat runs repeatedly.
+
+```bash
+docker compose ps
+docker compose logs -f api worker sandbox-worker beat frontend
+```
+
+Kubernetes uses commands such as `kubectl get pods` and `kubectl logs -f deployment/api`.
+
+## Product Metrics
+
+The workspace dashboard and Agent/Workflow monitoring pages provide conversation counts, message counts, Tokens, response time, tool calls, Workflow run counts, success rate, failure counts, and average duration. Filter by team and resource permissions; different users may see different data scopes.
+
+<Callout type="info" title="Image needed: Clouisle observability dashboard">
+  File: `/images/observability-dashboard.png`. Screenshot content: the admin panel observability page showing API/task status, conversation and Workflow metrics, failure trends, and time-range filtering. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "Clouisle observability dashboard".
+</Callout>
+
+## Audit and Alerts
+
+The audit log records the operator, resource, action, time, and before/after snapshots. The notification system can send in-app or external notifications for document processing failures, Workflow failures, Agent publishing, quota near/over limits, abnormal logins, and account locks.
+
+## Log Security
+
+Logs may contain URLs, model errors, user input summaries, tool parameters, and resource IDs. In production, never expose log endpoints unprotected; mask, retain, and archive according to organization policy.

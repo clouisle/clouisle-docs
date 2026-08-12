@@ -1,0 +1,59 @@
+---
+title: Create and Orchestrate an Agent
+description: Configure the model, prompt, variables, Knowledge Base, and tools, then publish the Agent
+icon: Bot
+---
+
+The Agent editor separates core orchestration from final presentation: the main area configures the prompt, variables, Knowledge Base, and capabilities; **Agent Settings** configures the name, model, conversation presentation, and iteration cap.
+
+<Callout type="info">
+  The current team must have an enabled `chat` model authorized. Creating requires `agent:create`; publishing requires `agent:publish`.
+</Callout>
+
+## Create an Agent
+
+1. Navigate to **Apps**, select **Create App** > **Agent**.
+2. Fill in the name. The name can be `1-100` characters; the description up to `500` characters.
+3. On the orchestration page, select **Agent Settings** in the top-right corner, choose the model, and configure the name, icon, opening message, suggested questions, and visibility.
+4. Set visibility to **Private** or **Team**.
+
+<figure>
+  <img src="/images/agent-settings-drawer.png" alt="Agent settings drawer" />
+  <figcaption>Agent settings drawer</figcaption>
+</figure>
+
+## Write the Prompt and Variables
+
+1. In the **Prompt**, specify the role, task, constraints, tool usage conditions, and failure handling.
+2. Type `{` to open the variable selector. `{query}` is the current user message.
+3. In **Variables**, add user input fields. Variable names can be up to `50` characters; you can configure the display name, required, hidden, default value, options, numeric range, or maximum length.
+4. Fill in the variables in the preview on the right and confirm the substitution result.
+
+## Link a Knowledge Base
+
+1. In the **Knowledge Base** area, select **Add**.
+2. Select a Knowledge Base and a `vector`, `fulltext`, or `hybrid` retrieval mode.
+3. Set Top K (`1-100`, default `5`) and the threshold (`0-1`, default `0.3`).
+4. Set the overall RAG mode: **Agentic RAG**, **Naive RAG**, or **Off**.
+
+## Add Tools and Capabilities
+
+In the **Tools** area, select a built-in tool, custom tool, MCP, or Skill. When a tool shows "Configuration needed", go to **Capabilities** first to complete the credentials. When enabling attachments, user input requests, memory, image generation, or video generation, check the corresponding limits and default model in each case.
+
+## Save, Debug, and Publish
+
+1. Select **Save**. Validation errors list the specific fields.
+2. In **Debug & Preview**, send questions that cover both normal and failure paths.
+3. When tools are present, verify tool parameters, failure prompts, and max-iteration termination behavior.
+4. Select **Publish**. After publishing, you can open the **Public Page**, **Embed**, and **Access API**.
+
+<Callout type="info" title="Image needed: Published Agent toolbar">
+  File: `/images/agent-published-toolbar.png`. Screenshot content: the top of the Agent editor, highlighting the published status, public page, embed, settings, and save actions. Crop the screenshot to the relevant area and outline the key actions with the theme color. The future `alt` and caption for this image will both use "Published Agent toolbar".
+</Callout>
+
+## FAQ
+
+- **Empty model list**: The team has no authorized chat model, or the model is disabled.
+- **Tools are not called**: Check the model's function-calling capability, whether the tool is enabled, and whether the prompt defines the calling conditions.
+- **Publish fails**: Confirm you have the publish permission, and that the model, variable references, and capability configuration are valid.
+- **Public page inaccessible**: Confirm the Agent is published; private/team visibility is still affected by sign-in and team access control.

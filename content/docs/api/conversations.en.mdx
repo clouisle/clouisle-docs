@@ -1,0 +1,27 @@
+---
+title: Conversations API
+description: Query, update, delete conversations and manage message versions
+icon: MessagesSquare
+---
+
+User conversation endpoints are mounted under `/api/v1/agents`; administrator conversation endpoints are mounted under `/api/v1/conversations`. Administrator endpoints require the corresponding admin permissions.
+
+## User Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/agents/conversations/my` | Query the current user's conversations |
+| GET | `/api/v1/agents/{agent_id}/conversations` | Query Agent conversations |
+| GET | `/api/v1/agents/conversations/{conversation_id}` | Get a conversation and its messages |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | Update the title |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}` | Delete a conversation |
+
+Titles are `1-200` characters. Not passing a conversation ID on the first chat creates one automatically; pass the ID back afterwards to continue variables and history.
+
+## Message Versions
+
+Messages can have multiple versions; the response contains `version_number`, `is_active`, and parent message/branch relationships. Editing or regenerating creates a branch; switching versions only changes the active version.
+
+## Administrator Endpoints
+
+The admin panel can paginate team/user/Agent conversations, view details, and delete single or batch items. Deletion is permanent; filter by time, team, user, and Agent first.

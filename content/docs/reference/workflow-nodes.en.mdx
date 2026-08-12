@@ -1,0 +1,39 @@
+---
+title: Workflow Nodes Reference
+description: Look up node types, field defaults, runtime limits, and validation rules
+icon: Workflow
+---
+
+Workflow definitions currently use `schema_version: 2`. The following fields come from the backend node configuration schemas and the frontend editor registry.
+
+## Node Fields
+
+| Node | Core fields | Default/Limit |
+| --- | --- | --- |
+| LLM | `model_id`, `prompt`, `temperature`, `max_tokens`, `top_p` | `temperature=0.7`, range `0-2`; `top_p` range `0-1` |
+| Agent | `agent_id`, `message` | Agent must exist and be accessible |
+| Knowledge Base Retrieval | `knowledge_base_id`, `query`, `top_k`, `score_threshold` | Top K default `5`, `1-100`; threshold default `0.3`, `0-1` |
+| Conditional Branch | `expression`, `true_output`, `false_output` | The two outputs default to `true`/`false` |
+| Loop | `array_expression`, `item_variable`, `index_variable`, `max_iterations` | item=`item`, index=`index`, max `100`, `1-1000` |
+| Code Execution | `language`, `code`, `timeout_seconds` | Python/JavaScript; default `30s`, `1-300s` |
+| HTTP Request | `method`, `url`, `headers`, `body`, `timeout_seconds` | GET default; timeout default `30s`, `1-300s` |
+| Tool | `tool_id`, `arguments` | Arguments mapped by expressions |
+| Sub-workflow | `workflow_id`, input/output mapping, timeout, failure policy | Timeout default `300s`; `fail_on_error=true` |
+| Delay | `seconds` | `0-3600` |
+
+## Editor Nodes
+
+The current UI also registers user input, trigger, media generation, iteration container, iteration start/end, loop start/end, template transform, file-to-URL, variable aggregation, variable assignment, parameter extraction, question classification, output, and comment nodes.
+
+## Validation
+
+Pre-publish checks reject nonexistent variable references, empty prompts, unselected models/tools/knowledge bases, missing input sources, missing output nodes, incomplete branches, and incomplete containers. The start node cannot be deleted.
+
+## Data Format
+
+`nodes` and `edges` use the React Flow structure; `viewport` defaults to `{x: 0, y: 0, zoom: 1}`. Version 2 supports native objects and arrays, and nodes can save inferred schemas and output type specifications.
+
+
+<Callout type="info" title="Image needed: Node configuration reference">
+  File: `/images/workflow-node-reference.png`. Screenshot content: the workflow node panel and three representative configuration drawers; the image should annotate model, logic, and transform node fields respectively. Crop the screenshot to the relevant areas and outline key actions with the theme color. Future image `alt` and caption will both use "Node configuration reference".
+</Callout>

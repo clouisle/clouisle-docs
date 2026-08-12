@@ -1,0 +1,21 @@
+---
+title: Model
+description: Understand model registry, capability flags, and team authorization
+icon: Cpu
+---
+
+Models use two-level management: administrators save provider connections and model capabilities in the global model registry; then a team owner or administrator authorizes models to specific teams. Platform users only see models authorized and enabled for the current team.
+
+### Model types
+
+Clouisle supports `chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, and `text_to_video`. Different resources need matching types: Agents use chat models, Knowledge Bases use embedding and optional rerank models, and media nodes use image or video models.
+
+### Credentials and endpoints
+
+API Keys are stored by the backend; reading a model only returns `has_api_key`, never plaintext credentials. Administrators can test the connection before saving; supported OpenAI-compatible endpoints are limited by the site's **model endpoint whitelist**.
+
+### Team quota
+
+Authorization can configure daily/monthly Token and request limits; `null` means unlimited, and `0` is a valid zero limit. The higher the priority value, the earlier same-type models are sorted. Exceeding the quota returns business error `6103`.
+
+Related content: [Manage models](../guides/models/manage-models.mdx), [Model provider reference](/reference/model-providers).

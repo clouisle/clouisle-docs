@@ -1,0 +1,32 @@
+---
+title: Workflow
+description: Understand visual nodes, typed variables, triggers, and the version lifecycle
+icon: Workflow
+---
+
+A Workflow orchestrates deterministic multi-step tasks with a directed node graph. The start node defines inputs, intermediate processing nodes transform data or call capabilities, and the output node defines the final result.
+
+### Two ways to start
+
+- **User input**: generates an interactive run form, suitable for manual initiation.
+- **Trigger**: starts via manual/API, Webhook, or Cron, suitable for integrations and automation.
+
+Each Workflow can have only one start node, and the start node cannot be deleted.
+
+### Typed data flow
+
+The current definition format is `schema_version: 2`. Node outputs keep native objects and arrays and are no longer implicitly converted to JSON strings. Legacy definitions can be opened, but must be re-saved before they can run. Variable references are made with the editor's variable picker; the pre-publish validation checklist reports nonexistent references and type mismatches.
+
+### Nodes and containers
+
+Nodes fall into four categories: model, logic, transformation, and extension. Iteration loops over arrays; loops repeat until a condition is met; both are container nodes whose inner subgraphs have their own start and exit nodes. See the [Workflow node reference](/reference/workflow-nodes) for the full fields.
+
+### Running, debugging, and observability
+
+Drafts can be **debugged**, and published versions can run for real. Execution states include pending, running, succeeded, failed, canceled, timed out, and skipped. The run drawer shows inputs, results, node traces, Tokens, duration, errors, and the matched branch.
+
+### Publishing, versions, and restore
+
+Publishing automatically creates a version snapshot. Restoring an old version first saves the current state, then copies the specified version as the new current version, so version history is never erased. The publish page offers two presentation modes: **Form & Result** or **Result & Details**.
+
+Related content: [Orchestrate a Workflow](../guides/workflow/orchestrate.mdx), [Versioning](../guides/workflow/versioning.mdx), [Workflow API](/api/workflow).

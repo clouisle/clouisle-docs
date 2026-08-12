@@ -1,0 +1,36 @@
+---
+title: Site Settings
+description: Configure branding, registration policy, security, notifications, storage, and compliance entry points
+icon: MonitorCog
+---
+
+Site settings determine the logged-out pages, authentication flow, resource limits, and runtime policies. Only users with the corresponding `admin:settings:*` permissions or super administrator status can see the matching tabs.
+
+## Settings Sections
+
+- **General**: site name, description, URL, icon, default language, authentication page layout, theme mode, and branding display.
+- **Security**: registration toggle, approval, email verification, password policy, sessions, login attempts, CAPTCHA, and TOTP.
+- **Notification channels**: SMTP, DingTalk, WeCom, Feishu, Webhook, Slack.
+- **Storage**: local filesystem or object storage.
+- **SSO**: single sign-on connections.
+
+<Callout type="info" title="Image needed: Site settings navigation">
+  File: `/images/site-settings-navigation.png`. Screenshot content: the complete left navigation of site settings with the General/Security/Notification channels/Storage/SSO tabs, highlighting the pages that require administrator permissions. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Site settings navigation”.
+</Callout>
+
+## Key Defaults
+
+Default public settings for a new site: site name `Clouisle`, centered authentication pages, theme follows system, icon and name displayed, registration allowed, email verification on, CAPTCHA off, SSO off, password login allowed, and knowledge base single-file upload `50MB`.
+
+## When Changes Take Effect
+
+Page settings usually affect the public site and subsequent requests immediately after saving; model endpoints, storage, and deployment environment variables are read by the server, so restart the relevant services according to your deployment after changing them. After saving, verify the login and sign-up pages in an incognito window.
+
+## Security Principles
+
+- Store `SECRET_KEY`, SMTP passwords, SSO client secrets, object storage keys, and model API Keys only as server-side secrets.
+- The allowlist matches against full Origins; an empty allowlist blocks model endpoints.
+- Before enabling SSO-only, confirm at least one connection works and keep an administrator recovery path.
+- Before changing the audit log retention days, confirm the archive path and backup policy.
+
+See the [Site settings reference](/reference/site-settings) for the field-level checklist.

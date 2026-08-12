@@ -1,0 +1,34 @@
+---
+title: SSE Streaming Events
+description: Parse Server-Sent Events from Agent chat and workflow runs
+icon: RadioTower
+---
+
+Clouisle's streaming interfaces return `Content-Type: text/event-stream`. Clients should read each `event:` and `data:` line, handle unknown events, and release resources on `error` or connection close.
+
+## Agent Events
+
+| Event | Description |
+| --- | --- |
+| `message_start` | Returns `conversation_id` and `message_id` |
+| `rag_start` / `rag_context` | Starts retrieval and returns sources |
+| `reasoning_start` / `reasoning_delta` / `reasoning_end` | Reasoning (if the model supports it and it is not hidden) |
+| `content_delta` | Text delta |
+| `tool_call` / `tool_result` | Tool name, arguments, and result |
+| `media_result` | Image/video display payload |
+| `compression_start` / `compression_end` | Context compression details |
+| `output_truncated` | Reached the maximum output Token |
+| `iteration_cap_reached` | Reached the Agent's tool iteration cap |
+| `message_end` | Token usage, elapsed time, and termination status |
+| `error` | Error details |
+
+## Workflow Events
+
+Workflow streams contain status events for run start, node start/output/skipped, run complete, failure, cancel, and timeout. Use the `stream_url` from the initial Webhook response to subscribe; use `from_sequence` to resume reading.
+
+## Client Strategy
+
+- Concatenate `content_delta` in order; do not overwrite earlier fragments.
+- Store reasoning separately from text; do not render hidden content where display is not allowed.
+- Treat `message_end` as normal termination and `error` as failed termination.
+- Configure heartbeats and reconnection for long connections; after reconnecting, use the conversation/run ID instead of creating new resources.

@@ -1,0 +1,31 @@
+---
+title: Import Documents
+description: Upload files or URLs and track parsing, embedding, and indexing status
+icon: Upload
+---
+
+After opening the knowledge base details, select **Upload Documents** to upload local files, or select **Import from URL** to add webpage/YouTube URLs. Current backend document types include `pdf`, `docx`, `doc`, `txt`, `markdown`, `html`, `csv`, `xlsx`, `xls`, `json`, and `url`.
+
+## Uploading and Status
+
+1. Select files; the frontend shows the upload progress.
+2. After a successful upload, the document status is **Pending**.
+3. Select **Start Processing**; **Preview Chunks** first if necessary.
+4. When processing completes, the status becomes **Completed**, and only then does the document participate in retrieval.
+5. Failed documents show an error message; you can select **Reprocess** or retry only the failed segments.
+
+<Callout type="info" title="Image needed: document processing status">
+  File: `/images/knowledge-document-processing.png`. Screenshot content: the knowledge base document list with at least one pending, processing, completed, and failed document, with processing actions highlighted. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Document processing status".
+</Callout>
+
+## Upload Limits
+
+The site's default single-file limit is `50MB`; administrators can adjust it to `1-1024MB` in **Site Settings** > **General**. The backend rejects files larger than the current setting. Do not treat the fixed `100MB` from older guides as the current default.
+
+## Importing from URLs
+
+Enter a full `http://` or `https://` address and an optional document name. Page or YouTube content is fetched server-side and enters the same processing queue. If an external site is unreachable, its content is empty, or parsing fails, check the document error message and the API logs.
+
+<Callout type="warn">
+  Uploading a document and processing it are two separate stages. A document appearing in the list does not mean it has been embedded; only a document with status **Completed** is suitable for binding to an Agent.
+</Callout>

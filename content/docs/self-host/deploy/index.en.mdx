@@ -1,0 +1,21 @@
+---
+title: Deployment methods
+description: Choose the guided installer, Docker Compose, Helm, or a Kubernetes manifest
+icon: Rocket
+---
+
+Clouisle offers the guided installer, manual Docker Compose, Helm, generated single-file Kubernetes manifests, manual Kubernetes templates, and running from source.
+
+<Cards>
+  <Card title="Docker Compose" href="/self-host/deploy/docker-compose">Single-server deployment with API, Worker, database, cache, and vector store.</Card>
+  <Card title="Kubernetes" href="/self-host/deploy/kubernetes">Deploy a cluster with Helm or generated/manual manifests.</Card>
+  <Card title="Run from source" href="/self-host/deploy/source-code">Start the backend, frontend, and dependencies for development and contributors.</Card>
+</Cards>
+
+## Guided installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | bash
+```
+
+The installer offers Docker Compose, Kubernetes Helm, and secure single-file manifest options. The Docker default directory is `/opt/clouisle`; upgrades keep the existing `.env`. The single-file manifest only generates `./clouisle-k8s.yaml` by default and does not run `kubectl apply` automatically.

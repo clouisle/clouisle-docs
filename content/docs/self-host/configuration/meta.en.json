@@ -1,0 +1,8 @@
+{
+  "title": "Configuration",
+  "icon": "SlidersHorizontal",
+  "pages": [
+    "index",
+    "environment-variables"
+  ]
+}

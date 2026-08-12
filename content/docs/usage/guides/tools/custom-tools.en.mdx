@@ -1,0 +1,34 @@
+---
+title: Custom HTTP and Code Tools
+description: Create external API tools or restricted code tools
+icon: CodeXml
+---
+
+Custom tools belong to the current team. Tool names can only contain letters, digits, and underscores, and must start with a letter, for example `lookup_order`.
+
+## HTTP API Tools
+
+1. In **Capabilities** > **Tools**, select **Create Tool** > **HTTP API**.
+2. Set the tool name, display name, description, and parameter definitions.
+3. Configure the HTTP method (default `GET`), URL, headers, query parameters, JSON request body, and response path.
+4. Use `{parameter_name}` placeholders in the URL, headers, query parameters, and body.
+5. The timeout defaults to `30` seconds, range `1-300` seconds.
+6. After saving, select **Run Test** and confirm the result path and error behavior.
+
+## Code Tools
+
+Code tools support Python and JavaScript. Python packages must use exact `package==version`; JavaScript packages must use `package@version`. You can configure the command argv, package source address, artifacts, and resource limits.
+
+Default resource limits: `30` second timeout, `1024MB` disk, `256KB` standard output, `256KB` standard error. Artifact paths must be under `/workspace` and can be marked optional.
+
+<Callout type="info" title="Image needed: Create an HTTP tool">
+  File: `/images/custom-tool-http-dialog.png`. Screenshot content: the HTTP tool configuration dialog, highlighting the parameter definitions, URL placeholders, request body, response path, credentials, and timeout. Crop the screenshot to the relevant area and outline the key actions with the theme color. The future `alt` and caption for this image will both use "Create an HTTP tool".
+</Callout>
+
+## Credentials and Sharing
+
+Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with **Read-only** or **Read & Execute** permission. Built-in tools cannot be deleted or shared; shared tools cannot have their owner's configuration modified by the receiving team.
+
+## Failure Handling
+
+When an HTTP tool test fails, check the URL, TLS, authentication, request body JSON, and response path. When a code tool fails, check the pinned version, standard output cap, disk cap, timeout, and artifact paths.

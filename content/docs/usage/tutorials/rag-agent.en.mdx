@@ -1,0 +1,67 @@
+---
+title: "Tutorial: Build a RAG Agent"
+description: From product documentation import to retrieval tuning, publish a traceable knowledge Q&A Agent
+icon: GraduationCap
+---
+
+This tutorial builds a RAG Agent from a set of product documents, focusing on verifying chunking, hybrid retrieval, reranking, citations, and failure diagnostics.
+
+<Callout type="info" title="Prerequisites">
+  The current team has `embedding` and `chat` models, and optionally a `rerank` model. Prepare a product document in PDF, Markdown, or DOCX format; a single file must not exceed the site's current upload limit (default `50MB`).
+</Callout>
+
+## Final Result
+
+The Agent answers questions from the documents and returns sources; the retrieval lab explains each result's scores across the vector, full-text, hybrid, and rerank stages.
+
+<Callout type="info" title="Image needed: RAG Agent final result">
+  File: `/images/tutorial-rag-agent-final.png`. Screenshot content: the RAG Agent conversation page showing the answer, source documents, and citation details, next to the retrieval lab quality validation results. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “RAG Agent final result”.
+</Callout>
+
+## Step 1: Create a Knowledge Base & Select Models
+
+<Callout type="info">The embedding model determines the index dimensions, so confirm it before processing documents.</Callout>
+
+1. Create a knowledge base and select the current team.
+2. Select the `embedding` model and optionally a `rerank` model.
+3. Use a chunk size of `1000` and an overlap of `100`.
+4. Save.
+
+## Step 2: Import & Process Documents
+
+<Callout type="info">Preview the chunks first to make sure headings, paragraphs, and tables are not cut too finely.</Callout>
+
+1. Select **Upload documents** and upload the product document.
+2. After the document enters **Pending**, select **Preview chunks**.
+3. Check the chunk count, overlap length, and text cleaning results.
+4. Select **Start processing** and wait until the status becomes **Completed**.
+
+<Callout type="info" title="Image needed: Document processing completed">
+  File: `/images/tutorial-rag-document-ready.png`. Screenshot content: the target document in the knowledge base document list shows a completed status, with chunk count, Token count, and embedding progress. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Document processing completed”.
+</Callout>
+
+## Step 3: Run the Retrieval Lab
+
+<Callout type="info">Compare configurations with fixed questions instead of adjusting production parameters by feel.</Callout>
+
+1. Open **Hit testing** and enter a question with a clear answer in the documents.
+2. Run vector, full-text, and hybrid retrieval separately.
+3. Compare result overlap counts, per-stage latency, final scores, and diagnostics.
+4. Save the best-performing local preset.
+5. Before selecting **Apply to production**, confirm at least one hybrid weight is greater than `0`.
+
+## Step 4: Create & Link the Agent
+
+1. Create an Agent and select the `chat` model.
+2. Link the knowledge base you just created and use `hybrid`.
+3. Select **Agentic RAG** or **Naive RAG** as the RAG mode.
+4. Prompt: “answer based only on sources; state uncertainty when no answer can be found”.
+5. Preview and publish.
+
+## Acceptance & Troubleshooting
+
+- Document questions cite the correct documents.
+- Unanswerable questions do not produce unsupported claims.
+- Retrieval lab diagnostics are empty or explainable.
+- Rebuild the index after switching embedding models.
+- If recall fails, check Qdrant, PostgreSQL/pg_search, model credentials, and document status.

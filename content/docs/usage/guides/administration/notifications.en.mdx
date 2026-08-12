@@ -1,0 +1,29 @@
+---
+title: Notifications & External Channels
+description: View notifications, configure delivery channels, and enable automatic event notifications
+icon: BellRing
+---
+
+The notification center aggregates site-wide, team, and personal notifications, with search, unread filtering, and mark-as-read. Automatic notifications are triggered by system events, and administrators can select event types and external channels.
+
+## View Notifications
+
+Navigate to **Notifications** and filter by scope, priority, and type. Notification types include announcements, security, pending, status updates, and general notifications. Document processing, workflow runs, Agent publishing, API Key expiration, quota, and security events can trigger automatic notifications.
+
+## Configure Channels
+
+In **Site settings** > **Notification channels**, select Email, DingTalk, WeCom, Feishu, Slack, or Webhook. Fill in the channel credentials and send a test message; do not put signing secrets in URL query parameters.
+
+<Callout type="info" title="Image needed: Notification channel settings">
+  File: `/images/notification-channel-settings.png`. Screenshot content: the site notification channels page showing channel tabs, enable toggles, Webhook/SMTP configuration, and a test button. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Notification channel settings”.
+</Callout>
+
+## Automatic Notifications
+
+On the **Automatic notifications** page:
+
+1. Select the global external channel.
+2. Enable events grouped by team, user, knowledge base, workflow, Agent, API Key, and security.
+3. After saving, verify in-app and external status with a test event.
+
+External delivery states include pending, sending, sent, and failed; failures record retry counts. Do not rely on external channels alone — confirm important security events in the notification center and audit log as well.

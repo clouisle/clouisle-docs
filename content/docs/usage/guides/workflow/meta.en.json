@@ -1,0 +1,12 @@
+{
+  "title": "Workflow guide",
+  "icon": "Workflow",
+  "pages": [
+    "index",
+    "orchestrate",
+    "nodes",
+    "triggers",
+    "versioning",
+    "debugging"
+  ]
+}

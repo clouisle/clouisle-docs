@@ -1,0 +1,48 @@
+---
+title: Orchestrate a Workflow
+description: Build a runnable, typed flow from the start node to the output node
+icon: Workflow
+---
+
+The workflow editor uses a React Flow canvas. The node panel on the left adds nodes, the central canvas connects the flow, and the drawer on the right configures the selected node.
+
+## Creating and Saving Drafts
+
+1. Navigate to **Apps** > **Create App** > **Workflow**.
+2. In **Workflow Settings**, fill in the name, description, and visibility.
+3. Choose a start node: **User Input** suits forms; **Trigger** suits API, Webhook, or scheduled tasks.
+4. Drag nodes from the node panel onto the canvas, or click **Add Node**.
+5. Drag from a source handle to a target handle to create a connection. The start node cannot be deleted.
+6. Select **Save**. The editor records the last saved time and unsaved state.
+
+<figure>
+  <img src="/images/workflow-editor-canvas.png" alt="Workflow editor canvas" />
+  <figcaption>Workflow editor canvas</figcaption>
+</figure>
+
+## Defining Variables
+
+Start nodes use workflow-level variables. Variable types include text, paragraph, dropdown options, number, boolean, array, object, file, image, multi-file, and multi-image. Each variable can set required, default value, label, and description.
+
+Use the editor selector when referencing variables; do not hand-write names that do not exist. The current definition format `schema_version: 2` supports native object and array passing.
+
+## Configuring Nodes
+
+Configure by task:
+
+- **LLM**: select the model, prompt, temperature (default `0.7`, range `0-2`), `max_tokens`, and `top_p`.
+- **Agent**: call a published Agent and pass a message template.
+- **Knowledge Base Retrieval**: select the knowledge base, query template, Top K (default `5`, range `1-100`), and score threshold (default `0.3`).
+- **Conditional Branch**: configure the expression and true/false outputs.
+- **Code Execution**: select Python/JavaScript; default timeout `30` seconds, range `1-300` seconds.
+- **HTTP Request**: configure GET/POST/PUT/PATCH/DELETE; default timeout `30` seconds, range `1-300` seconds.
+- **Tools**: select a tool and map parameters.
+- **Variable Assignment/Aggregation/Template**: organize upstream values into structures used by downstream nodes.
+
+## Pre-publish Checks
+
+Select **Checklist** and resolve issues such as unselected models, input variables without a source, nodes without inputs, undefined outputs, incomplete conditional branches, missing required tool parameters, and incomplete loop containers. Only debug run and publish after validation passes.
+
+## Exiting and Lost Changes
+
+Before returning to the app list or closing the page, the editor shows a confirmation dialog when there are unsaved changes. Select **Leave Without Saving** to discard the current draft changes.

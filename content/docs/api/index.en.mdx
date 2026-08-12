@@ -1,0 +1,21 @@
+---
+title: API
+description: Integrate Agents, workflows, conversations, and knowledge bases with API Keys
+icon: CodeXml
+---
+
+The Clouisle API base path is `/api/v1`. Requests use JSON, and responses use a unified `code`, `data`, `msg` structure. Authenticated requests pass a `Bearer` JWT or an API Key starting with `clou_` in the `Authorization` request header.
+
+<Cards>
+  <Card title="Get Started" href="/api/get-started">Create an API Key, set the base URL, and send your first request.</Card>
+  <Card title="Agent Chat" href="/api/chat">Send messages, attachments, and variables, and consume streaming responses.</Card>
+  <Card title="Workflow Execution" href="/api/workflow">Run workflows, trigger Webhooks, cancel runs, and subscribe to node events.</Card>
+  <Card title="Conversations" href="/api/conversations">Query, update, delete, and manage message versions.</Card>
+  <Card title="Knowledge Base" href="/api/knowledge">Manage documents, chunks, and retrieval tests.</Card>
+  <Card title="Streaming Events" href="/api/streaming">Parse SSE events from Agents and workflows.</Card>
+  <Card title="Error Handling" href="/api/errors">Recover by HTTP status and business error codes.</Card>
+</Cards>
+
+<Callout type="warn">
+  `/api/v1/admin/*` is a protected endpoint used by the admin panel, not a stable third-party public API. Prefer the resource endpoints listed in this section for integrations, and keep a compatibility strategy for version changes.
+</Callout>

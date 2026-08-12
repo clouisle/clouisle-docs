@@ -1,0 +1,64 @@
+---
+title: "Tutorial: Workflow Automation"
+description: Build a workflow that receives requests, classifies them, calls APIs, and returns results
+icon: GraduationCap
+---
+
+This tutorial builds a “ticket routing” workflow: it receives user input, determines priority with a question classification node, calls a knowledge base and an external HTTP API, and finally outputs the ticket result.
+
+<Callout type="info" title="Prerequisites">
+  The current team has a `chat` model, at least one processed knowledge base, and a callable test HTTP endpoint. To publish the Webhook, create an API Key and have workflow publishing permissions.
+</Callout>
+
+## Final Result
+
+The published workflow has an input variable, classification branches, knowledge base retrieval, an HTTP request, an output node, and run tracing.
+
+<Callout type="info" title="Image needed: Ticket routing workflow final result">
+  File: `/images/tutorial-workflow-final.png`. Screenshot content: a full view of the workflow canvas showing the start, question classification, conditional branch, knowledge base retrieval, HTTP request, and output nodes. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Ticket routing workflow final result”.
+</Callout>
+
+## Step 1: Define the Start Inputs
+
+<Callout type="info">Define the input contract clearly so later nodes get stable types through the variable selector.</Callout>
+
+Create a workflow and select the **User input** start node, then add: `customer_id` (text, required), `message` (paragraph, required), `priority` (dropdown option, optional, default `normal`).
+
+## Step 2: Classify & Branch
+
+<Callout type="info">Classify before side-effecting operations so not all requests go to the same business queue.</Callout>
+
+1. Add a **Question classification** node and define three categories: `billing`, `technical`, `general`.
+2. Add a **Conditional branch** to route high-priority or technical issues to the knowledge base and API branch.
+3. Connect inputs and classification outputs with the variable selector.
+
+<Callout type="info" title="Image needed: Workflow conditional branches">
+  File: `/images/tutorial-workflow-branches.png`. Screenshot content: the question classification and conditional branch node configuration, highlighting the categories, branch connections, and variable references. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Workflow conditional branches”.
+</Callout>
+
+## Step 3: Retrieve & Call the HTTP API
+
+<Callout type="info">Tool and HTTP nodes should only receive necessary parameters; inject sensitive credentials with tool credential injection.</Callout>
+
+1. Add **Knowledge base retrieval** with the query `{message}` and Top K of `5`.
+2. Add an **HTTP request**, select `POST`, and use the test endpoint as the URL.
+3. In the request body, map `customer_id`, the classification result, and the knowledge base summary.
+4. Set a `30` second timeout and test the failure branch.
+
+## Step 4: Define Outputs & Debug
+
+1. Add an **Output** node and map `category`, `ticket_id`, `answer`, and `sources`.
+2. Open the **Checklist** and fix all errors.
+3. Select **Debug run** and test a normal request, an unknown category, an API timeout, and a no-knowledge-base result separately.
+4. In the run drawer, review each node's inputs, outputs, and errors.
+
+## Step 5: Publish the Webhook
+
+1. Open **Workflow settings**, select the Webhook trigger, and save.
+2. Select **Publish**; in the run page presentation options, choose **Form & results**.
+3. In **Access API**, copy the URL.
+4. Send a JSON request with an API Key and use `stream_url` to view SSE execution events.
+
+<Callout type="success" title="Acceptance criteria">
+  Normal requests return a ticket ID; conditional branches run per category; HTTP failures can be located in the tracing; the Webhook only accepts valid Bearer API Keys; run logs show node status, duration, and outputs.
+</Callout>

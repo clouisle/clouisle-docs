@@ -1,0 +1,39 @@
+---
+title: Agent Chat API
+description: Send Agent messages and receive text, sources, tools, and media results
+icon: MessagesSquare
+---
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/agents/{agent_id}/public` | Get public Agent basic info, authentication optional |
+| POST | `/api/v1/agents/{agent_id}/chat` | Non-streaming chat |
+| POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE streaming chat |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/regenerate` | Regenerate |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | Edit a user message and create a branch |
+| GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | Query message versions |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | Switch version |
+
+## Request Body
+
+`message` is required; `conversation_id` can be `null` on the first call; `variables` is for variables defined by the Agent; `images` and `file_urls` are for attachments. Image objects should contain at least a URL; file URL objects require `url`, `filename`, `mime_type`, and `size`.
+
+```json
+{
+  "message": "Please summarize the refund rules based on the materials",
+  "conversation_id": null,
+  "variables": {"customer_type": "enterprise"},
+  "images": [],
+  "file_urls": []
+}
+```
+
+## Non-Streaming Response
+
+A successful response's `data` contains conversation/message identifiers, text, RAG context, tool calls, media results, Token usage, and elapsed time. Non-streaming suits short responses; SSE is recommended for long tasks.
+
+## Access Boundaries
+
+The Agent must be published. The API Key needs the matching permission, and if bound to an Agent, it can only access IDs in the allowlist. The Agent's attachment limits, tool iteration caps, and model quotas still apply.

@@ -1,0 +1,27 @@
+---
+title: Import and Use Skills
+description: Import reusable Skill packages into a team and bind them to apps
+icon: PackageOpen
+---
+
+Skills are reusable instructions, resources, and execution conventions. The platform provides the **Capabilities** > **Skills** page; administrators can also review and manage imported packages in the admin panel.
+
+## Import a Skill Package
+
+1. On the **Capabilities** page, select the **Skills** tab.
+2. Select **Import** and upload or choose a Clouisle package.
+3. Review the package's name, version, description, resources, and dependencies.
+4. After importing, enable the Skill for the current team.
+5. Bind the Skill you need in the Agent's **Tools** selector, or use it in a Workflow node.
+
+<Callout type="info" title="Image needed: Import a Skill package">
+  File: `/images/skill-import-dialog.png`. Screenshot content: the Skills import dialog, showing the package file picker, metadata, version, resource list, and import result. Crop the screenshot to the relevant area and outline the key actions with the theme color. The future `alt` and caption for this image will both use "Import a Skill package".
+</Callout>
+
+## Lifecycle
+
+Importing, enabling, disabling, and deleting are separate operations. Disabling does not delete historical references; before deleting, confirm that no published Agent or Workflow depends on it. Skill versions should be recorded together with the package content, and production changes should be validated in a draft app first.
+
+## Troubleshooting
+
+Import fails when the package format is invalid, resources are missing, dependencies are unsatisfied, or permissions are insufficient. Keep the error message returned by the server and the package version so administrators can diagnose the issue.

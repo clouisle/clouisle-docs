@@ -1,0 +1,30 @@
+---
+title: Workflow Versioning
+description: Publish snapshots, restore historical versions, and handle legacy definitions
+icon: GitBranch
+---
+
+Publishing a workflow automatically saves a version snapshot. A version contains the definition, variables, trigger configuration, and creation information.
+
+## Publishing a Version
+
+1. Save the draft and open the **Checklist**.
+2. Fix all errors; evaluate warnings before publishing.
+3. Select **Publish** and set the run page presentation to **Form and Results** or **Results and Details**.
+4. After publishing, the version number increments and the run entry uses the currently published version.
+
+<Callout type="info" title="Image needed: workflow publish dialog">
+  File: `/images/workflow-publish-dialog.png`. Screenshot content: the workflow publish dialog with the checklist status, Form and Results/Results and Details presentation modes, and the publish button highlighted. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Workflow publish dialog".
+</Callout>
+
+## Viewing and Restoring
+
+View snapshots in **Workflow Settings** > **Version History**. Select a version and click **Restore**; the system first saves the current state, then creates a new current version from the restored one. Restoring does not delete other history records.
+
+## Legacy Workflows
+
+Legacy definitions with `schema_version` less than `2` can be loaded onto the canvas, but the run button is disabled. Re-saving writes the new type system version; this is a hard switch, and legacy definitions are not migrated automatically at runtime.
+
+<Callout type="warn">
+  Record version notes before publishing, and after restoring re-run the input boundary, conditional branches, sub-workflows, and external side-effect nodes.
+</Callout>

@@ -1,0 +1,31 @@
+---
+title: Workflow Nodes
+description: Configure the available nodes in Clouisle workflows by category
+icon: Workflow
+---
+
+The workflow editor currently registers the following nodes. The exact input and output fields of a node are determined by the editor configuration and the [node reference](/reference/workflow-nodes).
+
+| Category | Nodes |
+| --- | --- |
+| Start and Output | User Input, Trigger, Output, Note |
+| Models and Apps | LLM, Agent, Media Generation, Question Classification, Parameter Extraction |
+| Knowledge and Extensions | Knowledge Base Retrieval, Tools, MCP/Custom Capabilities, Sub-workflow |
+| Logic | Conditional Branch, Iteration, Loop and its start/exit nodes |
+| Transformation | Code Execution, Template Transformation, Variable Assignment, Variable Aggregation, File to URL |
+
+## Principles for Choosing Nodes
+
+- Use **LLM** when chat model reasoning is needed; use **Agent** when you need to reuse complete Agent behavior.
+- Use **Knowledge Base Retrieval** when you need to answer based on a knowledge base, then map the results to an LLM or output.
+- Use **Tools** when you need to call existing HTTP/MCP/code capabilities; do not duplicate stored credentials in workflows.
+- Use **Iteration** to process each array item; use **Loop** to repeat until a condition is met.
+- Use **Sub-workflow** to isolate reusable flows, configuring input/output mappings and failure strategies.
+
+## Node-level Failures
+
+Each executed node records inputs, outputs, model, Tokens, duration, retry count, error type, and error message. HTTP, code, MCP, and media nodes should configure an acceptable timeout; avoid unconditional repeated calls to side-effect interfaces that cannot be retried.
+
+<Callout type="info" title="Image needed: workflow node configuration drawer">
+  File: `/images/workflow-node-config-drawer.png`. Screenshot content: the right-side configuration drawer after selecting an LLM or conditional node, with the input variable selector, field validation, and output variables highlighted. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Workflow node configuration drawer".
+</Callout>

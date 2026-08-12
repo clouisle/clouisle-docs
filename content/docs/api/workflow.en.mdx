@@ -1,0 +1,34 @@
+---
+title: Workflow Execution API
+description: Run workflows, trigger Webhooks, cancel runs, and subscribe to execution streams
+icon: Workflow
+---
+
+## Main Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/workflows/{workflow_id}/run` | Run a published workflow |
+| POST | `/api/v1/workflows/{workflow_id}/debug` | Debug with a draft |
+| POST | `/api/v1/workflows/webhook/{webhook_token}` | Trigger asynchronously via Webhook |
+| GET | `/api/v1/workflows/runs/{run_id}/stream` | SSE execution events |
+| POST | `/api/v1/workflows/runs/{run_id}/cancel` | Cancel a run |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | Query the current user's runs |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | View run details |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}/nodes` | View node execution |
+
+## Run Request
+
+```json
+{"inputs":{"query":"Check the order status"}}
+```
+
+`inputs` defaults to an empty object. Webhooks must carry an API Key, and the workflow must be published with Webhook enabled. The initial response contains `run_id`, `status`, and `stream_url`.
+
+## Run Stream
+
+Connect to `stream_url` to get events such as node start, output, skipped, complete, and error. After a disconnect, continue from a known sequence number using `from_sequence`; do not re-run nodes with external side effects to "compensate" for a disconnect.
+
+## Publishing and Scope
+
+The run API Key needs `workflow:run`, and the target workflow must satisfy team and visibility rules. Drafts can only run through the debug endpoint; public embedded pages render results according to the workflow's publishing configuration.

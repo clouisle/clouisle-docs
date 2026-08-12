@@ -1,0 +1,16 @@
+---
+title: Configuration
+description: Configure your deployment by environment variables, secrets, network, retrieval, and sandbox
+icon: SlidersHorizontal
+---
+
+Deployment configuration is split between the root-level source configuration and the `deploy/.env` Compose configuration. Compose uses service names; source development uses `localhost`. See the full field reference in [Environment Variables](./environment-variables.mdx).
+
+<Cards>
+  <Card title="Environment Variables" href="/self-host/configuration/environment-variables">Look up defaults, required relationships, and security properties by purpose.</Card>
+  <Card title="Deployment Architecture" href="/self-host/architecture">Confirm service names, ports, internal URLs, and persistent volumes.</Card>
+</Cards>
+
+<Callout type="error">
+  `SECRET_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, `SANDBOX_ARTIFACT_UPLOAD_API_KEY`, and `INTERNAL_API_TOKEN` must be strong random values or come from a Secret manager; never commit `.env`.
+</Callout>

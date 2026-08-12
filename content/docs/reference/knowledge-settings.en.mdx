@@ -1,0 +1,44 @@
+---
+title: Knowledge Base Settings Reference
+description: Look up chunking, retrieval, hybrid search, rerank, and document processing fields
+icon: Database
+---
+
+Knowledge Base settings affect both document processing and runtime retrieval. After creation, the embedding model and vector dimensions should stay stable.
+
+## Chunking & Rerank
+
+| Field | Type | Default | Limit |
+| --- | --- | --- | --- |
+| `chunk_size` | integer | `1000` | `>=100` characters |
+| `chunk_overlap` | integer | `100` | `>=0` characters |
+| `separator` | string/null | `null` | Custom text separator |
+| `rerank_enabled` | boolean | `true` | Whether rerank is enabled |
+| `rerank_candidate_k` | integer | `10` | `1-100` |
+| `rerank_score_threshold` | number/null | `null` | `0-1` |
+
+## Retrieval
+
+| Field | Type | Default | Limit/Description |
+| --- | --- | --- | --- |
+| `search_mode` | `vector`, `fulltext` or `hybrid` | `null` (Knowledge Base settings); request default `hybrid` | Hybrid fuses vector and full-text search |
+| `top_k` | integer/null | `null` (settings); request default `5` | Request range `1-20`; settings range `1-100` |
+| `score_threshold` | number/null | `null` (settings); request default `0` | `0-1` |
+| `dense_weight` | number/null | `null` (settings); request default `1.0` | `>=0` |
+| `lexical_weight` | number/null | `null` (settings); request default `1.0` | `>=0` |
+| `rrf_k` | integer/null | `null` (settings); request default `60` | `1-1000` |
+
+Hybrid retrieval requires at least one of dense weight or lexical weight to be greater than `0`. Query length is `1-1000` characters; batch comparison supports at most `10` configurations and IDs must be unique.
+
+## Documents & Statuses
+
+Supported formats: PDF, DOC/DOCX, TXT, Markdown, HTML, CSV, XLS/XLSX, JSON, and URL. Document statuses are `pending`, `processing`, `completed`, `error`. The site-wide default single-file upload limit is `50MB` and can be changed within `1-1024MB`.
+
+## Failure Diagnostics
+
+Retrieval responses may include `inactive`, `missing_embedding_model`, `timeout`, `failed` diagnostics as well as `recall`, `rerank`, `context`, `total` stage timings. For production troubleshooting, check in order: document completion status, embedding dimensions, Qdrant, PostgreSQL/pg_search, rerank model credentials, and provider quotas.
+
+
+<Callout type="info" title="Image needed: Knowledge Base settings reference">
+  File: `/images/knowledge-settings-reference.png`. Screenshot content: the Knowledge Base settings drawer, grouped into chunking, rerank, and retrieval; key fields should be outlined. Crop the screenshot to the relevant areas and outline key actions with the theme color. Future image `alt` and caption will both use "Knowledge Base settings reference".
+</Callout>

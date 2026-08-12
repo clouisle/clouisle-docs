@@ -1,0 +1,40 @@
+---
+title: Knowledge Base API
+description: Manage knowledge bases, documents, chunks, and retrieval requests
+icon: Database
+---
+
+Knowledge base resource endpoints have a base path of `/api/v1/knowledge-bases`.
+
+## Resource Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET/POST | `/knowledge-bases` | Paginated query / create a knowledge base |
+| GET/PUT/DELETE | `/knowledge-bases/{kb_id}` | Details / update / delete |
+| GET | `/knowledge-bases/{kb_id}/stats` | Statistics |
+| GET | `/knowledge-bases/{kb_id}/documents` | Document list |
+| POST | `/knowledge-bases/{kb_id}/documents/upload` | Upload a file |
+| POST | `/knowledge-bases/{kb_id}/documents/url` | Import a URL |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process a document |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/preview-chunks` | Preview chunks |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | Reprocess |
+| GET/PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | Query / edit chunks |
+| POST | `/knowledge-bases/{kb_id}/search` | Single retrieval |
+| POST | `/knowledge-bases/{kb_id}/search/batch` | Multi-config comparison |
+
+## Retrieval Request
+
+```json
+{
+  "query": "How do I reset my password?",
+  "search_mode": "hybrid",
+  "top_k": 5,
+  "score_threshold": 0,
+  "dense_weight": 1,
+  "lexical_weight": 1,
+  "rrf_k": 60
+}
+```
+
+Queries are `1-1000` characters; hybrid weights cannot both be `0`. Results contain `chunk_id`, document name, content, final score, and per-stage ranking/scores.

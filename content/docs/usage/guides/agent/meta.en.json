@@ -1,0 +1,11 @@
+{
+  "title": "Agent guide",
+  "icon": "Bot",
+  "pages": [
+    "index",
+    "create-agent",
+    "conversation",
+    "memory",
+    "media"
+  ]
+}

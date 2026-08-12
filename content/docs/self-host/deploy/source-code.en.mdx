@@ -1,0 +1,27 @@
+---
+title: Run from source
+description: Start the backend, frontend, and infrastructure dependencies from source
+icon: CodeXml
+---
+
+Running from source suits contributors and feature development; it is not equivalent to a production deployment. The backend uses Python `3.13`, FastAPI, and Celery; the frontend uses Next.js 16 with Bun.
+
+## Base dependencies
+
+Start PostgreSQL 17 + pg_search, Redis 7, and Qdrant 1.18.3. Copy the root `.env.example` to `.env` and set the database, Redis, Qdrant, backend/frontend URLs, and `NEXT_PUBLIC_API_URL`.
+
+## Backend
+
+In `backend/`, install the dependencies from `pyproject.toml`, initialize the database, then start the FastAPI API and the Celery Worker/Beat. The development service listens on API `8000`; the OpenAPI page is at `/docs`.
+
+## Frontend
+
+In `frontend/`, install the Bun dependencies, set `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`, and run the Next.js development server, default port `3000`.
+
+<Callout type="warn">
+  Source startup commands change as the project develops; follow the root README, `backend/pyproject.toml`, `frontend/package.json`, and current scripts. For production deployments, use released images or Compose/Helm, and do not expose a development server to the public internet.
+</Callout>
+
+<Callout type="info" title="Image needed: source development service topology">
+  File: `/images/source-development-topology.png`. Screenshot content: split terminal showing local development processes for frontend, api, worker/beat, and PostgreSQL/Redis/Qdrant; hide usernames and paths. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "source development service topology".
+</Callout>

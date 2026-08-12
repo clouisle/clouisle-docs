@@ -1,0 +1,30 @@
+---
+title: Tools and Skills
+description: Understand built-in tools, custom tools, MCP, the code sandbox, and skill reuse
+icon: Wrench
+---
+
+Tools let Agents and Workflows perform external actions; Skills organize reusable instructions and resources into installable capabilities. Tools fall into three categories: built-in, custom, and MCP.
+
+### Built-in tools
+
+Built-in capabilities include time, date formatting, calculation, unit conversion, web search, web scraping, document conversion, image/video generation, and `artifact`, `bash`, `edit`, `read`, `write` in the sandbox. Web search requires configuring `TAVILY_API_KEY`.
+
+### Custom tools
+
+- **HTTP API**: configure the method, URL, headers, query parameters, body template, timeout, and response path.
+- **Code tools**: run Python or JavaScript, can install packages pinned to exact versions, and declare artifacts under `/workspace`.
+
+### MCP
+
+MCP servers support `stdio`, `sse`, and `http` transports. You can fetch the server tool list before saving. `stdio` configures the command, arguments, and environment variables; remote transports configure the URL and headers.
+
+### Sandbox boundaries
+
+Code tools time out after `30` seconds by default, and persistent configurations allow `1-600` seconds; the direct execution interface is limited to `1-60` seconds. Default disk is `1024MB`, with `256KB` each for standard output and error. Artifact paths must be under `/workspace`.
+
+### Sharing
+
+Custom tools can be shared with other teams with **read-only** or **read and execute** permission. Built-in tools cannot be deleted or shared.
+
+Related content: [Built-in tools](../guides/tools/built-in.mdx), [Custom tools](../guides/tools/custom-tools.mdx), [MCP](../guides/tools/mcp.mdx).

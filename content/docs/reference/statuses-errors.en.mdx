@@ -1,0 +1,47 @@
+---
+title: Statuses & Errors Reference
+description: Look up resource statuses, run statuses, and error code families
+icon: CircleAlert
+---
+
+The Clouisle API uses a unified response structure for both success and failure:
+
+```json
+{"code": 0, "data": {}, "msg": "success"}
+```
+
+Paginated data lives in `data.items` and includes `total`, `page`, `page_size`.
+
+## Common Resource Statuses
+
+| Resource | Statuses |
+| --- | --- |
+| Agent/Workflow | `draft`, `published` |
+| Knowledge Base | `active`, `processing`, `error`, `archived` |
+| Document | `pending`, `processing`, `completed`, `error` |
+| Workflow run | `pending`, `running`, `completed`, `failed`, `cancelled`, `timeout` |
+| Node execution | `pending`, `running`, `success`, `failed`, `cancelled`, `timeout`, `skipped` |
+| API Key | active, inactive, expired |
+
+## Error Code Families
+
+| Range | Meaning |
+| --- | --- |
+| `1000-1999` | General validation and server errors |
+| `2000-2999` | Authentication, Tokens, and account status |
+| `3000-3999` | Permission, team membership, and administrator requirements |
+| `4000-4999` | User, role, team, and other resources not found |
+| `5000-5499` | Registration, security captcha, TOTP, and rate limits |
+| `6000-6099` | Knowledge Base, documents, and chunks |
+| `6100-6199` | Models, authorizations, quotas, and capabilities |
+| `6200-6299` | Agents, conversations, and messages |
+| `6300-6399` | SSO configuration, authentication, and sessions |
+
+## Recovery Principles
+
+`401`/`2000`-`2002`: refresh the login or replace the API Key; `403`/`3000`: check roles, teams, and resource scopes; `4000`/`6000`: confirm IDs and resource statuses; `5400` or provider quota errors: back off and retry; document/workflow failures: first check resource-level error details, fix the configuration, then reprocess or rerun.
+
+
+<Callout type="info" title="Image needed: API error response">
+  File: `/images/api-error-response.png`. Screenshot content: an API client showing the unified code/data/msg error structure, with code, HTTP status, and actionable hints marked. Crop the screenshot to the relevant areas and outline key actions with the theme color. Future image `alt` and caption will both use "API error response".
+</Callout>

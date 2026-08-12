@@ -1,0 +1,29 @@
+---
+title: Teams and Security
+description: Understand multi-tenant resource boundaries, role permissions, authentication, and audit
+icon: ShieldCheck
+---
+
+Clouisle isolates Agents, Workflows, Knowledge Bases, model authorization, tools, and Skills by team. The current team determines the boundary for querying and creating resources in the platform workspace.
+
+### Team roles
+
+Team roles are owner, administrator, member, and viewer. The owner handles ownership transfer and cannot be removed or leave directly; administrators can manage team resources; finer-grained operations are decided jointly by global role permissions and scoped roles.
+
+### Permissions
+
+Backend permission codes use `resource:action` or `admin:resource:action`. Super administrators bypass permission checks. Non-admin resources can also be authorized through team- or resource-scoped roles. The frontend hides menus based on permissions, but the backend still checks permissions on every request.
+
+### Authentication and account security
+
+The site can combine password sign-in, email verification, administrator approval, click captcha, password policy, password expiration, single session, TOTP, and SSO. SSO supports multiple connections; administrators can disable password sign-in.
+
+### API Keys
+
+API Keys start with `clou_` and are sent via `Authorization: Bearer`. A key can be restricted to Agents, Workflows, expiration, and requests per minute; when resources are unrestricted, it can access all matching resources.
+
+### Audit and notifications
+
+The admin panel records resource operations, actors, and change snapshots, and offers filtering by event, user, team, and time. Notifications can be shown in-app and sent out via email, DingTalk, WeCom, Feishu, Slack, or Webhook.
+
+Related content: [Team management](../guides/administration/teams.mdx), [Roles and permissions](../guides/administration/roles-permissions.mdx), [Sign-in and accounts](../guides/administration/authentication.mdx).

@@ -1,0 +1,16 @@
+---
+title: Admin API Boundaries
+description: Understand the permission boundaries and usage guidance for admin panel endpoints
+icon: ShieldCheck
+---
+
+Admin routes are mounted under `/api/v1/admin` and cover dashboards, observability, audit logs, users, roles, permissions, models, SSO, notifications, teams, memory, Agents, tools, Skills, workflows, and package management.
+
+These endpoints are used by the admin panel and usually require `admin:*` global permissions or super administrator identity; specific resources also run team and scope checks. They are not public APIs for anonymous calls.
+
+## Integration Guidance
+
+- Third-party apps should prefer the Agent, workflow, conversation, and knowledge base resource endpoints.
+- Admin automation must pin the Clouisle version, record required permissions, and check the OpenAPI Schema before upgrading.
+- API Keys should not be granted unnecessary `admin:*` permissions.
+- Audit and user management operations contain sensitive data; use short-lived keys and minimal rate limits.

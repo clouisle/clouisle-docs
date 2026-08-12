@@ -1,0 +1,82 @@
+---
+title: "Tutorial: Build a Customer Service Agent"
+description: Build a customer service Agent in your team that cites a knowledge base and calls web search
+icon: GraduationCap
+---
+
+After completing this tutorial, you will have a customer service Agent that answers product questions, cites internal documentation, queries the web when needed, and shows run sources.
+
+<Callout type="info" title="Prerequisites">
+  You are logged in to Clouisle; the current team has an enabled `chat` model; you have a usable knowledge base, or create one first by following [Create a knowledge base](../guides/knowledge/create-knowledge-base.mdx). Web search requires the server-side `TAVILY_API_KEY` configuration.
+</Callout>
+
+## Final Result
+
+The customer service Agent is in the **Published** state, with a system prompt, one linked knowledge base, the web search tool, and at least one suggested question.
+
+<Callout type="info" title="Image needed: Customer service Agent final result">
+  File: `/images/tutorial-customer-service-final.png`. Screenshot content: the final public conversation page showing the customer service Agent name, internal document citations, web search tool results, and message actions. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Customer service Agent final result”.
+</Callout>
+
+## Step 1: Create the Agent
+
+<Callout type="info">First create the resource shell so later steps can configure knowledge and tools in the same Agent.</Callout>
+
+1. Open **Apps** > **Create app** > **Agent**.
+2. Set the name to `客服助手` and describe the service scope in the description.
+3. Select a `chat` model authorized for the team.
+4. Save in **Agent settings**.
+
+<Callout type="info" title="Image needed: Customer service Agent creation result">
+  File: `/images/tutorial-customer-service-create.png`. Screenshot content: the Agent orchestration page after creation, showing the name, model, and draft status. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Customer service Agent creation result”.
+</Callout>
+
+## Step 2: Write the Prompt
+
+<Callout type="info">State citation priority and escalation rules for uncertainty explicitly to reduce fabrication when the knowledge base has no answer.</Callout>
+
+In **Prompt**, enter:
+
+```text
+你是 Clouisle 产品客服助手。
+优先根据关联知识库回答，并在有来源时给出引用。
+知识库没有足够信息时，明确说明不确定，不要编造版本、配置或价格。
+只有用户要求最新外部信息时才使用网页搜索。
+回复使用简体中文，先给结论，再给步骤。
+```
+
+Save and send a product question in the preview.
+
+## Step 3: Link the Knowledge Base
+
+<Callout type="info">The knowledge base anchors customer service answers to fact sources your enterprise can review.</Callout>
+
+1. On the **Knowledge base** card, select **Add**.
+2. Select the target knowledge base.
+3. Use `hybrid` retrieval with Top K of `5` and a threshold of `0.3`.
+4. Save.
+
+<Callout type="info" title="Image needed: Customer service Agent knowledge base binding">
+  File: `/images/tutorial-customer-service-kb.png`. Screenshot content: the Agent knowledge base card showing the linked knowledge base, hybrid retrieval, Top K, and threshold. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Customer service Agent knowledge base binding”.
+</Callout>
+
+## Step 4: Enable Web Search
+
+<Callout type="info">Use external search only for time-sensitive information beyond the knowledge base, so not every question depends on the live web.</Callout>
+
+1. In **Tools**, select **Add**.
+2. Select the built-in `web_search`.
+3. If **Configuration required** appears, contact an administrator to configure the Tavily API Key.
+4. Save and test a question that needs external information.
+
+## Step 5: Publish & Accept
+
+1. Verify citations with an internal documentation question.
+2. Verify tool calls with a time-sensitive question.
+3. Verify refusal or uncertainty statements with a sensitive question not covered by the knowledge base.
+4. Select **Publish** and open the **Public page**.
+5. In Agent **Logs**, confirm conversations, sources, tool results, and Token usage.
+
+<Callout type="success" title="Acceptance criteria">
+  Internal questions have sources; external questions trigger `web_search` only when needed; tool failures show errors instead of faked success; the Agent public page supports continued multi-turn conversations.
+</Callout>

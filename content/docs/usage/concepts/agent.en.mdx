@@ -1,0 +1,37 @@
+---
+title: Agent
+description: Understand conversation-oriented models, knowledge, tools, memory, and the publish lifecycle
+icon: Bot
+---
+
+An Agent is an AI application for multi-turn conversations. It combines a chat model authorized to a team with system prompts, variables, Knowledge Bases, tools, memory, attachments, and media generation settings.
+
+### Orchestration and runtime
+
+The Agent editor page consists of an orchestration form and a live preview. Prompts support `{{variable_name}}`; user variables support text, paragraphs, dropdown options, numbers, and checkboxes. The system variable `{{query}}` represents the current user input.
+
+An Agent performs up to `1-200` tool iterations per turn, with a default of `5`. When the limit is reached, the turn terminates with `max_iterations_reached` instead of calling tools indefinitely.
+
+### RAG modes
+
+| Mode | Behavior |
+| --- | --- |
+| `off` | No Knowledge Base retrieval |
+| `auto` (Naive RAG) | Automatically retrieves linked Knowledge Bases before each model call |
+| `agentic` (default) | The Agent decides when to retrieve Knowledge Bases |
+
+Each linked Knowledge Base can independently configure its retrieval method, Top K, and threshold. The retrieval method is `vector`, `fulltext`, or `hybrid`.
+
+### Conversations, branching, and compression
+
+A conversation is implicitly created with the first message. Users can edit messages or regenerate replies; the system saves versions and maintains the active branch. Long conversations run a context budget check before model calls and can compress old reasoning, tool results, and historical turns while keeping recent raw turns.
+
+### Memory
+
+With memory enabled, an Agent can retrieve user information across conversations. Each turn injects up to `10` memory entries by default, configurable from `1-50`; automatic extraction is on by default, and the minimum importance defaults to `medium`. Memory differs from conversation context: conversation context belongs to a single conversation, while memory can be used across conversations.
+
+### Publishing and visibility
+
+An Agent has only two states: **Draft** and **Published**. Visibility is **Private** or **Team**. After publishing, the public conversation page, embeddable page, and API are available; publish permission and edit permission are controlled separately.
+
+Related content: [Create an Agent](../guides/agent/create-agent.mdx), [Agent configuration reference](/reference/agent-config), [Chat API](/api/chat).

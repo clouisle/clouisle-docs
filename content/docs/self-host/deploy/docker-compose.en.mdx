@@ -1,0 +1,56 @@
+---
+title: Docker Compose deployment
+description: Start all Clouisle services on a single server
+icon: Container
+---
+
+Docker Compose suits single-server deployments. Requires Docker and Docker Compose v2.
+
+## Guided installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | bash
+```
+
+Select Docker Compose, confirm the install directory and domain, and the installer downloads files, generates strong secrets, validates the Compose file, pulls images, and starts the services.
+
+## Manual installation
+
+```bash
+cd deploy
+cp .env.example .env
+internal_api_token="$(openssl rand -hex 32)"
+sed -i.bak "s/^INTERNAL_API_TOKEN=.*/INTERNAL_API_TOKEN=${internal_api_token}/" .env
+rm .env.bak
+unset internal_api_token
+docker compose pull
+docker compose up -d
+```
+
+macOS BSD `sed` has different arguments from GNU `sed`; on macOS, edit `.env` directly or use the installer to generate the Token.
+
+## Check the services
+
+```bash
+docker compose ps
+docker compose logs -f api
+curl http://localhost:8000/api/v1/health
+```
+
+Configure the external reverse proxy so `/api/*` goes to `api:8000` and `/` goes to `frontend:3000`. The browser entry point defaults to `http://localhost:3000`.
+
+<Callout type="info" title="Image needed: Docker Compose services running">
+  File: `/images/docker-compose-running.png`. Screenshot content: the terminal shows `docker compose ps` with frontend, api, worker, sandbox-worker, beat, db, redis, and qdrant all ready; hide the host and credentials. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "Docker Compose services running".
+</Callout>
+
+## Common operations
+
+```bash
+docker compose logs -f worker
+docker compose restart api
+docker compose up -d --scale worker=4
+docker compose up -d --scale sandbox-worker=2
+docker compose down
+```
+
+`beat` must stay at one replica. `docker compose down -v` deletes data volumes; complete a backup before running it.

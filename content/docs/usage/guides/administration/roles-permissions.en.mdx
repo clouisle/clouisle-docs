@@ -1,0 +1,30 @@
+---
+title: Roles & Permissions
+description: Configure global roles and team-scoped permissions
+icon: ShieldCheck
+---
+
+Clouisle uses both global role permissions and resource-scoped roles. The frontend hides menus based on permissions, and the backend re-validates them in API dependencies; do not treat “cannot see the menu” as a security boundary.
+
+## Permission Codes
+
+Permission codes follow the `resource:action` pattern, for example `agent:read`, `agent:create`, `workflow:run`, `kb:read`, `tool:execute`, `apikey:read`. Administration permissions use the `admin:` prefix, for example `admin:model:read` and `admin:settings:read`.
+
+## Role Operations
+
+1. A super administrator navigates to **Roles** to view system roles or create custom roles.
+2. Select permissions for the role.
+3. Assign the role to users, or assign scoped roles within team/resource scopes.
+4. Log in as the target user to test actual menu and API behavior.
+
+<Callout type="info" title="Image needed: Roles & permissions management">
+  File: `/images/roles-permissions.png`. Screenshot content: the role details page showing the role name, system/custom status, permission list, and save action. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Roles & permissions management”.
+</Callout>
+
+## Protection Rules
+
+System roles and system permissions cannot be deleted or arbitrarily modified. The super administrator, default team owners, and roles in use cannot be deleted. Permission changes affect subsequent requests; issued JWTs should not be treated as permanent permission caches.
+
+## Troubleshooting 403s
+
+Inspect the permission information in the response, the current team, and the user's roles. Confirm which team owns the resource, whether the current account is valid, whether a team administrator or super administrator is required, and whether the API Key is scoped to access the target Agent/workflow.

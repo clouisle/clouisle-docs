@@ -1,0 +1,35 @@
+---
+title: Model Providers Reference
+description: Look up provider identifiers, model types, credentials, and capability fields
+icon: Network
+---
+
+## Provider Identifiers
+
+Current enum values: `openai`, `openai_responses`, `anthropic`, `google`, `azure_openai`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `runway`, `pika`, `luma`, `kling`, `stability`, `midjourney`, `custom`.
+
+## Model Types
+
+`chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, `text_to_video`.
+
+## Model Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string | Required | Display name, `1-100` characters |
+| `provider` | enum | Required | Provider identifier |
+| `model_id` | string | Required | Upstream model ID, `1-100` characters |
+| `model_type` | enum | Required | Model type |
+| `provider_display_name` | string/null | null | Provider name shown to users |
+| `base_url` | string/null | null | Custom API URL, at most `512` |
+| `api_key` | string/null | null | Can be empty for local providers; encrypted server-side |
+| `context_length` | integer/null | null | Must be `>=1` |
+| `max_output_tokens` | integer/null | null | Must be `>=1` |
+| `input_price` / `output_price` | decimal/null | null | Price per million Tokens, non-negative, up to 6 decimal places |
+| `default_params` | object/null | null | Default inference parameters |
+| `capabilities` | object/null | null | Capability flags such as vision, function calling, streaming |
+| `is_enabled` | boolean | true | Whether the model can be authorized/used |
+| `is_default` | boolean | false | Whether it is the default model of this type |
+| `sort_order` | integer | 0 | List sort order |
+
+Connection tests return `success`, `message`, and optional `latency_ms`. When discovering models, credentials are only used for requests and are not saved automatically.

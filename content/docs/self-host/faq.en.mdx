@@ -1,0 +1,49 @@
+---
+title: Deployment FAQ
+description: Quick answers to installation, service, storage, upgrade, and security questions
+icon: CircleAlert
+---
+
+## Installation and services
+
+### Why is the API service named `api` instead of `backend`?
+
+The current Compose, Kubernetes, and routing configuration uses `api`. Change `backend` references in old scripts or old documentation to `api`, for example `docker compose logs -f api`.
+
+### Why does the frontend open but requests fail?
+
+Check whether the reverse proxy forwards `/api/*` to `api:8000`, and confirm that `NEXT_PUBLIC_API_URL` is a base path reachable from the browser.
+
+### Why can Beat only run a single replica?
+
+Beat is the scheduler. Multiple replicas would deliver scheduled tasks repeatedly, causing duplicate processing or duplicate notifications.
+
+## Storage and scaling
+
+### Why do scaled-up APIs need a shared volume?
+
+Local upload storage is mounted on the API. Multiple API replicas must see the same directory, so they need `ReadWriteMany` or object storage; with `ReadWriteOnce`, keep a single replica.
+
+### Why are files or retrieval results still missing after restoring the database?
+
+The database only contains metadata. Original files live in upload storage and vectors live in Qdrant; all three must be restored from a consistent backup.
+
+## Retrieval and tasks
+
+### Why can't I search a document after a successful upload?
+
+Upload and processing are two phases. Wait for the document to enter `completed`, confirm embedding succeeded and Qdrant is available, then check the Knowledge Base associated with the Agent.
+
+### Why does hybrid retrieval return a validation error?
+
+Hybrid retrieval's `dense_weight` and `lexical_weight` cannot both be `0`. The full-text channel also requires PostgreSQL's `pg_search`.
+
+## Security
+
+### Can I commit `.env` to the repository?
+
+No. `.env` contains JWT, database, Redis, Qdrant, model, SSO, and internal gateway secrets. Use a secret manager and least privilege.
+
+### How do I rotate an API Key safely?
+
+Create a new Key, update the callers, observe usage and errors, then disable/delete the old Key. The full Key is shown only once.

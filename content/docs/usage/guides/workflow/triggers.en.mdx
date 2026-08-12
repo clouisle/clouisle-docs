@@ -1,0 +1,48 @@
+---
+title: Triggers and Runs
+description: Start workflows manually, via API, Webhook, and Cron
+icon: Webhook
+---
+
+Workflow trigger methods are configured in **Workflow Settings**. Drafts can be debugged before publishing; formal invocations require the workflow to be published.
+
+## Manual and API Runs
+
+Select **Run** in the editor, fill in the input variables, and start. For API runs, use:
+
+```bash
+curl -X POST "$CLOUISLE_API/api/v1/workflows/<workflow_id>/run" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs":{"query":"检查订单状态"}}'
+```
+
+The `inputs` in the request body defaults to an empty object. The response returns a run ID; use the run query interface to get the status and result.
+
+## Webhook
+
+1. In **Workflow Settings**, select **Webhook**.
+2. After saving, a Webhook Token and URL are generated.
+3. On the **Access API** page, copy the URL and call it with API Key Bearer authentication.
+4. The request JSON directly provides the workflow input fields.
+
+Webhook workflows must be published with the corresponding trigger enabled. The initial response contains the run ID, status, and `stream_url`; connecting to that URL shows node events via SSE.
+
+```bash
+curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"检查订单状态"}'
+```
+
+## Cron
+
+Choose by interval, daily, weekly, monthly, or custom Cron. The custom format is "minute hour day month weekday". Only workflows that are saved and published are executed by the scheduler.
+
+<Callout type="info" title="Image needed: workflow trigger settings">
+  File: `/images/workflow-trigger-settings.png`. Screenshot content: the trigger method area of the workflow settings drawer showing manual, Webhook, scheduled task, and Cron expression fields. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Workflow trigger settings".
+</Callout>
+
+## Status and Cancellation
+
+Run statuses include `pending`, `running`, `completed`, `failed`, `cancelled`, and `timeout`. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted. See the [Workflow API](/api/workflow) for streaming run events.

@@ -1,0 +1,23 @@
+---
+title: Create a Knowledge Base
+description: Build a searchable document collection for a team and choose indexing models
+icon: Database
+---
+
+A knowledge base must belong to a team. The embedding model selected at creation determines the vector dimensions; do not switch embedding models after documents are first processed. If you must switch, rebuild the index.
+
+1. Navigate to **Knowledge Bases**, select **Create Knowledge Base**.
+2. Fill in the name (`1-100` characters) and description (up to `500` characters).
+3. Select the current team.
+4. Select an authorized `embedding` model; optionally select a `rerank` model.
+5. Set the chunk size (default `1000` characters) and overlap (default `100` characters), then save.
+6. Open the knowledge base details and confirm the status is **Enabled**.
+
+<figure>
+  <img src="/images/knowledge-base-create-dialog.png" alt="Create Knowledge Base dialog" />
+  <figcaption>Create Knowledge Base dialog</figcaption>
+</figure>
+
+<Callout type="error">
+  Document processing and retrieval fail when the embedding model does not exist, is not authorized, or its vector dimensions do not match the existing index. First confirm authorization in the [models guide](../models/manage-models.mdx).
+</Callout>

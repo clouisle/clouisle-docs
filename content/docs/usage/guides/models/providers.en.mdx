@@ -1,0 +1,32 @@
+---
+title: Configure Model Providers
+description: Register chat, embedding, rerank, and media models
+icon: Network
+---
+
+Model provider configuration lives under **Models** in the admin panel. Administrators first create global models, then authorize them in team management. Built-in Clouisle provider identifiers include `openai`, `openai_responses`, `anthropic`, `google`, `azure_openai`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `runway`, `pika`, `luma`, `kling`, `stability`, `midjourney`, and `custom`.
+
+## Creating a Model
+
+1. Select **Add Model**.
+2. Select the provider and model type.
+3. Fill in the display name (`1-100` characters) and `model_id` (`1-100` characters).
+4. Fill in `base_url` and the API Key according to the provider; local providers can leave the API Key empty.
+5. Set the context length, max output Tokens, default parameters, and capability flags.
+6. Select **Test Connection** and save after it succeeds.
+
+<Callout type="info" title="Image needed: create model dialog">
+  File: `/images/admin-model-create-dialog.png`. Screenshot content: the model creation form in the admin panel with the provider, model type, model ID, endpoint, credentials, capabilities, and Test Connection button highlighted. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Create model dialog".
+</Callout>
+
+## Model Types and Capabilities
+
+Model types include chat, embedding, rerank, TTS, STT, audio generation, text-to-image, and text-to-video. Capability flags are stored in the `capabilities` JSON, for example vision, function calls, and streaming output. Before enabling tools for an Agent, confirm that the selected chat model supports function calls.
+
+## Endpoint Security
+
+The **Model Endpoint Whitelist** in site settings matches the protocol, hostname, and port exactly by Origin and ignores the path. An empty list blocks all model endpoints. Do not write provider keys into documentation, frontend code, or Git.
+
+## Modifying a Model
+
+Use the edit form and re-test when updating the API Key. The API only reports `has_api_key` and never echoes the key. Treat an updated `model_id` or type as a new model configuration, and re-check authorized teams and knowledge base index compatibility.

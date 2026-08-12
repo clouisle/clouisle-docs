@@ -1,0 +1,13 @@
+{
+  "title": "Platform administration guide",
+  "icon": "Settings",
+  "pages": [
+    "index",
+    "authentication",
+    "teams",
+    "roles-permissions",
+    "sso",
+    "notifications",
+    "site-settings"
+  ]
+}

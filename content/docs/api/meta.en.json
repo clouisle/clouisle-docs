@@ -1,0 +1,17 @@
+{
+  "title": "API",
+  "root": true,
+  "description": "API quick start and endpoint reference",
+  "icon": "CodeXml",
+  "pages": [
+    "index",
+    "get-started",
+    "chat",
+    "workflow",
+    "conversations",
+    "knowledge",
+    "streaming",
+    "errors",
+    "admin"
+  ]
+}

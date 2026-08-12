@@ -1,0 +1,40 @@
+---
+title: Troubleshooting
+description: Locate API, database, queue, Sandbox, model, and retrieval issues by symptom
+icon: CircleAlert
+---
+
+First confirm service status and recent configuration changes, then start troubleshooting from the earliest failing component.
+
+## API Cannot Connect to Database
+
+Check `POSTGRES_SERVER`, `POSTGRES_PORT`, the database password, and PostgreSQL readiness. Compose uses `db`; source development uses `localhost`. Confirm pg_search and `pg_stat_statements` are preloaded, then restart the database before checking extensions.
+
+## Frontend Cannot Access API
+
+Confirm the external proxy routes `/api/*` to `api:8000` and `NEXT_PUBLIC_API_URL` is correct at browser build time. Do not set the API address to an internal host the browser cannot resolve inside the container, and do not use `localhost` as the API address for Sandbox Worker.
+
+## Worker Does Not Process Tasks
+
+Check the Redis connection, password, queue names, and Worker logs. Knowledge Base uses Celery background processing; `beat` must run only one replica. Before cleaning or restarting Workers, confirm no production documents are being processed.
+
+## Sandbox Artifact Upload Fails
+
+Confirm `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`, the API and Sandbox Worker use the same signing configuration, or configure a dedicated `SANDBOX_ARTIFACT_UPLOAD_API_KEY`. Check whether the artifact path is inside `/workspace` and whether the file exceeds the `10MB` default limit.
+
+## Retrieval Fails
+
+1. Document status must be `completed`.
+2. The embedding model must exist, be authorized, and vector dimensions must match.
+3. Qdrant must be reachable.
+4. Hybrid/full-text retrieval requires PostgreSQL and pg_search.
+5. On rerank failure, check rerank model credentials and provider quota.
+6. Read the retrieval lab's diagnostics and timings.
+
+## Model Calls Fail
+
+Check the model's `is_enabled`, team authorization, endpoint allowlist, API Key, context length, provider rate limits, and type capabilities. Error code `6103` means quota exceeded; `6104` means unauthorized.
+
+<Callout type="info" title="Image needed: service logs and retrieval diagnostics">
+  File: `/images/troubleshooting-logs-and-diagnostics.png`. Screenshot content: terminal service logs and retrieval lab diagnostics shown side by side; mark the first failure, error category, and recovery suggestions, and hide sensitive content. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "service logs and retrieval diagnostics".
+</Callout>

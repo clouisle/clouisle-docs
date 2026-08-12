@@ -1,0 +1,64 @@
+---
+title: 15-Minute Quick Start
+description: Sign in to Clouisle, choose a team, and complete your first Agent conversation
+icon: Rocket
+---
+
+After completing this page, you will have opened a published Agent in your team workspace, sent a message, and found the matching conversation record.
+
+<Callout type="info" title="Before you begin">
+  You need an accessible Clouisle site and a valid account. Creating an Agent also requires a `chat` model authorized to your team; menus that regular members cannot see are determined by roles and permissions.
+</Callout>
+
+## Step 1: Sign in and choose a team
+
+1. Open the site root address and enter **Sign in**.
+2. Sign in with a username or email and password; the site may also offer SSO only.
+3. If you see prompts for email verification, TOTP, password expiration, or administrator approval, complete them on the page before continuing.
+4. Select the target team in the team switcher at the top of the workspace. Agents, Workflows, Knowledge Bases, and models are all isolated by the current team.
+
+<figure>
+  <img src="/images/quick-start-team-selection.png" alt="Selecting the current team" />
+  <figcaption>Selecting the current team</figcaption>
+</figure>
+
+## Step 2: Confirm available models
+
+Go to **Models**. Only models authorized by administrators to the current team are shown here; you can filter by provider, model type, and status. You need at least one enabled **chat** model to configure an Agent.
+
+<Callout type="warn">
+  If the list is empty, contact the team owner or an administrator to authorize models for the team in the admin panel. Platform users cannot save provider credentials on this page.
+</Callout>
+
+## Step 3: Open or create an Agent
+
+1. Go to **Apps** and switch to **Agent**.
+2. If you already have a published Agent, open it and select **Conversation**.
+3. If you have the `agent:create` permission, select **Create App** > **Agent**, enter a name, and enter the orchestration page.
+4. In **Agent Settings**, select a model; fill in the prompt and save.
+5. Publishing requires the `agent:publish` permission. After publishing, the public page and API become stable to use.
+
+<figure>
+  <img src="/images/quick-start-agent-editor.png" alt="Agent orchestration and preview" />
+  <figcaption>Agent orchestration and preview</figcaption>
+</figure>
+
+## Step 4: Send your first message
+
+1. Type a question in **Debug & Preview** on the right, or open a full conversation through the Agent's **public page**.
+2. Enter a message and send it. Streaming responses may include reasoning, knowledge sources, tool execution, and media results; how they are displayed is controlled by the Agent settings.
+3. To stop, select the stop button in the input area. Manually stopped turns keep their terminated status.
+4. Open **Logs** in the application sidebar to confirm conversations, messages, models, Tokens, duration, and knowledge sources.
+
+<Callout type="info" title="Image needed: first Agent conversation result">
+  File: `/images/quick-start-chat-result.png`. Screenshot content: the chat page of a published Agent, containing one user message and one completed streaming reply, with the source or Token action bar highlighted. The screenshot must be cropped to the relevant area, with key actions outlined in the theme color. The future image's `alt` and caption both use "First Agent Conversation Result".
+</Callout>
+
+## Acceptance
+
+- The current team is selected.
+- The **Models** page has at least one enabled chat model.
+- The Agent status is **Published**, and it can return messages.
+- The conversation you just had can be found in the Agent **Logs**.
+
+Next: learn to [create and orchestrate an Agent](./guides/agent/create-agent.mdx) or complete the [RAG Agent tutorial](./tutorials/rag-agent.mdx).

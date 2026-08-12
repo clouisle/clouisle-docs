@@ -1,0 +1,35 @@
+---
+title: Backup and Recovery
+description: Back up Clouisle metadata, indexes, queues, and upload assets
+icon: ArchiveRestore
+---
+
+A recoverable Clouisle backup includes at least PostgreSQL, Qdrant, upload storage, and deployment configuration/Secrets. Redis mainly holds queues, caches, and session state; whether to back it up depends on the organization's recovery requirements for unfinished tasks.
+
+## What to Back Up
+
+| Content | Role | Recommendation |
+| --- | --- | --- |
+| PostgreSQL | Users, teams, resources, configuration, audit, document metadata | Daily full backup + continuous archiving |
+| Qdrant | Document vectors | Coordinate with database backups |
+| Upload storage | Raw documents, attachments, media, and sandbox artifacts | Keep at the same point in time as PostgreSQL metadata |
+| `.env`/Kubernetes Secret | Connection and signing configuration | Store encrypted; never commit to the repository |
+| Redis | Celery/cache/session | Decide according to task recovery requirements |
+
+## Recovery Order
+
+1. Restore PostgreSQL and dependent extensions.
+2. Restore Qdrant collections and uploaded files.
+3. Restore Secrets and environment variables; confirm `SECRET_KEY` stays consistent.
+4. Start the API; confirm health and database migrations.
+5. Start Worker, Sandbox Worker, and the single Beat.
+6. Check document status, vector dimensions, Agents, Workflows, and API Keys.
+7. Run one Knowledge Base retrieval and one Agent/Workflow smoke request.
+
+<Callout type="info" title="Image needed: backup and recovery checklist">
+  File: `/images/backup-restore-checklist.png`. Screenshot content: the operations panel or a terminal showing backup files, the database/Qdrant/upload recovery order, and health check results; hide real credentials. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "backup and recovery checklist".
+</Callout>
+
+<Callout type="error">
+  Restoring only PostgreSQL leaves resources missing raw files or vectors; restoring only Qdrant leaves vectors that cannot be linked. Metadata, files, and indexes must be handled at the same recovery point.
+</Callout>

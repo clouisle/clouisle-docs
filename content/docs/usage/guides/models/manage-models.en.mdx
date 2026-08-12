@@ -1,0 +1,34 @@
+---
+title: Authorize and Manage Team Models
+description: Authorize global models to teams and set toggles, priority, and quotas
+icon: Gauge
+---
+
+The team models page shows the models authorized for the current team. It groups models by type and supports filtering by provider, type, enabled status, and name.
+
+## Authorizing Models
+
+1. Navigate to **Teams** and open the target team.
+2. Select **Model Authorization** > **Authorize Models**.
+3. Select one or more global models.
+4. Fill in the daily/monthly Token and request limits; leave them empty for unlimited.
+5. After saving, members see the corresponding models on the **Models** page.
+
+<figure>
+  <img src="/images/team-model-authorization.png" alt="Team model authorization" />
+  <figcaption>Team model authorization</figcaption>
+</figure>
+
+## Limits and Priority
+
+The non-negative integer limits on a model authorization are `daily_token_limit`, `monthly_token_limit`, `daily_request_limit`, and `monthly_request_limit`. Authorizations return the currently used Tokens, request count, and percentage. Priority defaults to `0`; models of the same type are sorted by priority in descending order.
+
+## Enabling, Disabling, and Revoking
+
+- **Disable** keeps the authorization and usage history, but the team can no longer select that model.
+- **Revoke Authorization** removes the association between the team and the model; running requests are handled according to their runtime state.
+- When the quota is reached, requests return "Model quota exceeded" with error code `6103`.
+
+## Connection Testing
+
+The administrator model form provides a connection test whose response contains a success status, a message, and an optional latency in milliseconds. When a test fails, first check the endpoint whitelist, credentials, network access, and model type.

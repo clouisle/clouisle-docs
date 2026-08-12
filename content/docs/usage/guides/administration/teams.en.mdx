@@ -1,0 +1,43 @@
+---
+title: Teams & Members
+description: Create teams, manage member roles, authorize models, and transfer ownership
+icon: UsersRound
+---
+
+Teams are Clouisle's resource isolation boundary. Team member roles are owner, administrator, member, and viewer.
+
+## Create & Switch Teams
+
+1. Navigate to **Teams** > **Create team**.
+2. Fill in the name and the optional description and avatar.
+3. After creating, select it from the team switcher in the workspace.
+4. Confirm the current team when creating new Agents, workflows, and knowledge bases.
+
+<figure>
+  <img src="/images/team-management.png" alt="Team management page" />
+  <figcaption>Team management page</figcaption>
+</figure>
+
+## Add Members & Roles
+
+A team administrator selects **Add member**, searches for a user, and assigns a role. Roles:
+
+| Role | Primary responsibilities |
+| --- | --- |
+| Owner | Full team control, ownership transfer |
+| Administrator | Manage members, model authorization, and team resources |
+| Member | Create and use resources per permissions |
+| Viewer | Read-only access to accessible resources |
+
+Fine-grained operations are still controlled by permission codes. Role changes generate notifications and audit records.
+
+## Model Authorization
+
+In **Model authorization** on the team details page, select global models and set Token/request quotas, enabled status, and priority. See [Manage team models](../models/manage-models.mdx).
+
+## Remove, Leave & Transfer
+
+- Removing a member immediately revokes their access to team resources.
+- An owner cannot be removed, nor can they leave the team directly.
+- Transferring ownership strips the previous owner of owner permissions; confirm the target member before proceeding.
+- The default team cannot be deleted.

@@ -1,0 +1,31 @@
+---
+title: Configure Single Sign-On
+description: Configure OIDC, OAuth2, SAML 2.0, or CAS login connections
+icon: KeyRound
+---
+
+SSO connections are managed by a super administrator in **Site settings** > **SSO**. The fields for each connection depend on the protocol; prepare the identity provider's callback address, client credentials, and certificates/metadata before saving.
+
+## General Flow
+
+1. Enable SSO.
+2. Select the protocol and fill in the provider name, display name, and button text.
+3. Configure the client ID, client secret, Issuer/authorization endpoint, Token endpoint, user info mapping, or SAML metadata.
+4. Set the auto-creation, email matching, and approval policies.
+5. After saving, copy the callback address shown by Clouisle to the identity provider.
+6. In an incognito window, test new users, existing users, and failed callbacks.
+
+<Callout type="info" title="Image needed: SSO connection configuration">
+  File: `/images/sso-connection-form.png`. Screenshot content: the provider list and new connection form on the SSO settings page, highlighting the protocol, callback address, user mapping, and save/test actions. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “SSO connection configuration”.
+</Callout>
+
+## User Lifecycle
+
+- When **Auto-create** is on, the first SSO login can create a user.
+- When **Match by email** is on, the SSO email can link to an existing account.
+- When **Approval required** is on, new accounts remain pending approval.
+- When **Allow password login** is off, the site enters SSO-only mode.
+
+## Common Errors
+
+`SSO_INVALID_CONFIGURATION` (`6304`) means the configuration is missing or malformed; `SSO_AUTHENTICATION_FAILED` (`6303`) means the identity provider rejected the request or callback validation failed; expired sessions return `6301`. Start by checking the Issuer, callback URL, clock, certificates, and email mapping.

@@ -1,0 +1,14 @@
+{
+  "title": "Deployment",
+  "root": true,
+  "description": "Deployment, operations, and environment variables",
+  "icon": "Server",
+  "pages": [
+    "index",
+    "architecture",
+    "deploy",
+    "configuration",
+    "operations",
+    "faq"
+  ]
+}

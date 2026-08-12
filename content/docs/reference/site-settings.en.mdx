@@ -1,0 +1,46 @@
+---
+title: Site Settings Reference
+description: Look up public site, registration, security, theme, notification, and storage fields
+icon: Settings
+---
+
+Public settings are provided by the backend `PublicSiteSettingsResponse`. The following defaults apply when nothing is configured.
+
+## Public & Authentication Settings
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `site_name` | string | `Clouisle` |
+| `site_description` / `site_url` / `site_icon` | string | Empty |
+| `auth_page_layout` | `centered` or `split` | `centered` |
+| `theme_mode` | `system`, `light` or `dark` | `system` |
+| `theme_branding_display` | `full`, `name_only`, `icon_only` or `hidden` | `full` |
+| `allow_registration` | boolean | `true` |
+| `require_approval` | boolean | `false` |
+| `email_verification` | boolean | `true` |
+| `enable_captcha` | boolean | `false` |
+| `sso_enabled` | boolean | `false` |
+| `sso_allow_password_login` | boolean | `true` |
+| `allow_account_deletion` | boolean | `true` |
+| `require_terms_acceptance_on_register` | boolean | `false` |
+
+## Knowledge Base Uploads
+
+`kb_document_max_upload_size_mb` defaults to `50` with a valid range of `1-1024`. The backend upload endpoint reads this value at runtime; exceeding the limit returns a validation error.
+
+## Theme Colors
+
+The theme supports page, card, border, sidebar, top navigation, accent, muted, and chart colors. Colors use hex format, for example `#3b82f6` or `#3b82f680` with transparency.
+
+## Security & Operations Fields
+
+Security settings also include password minimum length, complexity, expiration, and history, session timeout, single session, maximum login attempts, lockout duration, captcha, and TOTP. Storage settings support the local file system and object storage; audit logs support retention days and archive paths.
+
+## Notification Channels
+
+Email uses SMTP host, port, encryption, username, password, sender name, and address; DingTalk, WeCom, Feishu, and Slack support Webhook or enterprise app fields; generic Webhooks support custom headers, body templates, and HMAC secrets.
+
+
+<Callout type="info" title="Image needed: Site settings fields overview">
+  File: `/images/site-settings-reference.png`. Screenshot content: field groups of the site settings general, security, storage, and notification pages; the final material should be split into three images: theme, security, and channels. Crop the screenshots to the relevant areas and outline key actions with the theme color. Future image `alt` and caption will both use "Site settings fields overview".
+</Callout>

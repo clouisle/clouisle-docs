@@ -1,0 +1,43 @@
+---
+title: Workflow Debugging and Monitoring
+description: Use the validation checklist, node traces, and run metrics to locate issues
+icon: Bug
+---
+
+Workflow issues fall into configuration issues, data flow issues, and runtime issues. First check the checklist, then debug run, and finally inspect node traces and service logs.
+
+## Configuration Validation
+
+The **Checklist** reports: unselected models, tools, or knowledge bases, inputs/outputs without a source, nonexistent variable references, incomplete conditional branches, empty code or templates, iterations/loops missing start or processing nodes, and missing output nodes.
+
+## Debug Runs
+
+Select **Debug Run** and fill in the inputs. Debug runs use the draft and do not change the published version. The run drawer's **Details** shows inputs, outputs, and errors; **Trace** shows each node's status, inputs, outputs, Tokens, duration, and retry count.
+
+<Callout type="info" title="Image needed: workflow node execution trace">
+  File: `/images/workflow-debug-trace.png`. Screenshot content: a debug run's trace drawer with succeeded, failed, and skipped nodes highlighted, plus the selected node's inputs, outputs, and error messages. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Workflow node execution trace".
+</Callout>
+
+## Run Status
+
+| Status | Meaning |
+| --- | --- |
+| `pending` | Created, waiting for execution |
+| `running` | Executing |
+| `completed` | All flows completed successfully |
+| `failed` | A node or the runtime failed |
+| `cancelled` | Cancelled by the user |
+| `timeout` | Reached the runtime limit |
+| `skipped` | Skipped by a condition or loop |
+
+## Monitoring Metrics
+
+The workflow **Monitoring** page shows total runs, success rate, average duration, failure count, status distribution, and run trends over `7d` or `30d`. Run logs support filtering by status, time, and full run ID.
+
+## Troubleshooting Order
+
+1. Check whether the input variables exist and have the correct types.
+2. Look at the first failed node, not just the final error.
+3. For LLMs, check model authorization, prompt, and Tokens; for HTTP, check the URL, headers, timeout, and response path; for code, check package versions, resource limits, and artifact paths.
+4. For knowledge bases, check whether documents finished processing, whether embedding dimensions match, and whether the retrieval service is available.
+5. If it is a published app, confirm the published version rather than the draft editor.

@@ -1,0 +1,30 @@
+---
+title: Upgrade Clouisle
+description: Safely update images, migrate data, and roll back on failure
+icon: RefreshCw
+---
+
+Before upgrading, read the target version's CHANGELOG and confirm database migrations, Workflow definitions, model adapters, and deployment manifest changes.
+
+## Compose Upgrade
+
+1. Back up PostgreSQL, Qdrant, upload volumes, and `.env`.
+2. Pull the new images: `docker compose pull`.
+3. Review each service's configuration and image tags.
+4. Run `docker compose up -d` and watch the `api` and Worker logs first.
+5. Check `/api/v1/health`, login, model list, Knowledge Base retrieval, and one published Agent.
+6. Check whether old Workflow definitions need to be re-saved with `schema_version: 2`.
+
+The installer upgrade preserves the existing `.env`, but you still need to review new variables and defaults.
+
+## Kubernetes Upgrade
+
+Run `helm upgrade` with the same release and namespace, or review and apply newly generated manifests. Update the API and migrations first, then Worker/Beat/Frontend; keep Beat at a single replica during production.
+
+<Callout type="info" title="Image needed: upgrade rollout status">
+  File: `/images/upgrade-rollout-status.png`. Screenshot content: service status, API health, and logs during a Docker Compose or Kubernetes upgrade, marking completed database migrations. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "upgrade rollout status".
+</Callout>
+
+## Rollback
+
+Before rolling back images, confirm whether the database migration is reversible. If the migration is not reversible, do not just switch back to the old image; restore a backup in an isolated environment and verify. Workflow versions can be restored separately in the product UI, but this is not equivalent to a service rollback.

@@ -1,0 +1,36 @@
+---
+title: API Quick Start
+description: Create a least-privilege API Key and send your first Agent request
+icon: Rocket
+---
+
+## Prerequisites
+
+You need a deployed Clouisle API URL, a published Agent, and an API Key available to that Agent. API Keys default to `1000` requests per minute; leaving the expiration empty means the key never expires; the full key is shown only once.
+
+## Create an API Key
+
+1. Navigate to **API Keys** > **Create Key**.
+2. Set the name, `chat` scope, optional expiration, and rate limit.
+3. Optionally bind only the target Agent; an empty binding list means access to all published Agents.
+4. Copy the full key immediately after creation and write it to a local environment variable:
+
+```bash
+export CLOUISLE_API_KEY='clou_replace_me'
+export CLOUISLE_API_BASE='https://your-clouisle.example.com/api/v1'
+```
+
+## Send Your First Request
+
+```bash
+curl -N "$CLOUISLE_API_BASE/agents/<agent_id>/chat/stream" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Hello, please introduce your responsibilities","conversation_id":null,"variables":{}}'
+```
+
+The response is `text/event-stream`. Read `message_start` to get the `conversation_id`, then pass that ID back in subsequent messages to maintain context.
+
+## Acceptance
+
+You receive `content_delta` and `message_end`, and `message_end` includes Token usage and elapsed time. If `6202` is returned, the Agent is not published yet; if `3000` is returned, check the API Key scope and resource bindings.

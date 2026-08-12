@@ -1,0 +1,27 @@
+---
+title: Limits & Quotas
+description: Request rate limits and quotas
+icon: Timer
+---
+
+API rate limiting comes from three layers: API Keys, team model authorizations, and external model providers. They are independent of each other; when troubleshooting, first determine which layer rejected the request.
+
+## API Key Rate Limits
+
+When creating an API Key, `rate_limit` defaults to `1000`, in requests per minute; setting it to `0` means unlimited. Reaching the limit usually returns HTTP `429` with business error code `5400`. Clients should back off exponentially and reduce concurrency instead of retrying aggressively.
+
+## Model Quotas
+
+Team model authorizations can set daily/monthly Token and request count limits separately. All four fields are non-negative integers; leaving them empty means unlimited. Responses provide current usage and percentage. Exceeding the model quota returns `6103`; a model not authorized for the team returns `6104`.
+
+## Provider Rate Limits
+
+Even with sufficient API Key and team quota, upstream model providers may still return rate limit or quota errors. Preserve the provider response category and request trace ID, and use exponential backoff with jitter; for streaming requests, do not resubmit messages with tool side effects from the start.
+
+## Recommended Configuration
+
+Production integrations use single-purpose API Keys, bound to the necessary Agents/workflows, with a finite expiration and an explicit per-minute limit. Alert separately on provider quota, team quota, and Clouisle API Key so that not every `429` is attributed to the same component.
+
+<Callout type="warn">
+  `rate_limit=0` means unlimited, not disabled. To block calls immediately, disable the API Key or revoke the team model authorization.
+</Callout>

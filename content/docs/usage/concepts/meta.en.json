@@ -1,0 +1,13 @@
+{
+  "title": "Core concepts",
+  "icon": "Lightbulb",
+  "pages": [
+    "index",
+    "agent",
+    "workflow",
+    "knowledge-base",
+    "model",
+    "tool",
+    "security"
+  ]
+}

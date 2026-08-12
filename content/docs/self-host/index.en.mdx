@@ -1,0 +1,28 @@
+---
+title: Deploy Clouisle
+description: Deploy and operate Clouisle with Docker Compose or Kubernetes
+icon: Server
+---
+
+A Clouisle deployment consists of the frontend, a FastAPI API, Celery Worker, Sandbox Worker, Beat, and PostgreSQL, Redis, and Qdrant. For a single server, prefer the guided installer and Docker Compose; for production clusters, prefer Helm.
+
+<Cards>
+  <Card title="Architecture" href="/self-host/architecture">Understand application services, infrastructure dependencies, request routing, and data volumes.</Card>
+  <Card title="Deploy" href="/self-host/deploy">Choose the guided installer, Docker Compose, Helm, or a Kubernetes manifest.</Card>
+  <Card title="Configuration" href="/self-host/configuration">View environment variables, secrets, ports, internal addresses, and retrieval switches.</Card>
+  <Card title="Operations" href="/self-host/operations">Handle storage, backup, upgrades, monitoring, and troubleshooting.</Card>
+  <Card title="Deployment FAQ" href="/self-host/faq">Quickly locate common issues with services, databases, Workers, and the sandbox.</Card>
+</Cards>
+
+## Support matrix
+
+| Scenario | Recommended approach | Best for |
+| --- | --- | --- |
+| Single-server trial or small-scale production | Docker Compose | One server, external reverse proxy |
+| Scalable production cluster | Helm | Kubernetes, Ingress, shared storage |
+| Controlled review deployment | Generated single-file manifest | Reviewing Secrets and resources before `apply` |
+| Local development | Backend + frontend source code | Contributing code, debugging the product |
+
+<Callout type="error">
+  Production deployments must replace the example `SECRET_KEY`, database passwords, Redis/Qdrant credentials, and the internal Worker gateway Token. Do not expose the API service port directly to the public internet.
+</Callout>

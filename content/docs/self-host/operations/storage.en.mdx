@@ -1,0 +1,30 @@
+---
+title: Storage and Scaling
+description: Plan database, vector, cache, upload, and object storage capacity
+icon: HardDrive
+---
+
+Clouisle's persistent data lives across PostgreSQL, Qdrant, Redis, and upload storage. Backups cannot save only the database.
+
+## Storage Backends
+
+Site settings support **local filesystem** and **object storage**. Local mode fits a single API replica; when the API scales to multiple replicas, a `ReadWriteMany` shared volume is required. Object storage fits multi-replica and cross-node deployments, but you must configure the endpoint, bucket, region, access key, Secret Key, security, and path style.
+
+## Compose Volumes
+
+- `postgres_data`: business, audit, configuration, and metadata.
+- `qdrant_data`: vector collections.
+- `redis_data`: Redis persisted data and task/session state.
+- `uploads_data`: user uploads and sandbox artifacts.
+
+<Callout type="info" title="Image needed: storage settings and deployment volumes">
+  File: `/images/storage-settings-and-volumes.png`. Screenshot content: the site storage settings page and a Compose/Kubernetes persistent volume relationship diagram; hide bucket names, secrets, and real paths in the screenshot. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption both use "storage settings and deployment volumes".
+</Callout>
+
+## Scaling Rules
+
+Worker and Sandbox Worker can scale independently. `beat` must run exactly one replica. Multiple API replicas require shared upload storage or object storage; scale Qdrant and PostgreSQL according to their own high-availability schemes. Before scaling, confirm connection pool, queue concurrency, provider rate limits, and disk I/O.
+
+## Capacity Checks
+
+Monitor the PostgreSQL database, pg_search indexes, Qdrant collections, Redis memory, and the upload directory. Document count growth increases capacity for raw files, chunks, Token statistics, vectors, and full-text indexes simultaneously.

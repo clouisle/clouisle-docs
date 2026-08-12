@@ -1,0 +1,33 @@
+---
+title: API Keys Reference
+description: Look up API Key authentication format, resource scopes, expiration, and rate limits
+icon: KeyRound
+---
+
+API Keys are used for programmatic calls to Agents, workflows, and other protected APIs. The full key is shown only once in the creation response; later listings only show `key_prefix`.
+
+## Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string | Required | `1-100` characters |
+| `scopes` | string[] | `["chat"]` | Permission scopes; subject to actual backend permissions |
+| `rate_limit` | integer | `1000` | Requests per minute; `0` means unlimited |
+| `expires_at` | datetime/null | null | null means never expires |
+| `agent_ids` | UUID[] | `[]` | Empty list allows access to all Agents |
+| `workflow_ids` | UUID[] | `[]` | Empty list allows access to all workflows |
+| `is_active` | boolean | true (after creation) | Disabled keys fail authentication |
+
+## Authentication
+
+Put the full key in:
+
+```http
+Authorization: Bearer clou_your_api_key_here
+```
+
+The server first recognizes the `clou_` prefix, then validates the hash, active status, expiration, and associated user. Both JWT and API Keys use the Bearer format, but an API Key's resource scope is limited by the key itself.
+
+## Lifecycle
+
+Copy the key immediately after creation and store it in a Secret manager. Editing can change the name, scopes, rate limit, expiration, resource scopes, and active status, but a lost full key cannot be recovered. Deletion is irreversible; to rotate, create a new key, migrate callers, then disable the old key.

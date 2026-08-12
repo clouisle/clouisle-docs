@@ -1,0 +1,10 @@
+{
+  "title": "Tutorials",
+  "icon": "GraduationCap",
+  "pages": [
+    "index",
+    "customer-service-bot",
+    "rag-agent",
+    "workflow-automation"
+  ]
+}

@@ -1,0 +1,45 @@
+---
+title: Login & Account Security
+description: Complete sign-up, email verification, password recovery, TOTP, and SSO login
+icon: LockKeyhole
+---
+
+Clouisle's authentication flow may include password, email verification, administrator approval, CAPTCHA, password changes, TOTP, and SSO. Site settings determine which steps are enabled.
+
+## Sign-up & Email Verification
+
+1. Select **Sign up** and fill in the username, email, password, and confirm password.
+2. The password must be at least `6` characters; administrators can raise the minimum length and require uppercase letters, numbers, or special characters.
+3. If the site requires it, check the user agreement and privacy policy.
+4. After submitting, verify your email with the verification code or link in the email.
+5. If administrator approval is enabled, the account enters a pending-approval state and cannot log in until approved.
+
+<Callout type="info" title="Image needed: Sign-up & email verification">
+  File: `/images/registration-verification.png`. Screenshot content: the sign-up page showing site branding, password rules, agreement checkboxes, and the email verification code step. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “Sign-up & email verification”.
+</Callout>
+
+## Login Protection
+
+Login may require a click-through CAPTCHA. The CAPTCHA proof is valid for `60` seconds by default; re-fetch it after a failure or expiration. Repeated failures trigger account lockout and rate limiting.
+
+## Password Recovery & Expiration
+
+Send a reset email from **Forgot password**, enter the verification code, and set a new password. Administrators can configure password history, minimum change interval, expiration period, and forced change on first login. When a password expires or is force-changed, you must complete **Change password** first.
+
+## TOTP Two-Factor Authentication
+
+1. Open **Two-factor authentication** in account settings, or follow the administrator-enforced wizard.
+2. Scan the QR code with an authenticator app, or enter the secret manually.
+3. Enter the 6-digit verification code to confirm.
+4. Download or copy the one-time backup codes; each backup code can only be used once.
+5. Enter TOTP on subsequent logins; use a backup code when your device is unavailable.
+
+<Callout type="info" title="Image needed: TOTP setup wizard">
+  File: `/images/totp-setup-wizard.png`. Screenshot content: the TOTP setup wizard showing the QR code, manual secret, 6-digit verification input, and backup code saving steps. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. Future image `alt` and caption will both use “TOTP setup wizard”.
+</Callout>
+
+## SSO Login
+
+After SSO is enabled, the login page shows the providers configured by the administrator. If password login is also disabled, the username/password form is unavailable. SSO settings determine whether the first SSO login auto-creates users, whether approval is required, and whether existing accounts are matched by email.
+
+Related pages: [SSO configuration](./sso.mdx), [Site security reference](/reference/site-settings).

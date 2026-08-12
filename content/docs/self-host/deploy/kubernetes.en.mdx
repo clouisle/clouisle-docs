@@ -1,0 +1,44 @@
+---
+title: Kubernetes deployment
+description: Run Clouisle in Kubernetes with Helm or a single-file manifest
+icon: Boxes
+---
+
+A Kubernetes deployment requires Kubernetes `1.25+`, a configured `kubectl`, an Ingress Controller, and access to an image registry; the Helm approach requires Helm 3. Scaling API replicas with local upload storage requires a StorageClass that supports `ReadWriteMany`.
+
+## Helm (recommended)
+
+```bash
+helm lint deploy/helm/clouisle \
+  --set-string secrets.values.INTERNAL_API_TOKEN=lint-only-token
+helm upgrade --install clouisle deploy/helm/clouisle \
+  --namespace clouisle --create-namespace \
+  --set-string secrets.values.INTERNAL_API_TOKEN="$(openssl rand -hex 32)"
+```
+
+In production, put `SECRET_KEY`, database, Redis, Qdrant, Sandbox, and internal Tokens into Kubernetes Secrets and use `values-production.yaml`.
+
+## Generate a single-file manifest
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | \
+  CLOUISLE_DEPLOYMENT=k8s CLOUISLE_K8S_MANIFEST="$PWD/clouisle-k8s.yaml" \
+  CLOUISLE_YES=1 bash
+kubectl apply -f ./clouisle-k8s.yaml
+```
+
+The generated file has `0600` permissions and contains Base64-encoded Secrets; the installer neither applies automatically nor modifies the template. Review images, domains, Ingress, storage, and Secrets before applying.
+
+## Scaling and limits
+
+```bash
+kubectl -n clouisle scale deployment worker --replicas=4
+kubectl -n clouisle scale deployment sandbox-worker --replicas=2
+kubectl -n clouisle scale deployment api --replicas=3
+```
+
+`beat` always stays at one replica. With `ReadWriteOnce` local upload volumes, keep the API at a single replica; production with multiple replicas should configure a shared volume or object storage.
+
+<Callout type="info" title="Image needed: Kubernetes resources and Ingress">
+  File: `/images/kubernetes-resources.png`. Screenshot content: relationships among API, Worker, Sandbox Worker, Beat, Frontend, PostgreSQL, Redis, Qdrant, and Ingress resources in the Kubernetes namespace. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "Kubernetes resources and Ingress".
+</Callout>

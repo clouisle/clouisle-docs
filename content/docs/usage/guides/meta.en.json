@@ -1,0 +1,13 @@
+{
+  "title": "Guides",
+  "icon": "Map",
+  "pages": [
+    "index",
+    "agent",
+    "workflow",
+    "knowledge",
+    "models",
+    "tools",
+    "administration"
+  ]
+}

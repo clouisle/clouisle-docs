@@ -1,0 +1,34 @@
+---
+title: Chunking and Document Processing
+description: Preview chunks, process pending documents, and safely apply new chunking strategies
+icon: Split
+---
+
+Chunking determines the granularity of knowledge base recall. Preview first, then process; do not increase the chunk size or overlap directly without validating the results.
+
+## Preview
+
+Select **Preview Chunks** in the document actions, then set the chunk size, overlap, custom separators, and text cleaning. The preview shows the chunk count, character count, Token count, and overlap length without writing to the production index.
+
+## Processing
+
+Select **Quick Process** or **Start Processing** for pending documents. The default chunk size is `1000` characters and the overlap is `100` characters; the chunk size must be at least `100` and the overlap at least `0`. When the background task finishes, embeddings are generated and document statistics are updated.
+
+<Callout type="info" title="Image needed: chunk preview">
+  File: `/images/knowledge-chunk-preview.png`. Screenshot content: the document chunk preview panel with the chunk size, overlap, custom separators, clean text toggle, and chunk result statistics highlighted. Crop the screenshot to the relevant area and outline key actions with the theme color. The future image's `alt` and caption will both use "Chunk preview".
+</Callout>
+
+## Re-chunking
+
+Processed documents require **Re-chunk**. The system deletes the original chunks and their embeddings, then generates new chunks and vectors. While re-chunking, the document cannot be considered retrievable; all manual edits are lost.
+
+## Editing Chunks
+
+Select **Edit Chunks** to modify content, append chunks, or delete chunks. Chunk content cannot be empty. Saving after edits updates the chunk's embedding; if embedding fails, use **Retry This Segment**.
+
+## Handling Failures
+
+- Text extraction failed: check whether the file is corrupted, encrypted, or contains only images.
+- Embedding failed: check the embedding model credentials, quota, and vector dimensions.
+- Full-text retrieval unavailable: check PostgreSQL and `pg_search`.
+- Large batch backlog: check the Worker queue and API logs.

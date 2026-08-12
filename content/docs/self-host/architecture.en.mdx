@@ -1,0 +1,36 @@
+---
+title: Deployment architecture
+description: Understand Clouisle service topology, request routing, dependencies, and persisted data
+icon: Network
+---
+
+Clouisle runs 5 application services using 3 images. `clouisle-backend` provides `api`, `worker`, and `beat`; `clouisle-sandbox-worker` provides `sandbox-worker`; `clouisle-frontend` provides the Next.js frontend.
+
+## Service topology
+
+| Service | Image | Role | Port |
+| --- | --- | --- | --- |
+| `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
+| `api` | clouisle-backend | FastAPI API | `8000` |
+| `worker` | clouisle-backend | Celery `default`, `knowledge`, `workflow` queues | None |
+| `sandbox-worker` | sandbox-worker | Sandbox queue and artifact uploads | None |
+| `beat` | clouisle-backend | Celery Beat scheduler, must run with a single replica | None |
+| `db` | PostgreSQL 17 + pg_search | Business, full-text retrieval, and audit data | `5432` |
+| `redis` | Redis 7 | Queues, cache, sessions | `6379` |
+| `qdrant` | Qdrant 1.18.3 | Vector index | `6333` |
+
+## Request routing
+
+An external reverse proxy or Ingress routes requests: `/api/*` to `api:8000`, everything else under `/` to `frontend:3000`. The frontend image does not include Nginx; `deploy/nginx/default.conf` is only an optional external example.
+
+<Callout type="info" title="Image needed: Clouisle deployment architecture">
+  File: `/images/self-host-architecture.png`. Screenshot content: shows the browser, external reverse proxy, frontend, api, worker, sandbox-worker, beat, and PostgreSQL/Redis/Qdrant request and task relationships. Crop the screenshot to the relevant area and highlight key operations with theme-colored outlines. The future image's `alt` and caption both use "Clouisle deployment architecture".
+</Callout>
+
+## Persisted data
+
+Default Compose volumes: `postgres_data`, `redis_data`, `qdrant_data`, and `uploads_data`. Multiple API replicas using local upload storage require `ReadWriteMany`; with only `ReadWriteOnce`, keep a single API replica, while Worker and Sandbox Worker can still scale independently.
+
+## Internal addresses
+
+Use service names inside containers, not `localhost`: `POSTGRES_SERVER=db`, `REDIS_HOST=redis`, `QDRANT_URL=http://qdrant:6333`, `API_BASE_URL=http://api:8000`. The Sandbox Worker artifact upload address should stay `http://api:8000`.

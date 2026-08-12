@@ -1,0 +1,13 @@
+{
+  "title": "Usage",
+  "root": true,
+  "description": "Quick start, core concepts, and how-to guides",
+  "icon": "Compass",
+  "pages": [
+    "index",
+    "quick-start",
+    "concepts",
+    "guides",
+    "tutorials"
+  ]
+}

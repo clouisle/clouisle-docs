@@ -1,0 +1,29 @@
+---
+title: Knowledge Base
+description: Understand document processing, chunking, and hybrid vector and full-text retrieval
+icon: Database
+---
+
+A Knowledge Base converts documents into chunks that Agents and Workflows can retrieve. The resource belongs to a team; you select an embedding model when creating it, and optionally a rerank model.
+
+### Processing pipeline
+
+After upload or URL import, a document starts in **Pending**. Processing performs text extraction, cleaning, chunking, embedding, and indexing, ending in **Completed** or **Failed**. The document-level states are `pending`, `processing`, `completed`, `error`.
+
+Chunks of a processed document can be viewed, edited, added, and deleted. Re-chunking replaces all existing chunks and vectors, and manual edits are lost.
+
+### Three retrieval methods
+
+| Method | When to use |
+| --- | --- |
+| Vector retrieval | Recalls by semantic similarity |
+| Full-text retrieval | Matches exactly by lexical/BM25 |
+| Hybrid retrieval (default) | Fuses vector and full-text rankings with weighted RRF |
+
+Hybrid retrieval defaults both the dense weight and the lexical weight to `1.0`, with `rrf_k` at `60`. The two weights cannot both be `0`. Rerank can re-score candidate chunks after fusion.
+
+### Retrieval lab
+
+**Hit testing / retrieval lab** runs single-configuration tests or A/B comparisons, showing each result's rank and score at the vector, full-text, fusion, and rerank stages, and can apply local presets to production Knowledge Base settings.
+
+Related content: [Import documents](../guides/knowledge/import-documents.mdx), [Chunking](../guides/knowledge/chunking.mdx), [Knowledge Base settings reference](/reference/knowledge-settings).

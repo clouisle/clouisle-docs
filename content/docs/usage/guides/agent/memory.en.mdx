@@ -1,0 +1,41 @@
+---
+title: Memory and Context
+description: Configure cross-conversation memory and understand long-conversation context compression
+icon: Brain
+---
+
+Clouisle has three layers of context: the current active message branch, conversation-level summaries, and cross-conversation user memory. Each solves a different problem.
+
+## Enable Cross-Conversation Memory
+
+1. Open the Agent's **Orchestration** > **Memory**.
+2. Turn on **Enable Memory**.
+3. Set the maximum number of memories per retrieval, range `1-50`, default `10`.
+4. Turn on **Auto-extract Memories** as needed; it is on by default.
+5. Save the Agent and verify in two different conversations that user preferences are reused.
+
+<Callout type="info" title="Image needed: Agent memory configuration">
+  File: `/images/agent-memory-settings.png`. Screenshot content: the memory card on the Agent orchestration page, showing the enabled state, max memories, and the auto-extract toggle. Crop the screenshot to the relevant area and outline the key actions with the theme color. The future `alt` and caption for this image will both use "Agent memory configuration".
+</Callout>
+
+## How Long Conversations Are Compressed
+
+Context compression is on by default. It computes the available input budget from the model's context window, reserving a default of `4000` output Tokens and a `1000` safety margin.
+
+- At `70%` utilization, warning pressure begins.
+- At `80%` utilization, selective compression is triggered.
+- At `92%` utilization, it escalates to blocking-level macro compression.
+- By default, the last `3` raw turns and `2` tool turns are kept.
+- On context length errors, the system performs at most one more aggressive retry.
+
+The streaming API can send `compression_start` and `compression_end` to explain why this turn reorganized the history.
+
+## Conversation Summary
+
+A conversation-level summary is extracted asynchronously after at least `4` turns by default, with an injection budget of `400` Tokens by default. After `3` consecutive failures, the circuit breaker opens and cools down for `600` seconds. The summary only serves the current conversation and does not replace cross-conversation memory.
+
+## Troubleshooting
+
+- **Preferences not remembered**: Confirm the Agent has memory enabled, the information reached the importance threshold, and the same signed-in user is used.
+- **Replies ignore very early details**: Long conversations may have been compressed; restate the key constraints or start a new conversation.
+- **Compression happens too often**: Check the model's context length, output reservation, and the size of tool results.

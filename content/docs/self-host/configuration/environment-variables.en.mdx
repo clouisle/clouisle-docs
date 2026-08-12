@@ -1,0 +1,63 @@
+---
+title: Environment Variables Reference
+description: Look up Clouisle deployment environment variables, defaults, precedence, and secret requirements
+icon: Settings
+---
+
+The following values follow the root-level `deploy/.env.example` and the backend `Settings`. Compose internal addresses use `api`, `db`, `redis`, and `qdrant`; source development usually uses `localhost`.
+
+## Application and Network
+
+| Variable | Default/Example | Description |
+| --- | --- | --- |
+| `PROJECT_NAME` | `Clouisle` | Site/application name |
+| `SECRET_KEY` | Example placeholder | JWT signing and some internal signatures; must change in production |
+| `TIMEZONE` | `Asia/Shanghai` | Timezone |
+| `API_BASE_URL` | Compose `http://api:8000` | Server-side API address |
+| `PUBLIC_API_URL` | Empty | Use when an absolute public URL is required |
+| `FRONTEND_URL` | `http://localhost:3000` | Public frontend/SSO callback base URL |
+| `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | JSON array of allowed frontend Origins |
+| `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | Browser API base path |
+| `BACKEND_INTERNAL_URL` | `http://api:8000` | Frontend server-side access to API |
+
+## Data Dependencies
+
+| Variable | Compose Default | Description |
+| --- | --- | --- |
+| `POSTGRES_SERVER` | `db` | PostgreSQL host |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / empty / `clouisle` | Database credentials |
+| `DATABASE_URL` | Auto-built | Takes precedence over the individual fields when set |
+| `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis connection |
+| `REDIS_PASSWORD` | Empty | Recommended in production |
+| `QDRANT_URL` | `http://qdrant:6333` | Vector store address |
+| `QDRANT_API_KEY` | Empty | Recommended in production |
+| `VECTOR_BACKEND` | `qdrant` | Vector backend |
+| `QDRANT_COLLECTION_PREFIX` | `kb_dim` | Collection name prefix |
+| `QDRANT_DISTANCE` | `Cosine` | Distance function |
+
+## Internal Gateway and Sandbox
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `INTERNAL_API_TOKEN` | Empty | Worker accesses the API file gateway; must be shared with the API |
+| `INTERNAL_API_TOKEN_FILE` | Empty | Read the internal Token from a file |
+| `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox artifact upload address |
+| `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | Empty | Can replace the default internal signing |
+| `SANDBOX_RUNTIME_ENABLED` | `true` | Enable the sandbox |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | Compose `true` | Enable filesystem isolation |
+| `SANDBOX_MAX_DISK_MB` | `8192` | Maximum sandbox disk |
+| `SANDBOX_SESSION_TTL_HOURS` | `24` | Session retention |
+| `SANDBOX_RESULT_TTL_SECONDS` | `86400` | Result retention |
+| `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` | `10` | Per-artifact limit |
+| `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB` | `10` | Total artifacts limit |
+
+## Retrieval and External Services
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `RETRIEVAL_HYBRID_KILL_SWITCH` | `false` | Force vector retrieval in emergencies |
+| `RETRIEVAL_SHADOW_ENABLED` | `false` | Shadow-run hybrid retrieval |
+| `TAVILY_API_KEY` | Empty | Web search built-in tool |
+
+Restart the corresponding service after modifying server-side environment variables. `NEXT_PUBLIC_*` variables are injected at frontend build time; rebuild the frontend after changing them.

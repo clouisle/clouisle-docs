@@ -1,0 +1,45 @@
+---
+title: Attachments and Media Generation
+description: Configure Agent file attachments, reference images, and image and video generation
+icon: Images
+---
+
+Attachments give the Agent user assets; media generation lets the Agent call authorized image or video models. Both must be explicitly enabled.
+
+## Configure Attachments
+
+Enable attachments in the Agent's **Orchestration** > **Files & Images**. Default limits:
+
+| Item | Default | Configurable range |
+| --- | --- | --- |
+| Single file size | `10MB` | `1KB-50MB` |
+| Files per message | `5` | `1-10` |
+| Parsed content per file | `100,000` characters | `1,000-500,000` |
+| Truncation strategy | `end` (keep the beginning) | `end`, `start`, `middle` |
+
+Default extensions include PDF, Word, PowerPoint, Excel, TXT, Markdown, CSV, JSON, and HTML. Attachments are saved as Assets; the full text is not automatically injected into the conversation. The Agent calls the parsing capability on demand. Images go directly to the model only when the chat model supports vision.
+
+## Configure Image Generation
+
+1. Turn on **Image Generation** and select an image model, or use the system default model.
+2. The default size is `1024×1024`, with width and height ranging `256-4096`.
+3. A single run generates up to `4` images by default, configurable from `1-10`.
+4. **Allow Reference Images** is on by default; keep it on when editing or reference-based generation is needed.
+
+## Configure Video Generation
+
+1. Turn on **Video Generation** and select a video model.
+2. The default duration is `5` seconds and the default single-run maximum is `10` seconds; both range from `1-30` seconds.
+3. The default aspect ratio is `16:9`.
+4. The status polling interval defaults to `3000ms` and the synchronous wait cap defaults to `120` seconds. After a timeout, a task may return a still-processing status rather than a failure.
+
+<Callout type="info" title="Image needed: Agent attachments and media capabilities">
+  File: `/images/agent-media-capabilities.png`. Screenshot content: the Agent orchestration page showing the Files & Images, Image Generation, and Video Generation configuration cards in sequence, with each enable toggle and default model highlighted. Crop the screenshot to the relevant area and outline the key actions with the theme color. The future `alt` and caption for this image will both use "Agent attachments and media capabilities".
+</Callout>
+
+## Security and Failure Handling
+
+- Image/video models must be authorized for the team and enabled.
+- Reference images and generated artifacts are subject to Asset access control; do not copy unauthorized internal download URLs.
+- Files that are too large, disallowed extensions, or insufficient vision capability return clear errors before sending or from the backend.
+- When a video provider task fails, check the tool results and provider errors in the Agent logs.

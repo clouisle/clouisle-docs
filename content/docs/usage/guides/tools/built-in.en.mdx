@@ -1,0 +1,31 @@
+---
+title: Built-in Tools
+description: Enable and configure the tool capabilities that ship with Clouisle
+icon: Wrench
+---
+
+Built-in tools are registered by the platform and do not need to be created or deleted. Some tools require site-level or team-level configuration.
+
+| Tool ID | Purpose | Extra configuration |
+| --- | --- | --- |
+| `get_current_time` | Get the current time | None |
+| `format_datetime` | Format a date/time | None |
+| `calculate` | Math calculation | None |
+| `unit_convert` | Unit conversion | None |
+| `web_search` | Web search | `TAVILY_API_KEY` |
+| `fetch_webpage` | Fetch a web page | None |
+| `markitdown` | File/document conversion | None |
+| `generate_image` | Image generation | Image model |
+| `generate_video` | Video generation | Video model |
+| `artifact` / `bash` / `edit` / `read` / `write` | Sandbox artifacts and file operations | Sandbox runtime |
+
+Select a built-in tool in **Capabilities** > **Tools** to test it. Tools that need configuration show "Configuration needed"; select **Configure** to fill in team credentials. Tool details show the parameter name, type, required, enum, and default value.
+
+<figure>
+  <img src="/images/builtin-tools-list.png" alt="Built-in tools list" />
+  <figcaption>Built-in tools list</figcaption>
+</figure>
+
+<Callout type="warn">
+  `web_search` credentials come from server-side configuration and should not be written into the Agent prompt. Execution results and artifacts of sandbox tools should also be accessed according to team permissions.
+</Callout>

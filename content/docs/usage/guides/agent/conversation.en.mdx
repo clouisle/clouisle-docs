@@ -1,0 +1,47 @@
+---
+title: Chat and Conversations
+description: Use the Agent to chat, attach files, branch message versions, and view run logs
+icon: MessagesSquare
+---
+
+A published Agent provides a full chat page; the preview on the right side of the editor is for build-time debugging. A conversation is created when the first message is sent and stores variables, message count, and Token usage.
+
+## Start a Conversation
+
+1. Open the Agent from **Apps** and select **Chat** or **Public Page**.
+2. If the Agent defines required variables, complete the variable form first.
+3. Enter your message. `Enter` sends it; `Shift+Enter` starts a new line.
+4. If attachments are enabled, you can attach files and images; the count and size per message are determined by the Agent configuration.
+
+<figure>
+  <img src="/images/agent-chat-anatomy.png" alt="Agent chat interface" />
+  <figcaption>Agent chat interface</figcaption>
+</figure>
+
+## Understand a Reply
+
+A reply may consist of the following parts:
+
+- **Body**: Displayed in streaming increments.
+- **Reasoning**: Shown only when the model provides it and the Agent does not hide it.
+- **Referenced documents**: The chunks, document names, and relevance returned by RAG.
+- **Tool calls**: Parameters, results, logs, and artifacts; details can be hidden by the Agent.
+- **Media results**: Images or videos rendered directly into the assistant's message body.
+- **Message actions**: Copy, version, Token, speed, and more; can be hidden by the Agent.
+
+## Stop, Edit, and Regenerate
+
+- Select **Stop** during streaming. The message status is recorded as manually stopped.
+- Editing a historical user message creates a new branch from that message and streams a new reply.
+- Regenerating an assistant message creates a new version. Switching versions only changes the active branch; it never deletes older versions.
+- Deleting a message also handles its downstream branches; deleting a conversation permanently deletes all of its messages.
+
+## Manage Conversations
+
+The conversation drawer lets you select, rename, and delete your own conversations. Titles are up to `200` characters. The app's **Logs** page shows conversations by time and search term, and displays variables, model, Token, response time, reasoning, and knowledge sources.
+
+<Callout type="warn">
+  The current implementation has no archiving, multi-user collaboration comments, or PDF export flow. Do not treat deletion as archiving; deletion cannot be undone.
+</Callout>
+
+Related: [Streaming events](/api/streaming), [Conversations API](/api/conversations).
