@@ -24,6 +24,18 @@ export default async function Layout({ children, params }: LayoutProps<'/[lang]'
 
   return (
     <html lang={getHreflang(locale)} className={inter.className} suppressHydrationWarning>
+      <head>
+        {/* next-themes 0.4.6 把初始化 script 渲染在 body 内，React 19 拒绝执行（error #418），
+            导致刷新/新开页面首帧不恢复 localStorage 主题（闪变）。
+            head 内同步脚本在 HTML 解析时执行：读 localStorage('theme') 设置 html class，
+            与 next-themes 的 storageKey/attribute/defaultTheme/system 语义一致。 */}
+        <script
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');var dark=t==='dark'||((!t||t==='system')&&window.matchMedia('(prefers-color-scheme: dark)').matches);var d=document.documentElement;d.classList.remove('light','dark');d.classList.add(dark?'dark':'light');d.style.colorScheme=dark?'dark':'light';}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body>
         <RootProvider>
           <I18nProvider locale={locale} locales={value.locales} translations={value.translations}>
