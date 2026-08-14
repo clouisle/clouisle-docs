@@ -6,6 +6,14 @@ icon: Boxes
 
 Kubernetes 部署需要 Kubernetes `1.25+`、配置好的 `kubectl`、Ingress Controller 和可访问镜像仓库；Helm 方式需要 Helm 3。使用本地上传存储扩展 API 副本时需要支持 `ReadWriteMany` 的 StorageClass。
 
+外部服务要求：PostgreSQL `17+` 且预载 `pg_search`（0.24.3）与 `pg_stat_statements`、Redis `6+`、Qdrant `1.7+`。
+
+## 存储与默认副本
+
+单文件 manifest 默认创建三个 PVC：`postgres-data`（`10Gi`，`RWO`）、`qdrant-data`（`10Gi`，`RWO`）、`uploads-data`（`10Gi`，`RWX`，仅 API 挂载 `/app/uploads`）。Redis 差异：单文件 manifest 用 `emptyDir`（缓存可恢复），Helm 默认 `5Gi` PVC。
+
+默认副本数：api `2`、worker `2`、sandbox-worker `1`、beat `1`（`Recreate` 策略）、frontend `2`。manifest 不包含 HPA，副本数静态，需用 `kubectl scale` 调整。
+
 ## Helm（推荐）
 
 ```bash

@@ -1,0 +1,28 @@
+---
+title: Profile Settings
+description: Manage personal profile, password, 2FA, and connected accounts
+icon: UserRound
+---
+
+Profile settings open from the avatar menu in the top-right corner as a dialog with **Profile** and **Account** tabs — there is no dedicated `/settings` or `/profile` route. Timezones, active-session management, data export, and privacy toggles are not implemented (Roadmap).
+
+## Profile Tab
+
+| Field | Description |
+| --- | --- |
+| Avatar | Profile picture URL (upload via the avatar picker) |
+| Username | Unique username, max `50` characters |
+| Email | Email address; changing it may require email verification |
+
+## Account Tab
+
+- **Password**: change the password (current password verification required).
+- **2FA (TOTP)**: bind or unbind a TOTP authenticator.
+- **Connected accounts**: view and manage SSO connections.
+- **Delete account**: delete the current account (rejected if site-level constraints apply).
+
+---
+
+See also:
+- [Sign-in & Accounts](./authentication.mdx) — password policies, TOTP, and account recovery
+- [Configure Single Sign-On](./sso.mdx) — SSO connection management

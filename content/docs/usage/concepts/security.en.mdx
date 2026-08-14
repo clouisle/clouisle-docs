@@ -14,13 +14,17 @@ Team roles are owner, administrator, member, and viewer. The owner handles owner
 
 Backend permission codes use `resource:action` or `admin:resource:action`. Super administrators bypass permission checks. Non-admin resources can also be authorized through team- or resource-scoped roles. The frontend hides menus based on permissions, but the backend still checks permissions on every request.
 
+### Session and data isolation
+
+Regular users can only see their own conversations and data; users with `admin:dashboard:access` (or Super Admin) can view all team conversations, and team-scoped queries additionally require the team owner/administrator role. API Keys are managed per user: users can only view and manage their own keys; only Super Admin can view all keys across teams.
+
 ### Authentication and account security
 
-The site can combine password sign-in, email verification, administrator approval, click captcha, password policy, password expiration, single session, TOTP, and SSO. SSO supports multiple connections; administrators can disable password sign-in.
+The site can combine password sign-in, email verification, administrator approval, click captcha, password policy, password expiration, single session, TOTP, and SSO. SSO supports multiple connections; administrators can disable password sign-in. Active sessions default to `30` days (controlled by the `session_timeout_days` site setting); the JWT fallback token lasts `8` days.
 
 ### API Keys
 
-API Keys start with `clou_` and are sent via `Authorization: Bearer`. A key can be restricted to Agents, Workflows, expiration, and requests per minute; when resources are unrestricted, it can access all matching resources.
+API Keys start with `clou_` and are sent via `Authorization: Bearer`. A key can be restricted to Agents, Workflows, expiration, and requests per minute; when resources are unrestricted, it can access all matching resources. The per-minute request limit is counted per user, not per team.
 
 ### Audit and notifications
 

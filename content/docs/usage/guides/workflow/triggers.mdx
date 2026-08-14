@@ -1,6 +1,6 @@
 ---
 title: 触发器与运行
-description: 通过手动、API、Webhook 和 Cron 启动工作流
+description: 通过手动、API 和 Webhook 启动工作流
 icon: Webhook
 ---
 
@@ -37,7 +37,7 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 ## Cron
 
-选择按间隔、每天、每周、每月或自定义 Cron。自定义格式为“分 时 日 月 周”。只有保存并发布后的工作流会由调度器执行。
+界面可按间隔、每天、每周、每月或自定义 Cron（格式“分 时 日 月 周”）配置。**Cron 定时调度尚未实现**（后端没有对应的 Celery 调度任务，仅界面可保存配置），已发布的工作流不会按 Cron 自动执行。定时触发在 Roadmap 中。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-trigger-settings.png" alt="工作流触发器设置" />
@@ -46,4 +46,4 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 ## 状态与取消
 
-运行状态包括 `pending`、`running`、`completed`、`failed`、`cancelled` 和 `timeout`。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。查看[工作流 API](/api/workflow)获取流式运行事件。
+运行状态包括 `pending`、`running`、`success`、`failed`、`cancelled` 和 `timeout`。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。查看[工作流 API](/api/workflow)获取流式运行事件。

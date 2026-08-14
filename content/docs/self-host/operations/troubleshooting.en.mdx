@@ -22,6 +22,38 @@ Check the Redis connection, password, queue names, and Worker logs. Knowledge Ba
 
 Confirm `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`, the API and Sandbox Worker use the same signing configuration, or configure a dedicated `SANDBOX_ARTIFACT_UPLOAD_API_KEY`. Check whether the artifact path is inside `/workspace` and whether the file exceeds the `10MB` default limit.
 
+## Sandbox Jobs Fail with bwrap User Namespace Error [#bwrap-user-namespace-error]
+
+```text
+bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.
+```
+
+The supplied deployments (Docker Compose, Helm, Kubernetes) run the sandbox worker as root with `CAP_SYS_ADMIN`, so user namespace creation is privileged and this error should not occur. It typically means the worker is not running with the supplied security configuration (for example a custom deployment kept the worker non-root, `cap_add: SYS_ADMIN` is missing, or `seccomp=unconfined` was overridden). Custom non-root deployments must enable unprivileged user namespaces at the **node level** (`seccomp=unconfined` does not help): on Ubuntu 23.10+ run `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; on Debian run `sysctl -w kernel.unprivileged_userns_clone=1`, persist via `/etc/sysctl.d/`, and verify with `unshare -U true`. In Kubernetes apply the sysctl to every node; it cannot be set per pod. Full details: [Code Sandbox → Host Kernel Requirements](../../usage/concepts/sandbox.mdx#kernel-requirements).
+
+## Redis Connection Fails
+
+Confirm Redis is running: `docker compose ps redis` and `docker compose logs redis`; test with `docker compose exec redis redis-cli ping` (expect `PONG`, add `-a <password>` when a password is set); check `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`. The Celery broker and result backend are derived from `REDIS_*`; no separate configuration exists.
+
+## Qdrant Connection Fails
+
+Confirm Qdrant is running: `docker compose ps qdrant`; test with `curl http://localhost:6333/healthz`; check `QDRANT_URL` (Compose uses `http://qdrant:6333`) and `QDRANT_API_KEY`.
+
+## SSO Login Fails
+
+SSO providers are configured in **Site Settings** > **SSO** (no CLI check command). Confirm the callback URL matches `FRONTEND_URL`; review the provider logs; clear browser cookies and the SSO session, then retry.
+
+## Agent Does Not Respond
+
+Check the API logs for agent-related errors; LLM keys/base URLs are stored per provider in the **database** and managed on the **Models** page — they are not environment variables (`env | grep OPENAI_API_KEY` finding nothing is normal). Use the connection test on the **Models** page; check provider quota/rate limits; review Worker logs.
+
+## Workflow Execution Fails
+
+Check `docker compose logs api | grep workflow`; confirm Worker and Beat are running (`docker compose ps worker`); for runs stuck in **Running**, restart with `docker compose restart worker beat`; verify node configuration, circular dependencies, and test individual nodes.
+
+## Document Upload Fails
+
+The per-knowledge-base upload limit is the `kb_document_max_upload_size_mb` site setting (default `50MB`), not an environment variable. The API exclusively owns the upload directory (Workers use the internal upload gateway): check disk with `docker compose exec api df -h /app/uploads`. If processing fails after a successful upload, re-trigger processing from the Knowledge Base document UI.
+
 ## Retrieval Fails
 
 1. Document status must be `completed`.

@@ -14,6 +14,14 @@ curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/insta
 
 Select Docker Compose, confirm the install directory and domain, and the installer downloads files, generates strong secrets, validates the Compose file, pulls images, and starts the services.
 
+Non-interactive install (skips prompts, uses defaults):
+
+```bash
+CLOUISLE_DEPLOYMENT=docker CLOUISLE_YES=1 curl -fsSL https://raw.githubusercontent.com/clouisle/Clouisle/main/deploy/install.sh | bash
+```
+
+The default install directory is `/opt/clouisle`.
+
 ## Manual installation
 
 ```bash
@@ -38,6 +46,10 @@ curl http://localhost:8000/api/v1/health
 ```
 
 Configure the external reverse proxy so `/api/*` goes to `api:8000` and `/` goes to `frontend:3000`. The browser entry point defaults to `http://localhost:3000`.
+
+## Initialization
+
+Tortoise ORM creates and migrates tables automatically at API startup (no Alembic). The first registered user automatically becomes the Super Admin.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/docker-compose-running.svg" alt="Docker Compose services running" />

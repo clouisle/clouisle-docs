@@ -28,7 +28,7 @@ Default resource limits: `30` second timeout, `1024MB` disk, `256KB` standard ou
 
 ## Credentials and Sharing
 
-Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with **Read-only** or **Read & Execute** permission. Built-in tools cannot be deleted or shared; shared tools cannot have their owner's configuration modified by the receiving team.
+Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with **Read-only** or **Read & Execute** permission. Built-in tools cannot be deleted or shared; shared tools cannot have their owner's configuration modified by the receiving team. The tool API response's `share_permission` (`null` when not shared) and `shared_with_count` fields reflect the sharing state and the number of receiving teams.
 
 ## Failure Handling
 

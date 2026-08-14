@@ -6,17 +6,72 @@ icon: ShieldCheck
 
 权限由后端统一检查。前端菜单隐藏只是体验层；API 仍会返回权限错误。
 
-## 常用权限
+## 权限目录
 
-| 资源 | 常用权限 |
+### 特殊权限
+
+| 权限 | 说明 |
 | --- | --- |
-| Agent | `agent:read`、`agent:create`、`agent:update`、`agent:publish`、`agent:chat` |
-| 工作流 | `workflow:read`、`workflow:create`、`workflow:update`、`workflow:publish`、`workflow:run` |
-| 知识库 | `kb:read`、`kb:create`、`kb:update`、`kb:delete` |
-| 工具 | `tool:read`、`tool:create`、`tool:update`、`tool:execute` |
-| API Key | `apikey:read` |
-| 管理 | `admin:dashboard:access`、`admin:model:*`、`admin:settings:*` |
-| 审计 | `audit:read` |
+| `*` | 通配权限码；运行时绕过实际由 `is_superuser` 决定 |
+| `admin:dashboard:access` | 管理台访问，区分「管理员」与「普通用户」的关键权限 |
+
+### 管理类权限（需 `admin:dashboard:access`，按全局角色授予）
+
+| 权限 | 说明 |
+| --- | --- |
+| `admin:user:read/create/update/delete` | 用户管理 |
+| `admin:role:read/create/update/delete` | 角色管理 |
+| `admin:permission:read` | 查看权限列表 |
+| `admin:model:read/create/update/delete` | 模型管理 |
+| `admin:memory:read` | 查看记忆记录 |
+| `admin:conversation:read/delete` | 管理台会话管理 |
+| `admin:notification:create/delete` | 管理台通知管理 |
+| `admin:team:read/create/update/delete` | 全局团队管理 |
+| `admin:app:read/create/update/delete/publish/duplicate` | 跨团队 Agent 与工作流（App）管理 |
+| `admin:capability:read/create/update/delete/execute` | 跨团队工具与 Skill（Capability）管理 |
+| `admin:knowledge-base:read/test/create/update/delete` | 管理台知识库管理 |
+| `admin:settings:read` | 查看站点设置 |
+| `admin:settings:update` | 修改站点设置 |
+| `admin:sso:read` | 查看 SSO 提供商与配置 |
+| `admin:sso:update` | 管理 SSO 提供商与用户 SSO 连接 |
+| `audit:read` | 查看审计日志 |
+| `audit:export` | 导出审计日志 |
+
+### 资源类权限（受团队数据隔离约束，可通过团队/资源作用域角色授予）
+
+| 权限 | 说明 |
+| --- | --- |
+| `team:read/create/update/delete/manage` | 团队管理 |
+| `agent:read/create/update/delete/publish/chat` | Agent 管理 |
+| `workflow:read/create/update/delete/publish/run/execute` | 工作流管理 |
+| `kb:read/test/create/update/delete` | 知识库管理 |
+| `tool:read/create/update/delete/execute` | 工具管理 |
+| `skill:read/create/update/delete/execute` | Skill 管理 |
+| `apikey:read/create/update/delete` | API Key 管理 |
+| `conversation:read/delete` | 会话管理 |
+
+## 侧边栏菜单映射
+
+| 菜单 | 所需权限 | 超管 | Admin | Member | Viewer |
+| --- | --- | :-: | :-: | :-: | :-: |
+| Dashboard | `admin:dashboard:access` | ✓ | ✓ | | |
+| Teams | `team:read` | ✓ | ✓ | ✓ | ✓ |
+| Knowledge Bases | `admin:knowledge-base:read` | ✓ | ✓ | | |
+| Activities | `conversation:read` | ✓ | ✓ | ✓ | ✓ |
+| Users | `admin:user:read` | ✓ | ✓ | | |
+| Roles | `admin:role:read` | ✓ | ✓ | | |
+| Permissions | `admin:permission:read` | ✓ | ✓ | | |
+| API Keys | `apikey:read` | ✓ | ✓ | ✓ | |
+| Models | `admin:model:read` | ✓ | ✓ | | |
+| Apps | `admin:app:read` | ✓ | ✓ | | |
+| Capabilities | `admin:capability:read` | ✓ | ✓ | | |
+| Memories | `admin:memory:read` | ✓ | ✓ | | |
+| Observability | `admin:dashboard:access` | ✓ | ✓ | | |
+| Notifications | `admin:dashboard:access` | ✓ | ✓ | | |
+| Audit Logs | `audit:read` | ✓ | ✓ | | |
+| Site Settings | `admin:settings:read` | ✓ | ✓ | | |
+
+「管理」菜单组（Users、Roles、Permissions、Models、Audit Logs 等）仅在用户拥有 `admin:dashboard:access` 时可见。
 
 ## 检查顺序
 

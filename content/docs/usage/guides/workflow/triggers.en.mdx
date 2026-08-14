@@ -1,6 +1,6 @@
 ---
 title: Triggers and Runs
-description: Start workflows manually, via API, Webhook, and Cron
+description: Start workflows manually, via API, and via Webhook
 icon: Webhook
 ---
 
@@ -37,7 +37,7 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 ## Cron
 
-Choose by interval, daily, weekly, monthly, or custom Cron. The custom format is "minute hour day month weekday". Only workflows that are saved and published are executed by the scheduler.
+The UI allows configuring by interval, daily, weekly, monthly, or custom Cron ("minute hour day month weekday"). **Cron scheduling is not implemented yet** (no corresponding Celery scheduled task in the backend; the UI only saves the configuration), so published workflows are not executed automatically on a Cron schedule. Scheduled triggers are on the Roadmap.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-trigger-settings.png" alt="Workflow trigger settings" />
@@ -46,4 +46,4 @@ Choose by interval, daily, weekly, monthly, or custom Cron. The custom format is
 
 ## Status and Cancellation
 
-Run statuses include `pending`, `running`, `completed`, `failed`, `cancelled`, and `timeout`. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted. See the [Workflow API](/api/workflow) for streaming run events.
+Run statuses include `pending`, `running`, `success`, `failed`, `cancelled`, and `timeout`. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted. See the [Workflow API](/api/workflow) for streaming run events.

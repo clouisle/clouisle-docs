@@ -9,7 +9,7 @@ Clouisle's authentication flow may include password, email verification, adminis
 ## Sign-up & Email Verification
 
 1. Select **Sign up** and fill in the username, email, password, and confirm password.
-2. The password must be at least `6` characters; administrators can raise the minimum length and require uppercase letters, numbers, or special characters.
+2. The password must be at least `8` characters; administrators can raise the minimum length and require uppercase letters, numbers, or special characters.
 3. If the site requires it, check the user agreement and privacy policy.
 4. After submitting, verify your email with the verification code or link in the email.
 5. If administrator approval is enabled, the account enters a pending-approval state and cannot log in until approved.
@@ -21,7 +21,7 @@ Clouisle's authentication flow may include password, email verification, adminis
 
 ## Login Protection
 
-Login may require a click-through CAPTCHA. The CAPTCHA proof is valid for `60` seconds by default; re-fetch it after a failure or expiration. Repeated failures trigger account lockout and rate limiting.
+Login may require a click-through CAPTCHA. The CAPTCHA proof is valid for `300` seconds (5 minutes) by default; re-fetch it after a failure or expiration. Repeated failures trigger account lockout and rate limiting.
 
 ## Password Recovery & Expiration
 

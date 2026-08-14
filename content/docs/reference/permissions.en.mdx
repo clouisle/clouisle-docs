@@ -6,17 +6,72 @@ icon: ShieldCheck
 
 Permissions are checked uniformly by the backend. Hidden frontend menus are a UX layer only; the API still returns permission errors.
 
-## Common Permissions
+## Permission Catalog
 
-| Resource | Common permissions |
+### Special Permissions
+
+| Permission | Description |
 | --- | --- |
-| Agent | `agent:read`, `agent:create`, `agent:update`, `agent:publish`, `agent:chat` |
-| Workflow | `workflow:read`, `workflow:create`, `workflow:update`, `workflow:publish`, `workflow:run` |
-| Knowledge Base | `kb:read`, `kb:create`, `kb:update`, `kb:delete` |
-| Tool | `tool:read`, `tool:create`, `tool:update`, `tool:execute` |
-| API Key | `apikey:read` |
-| Administration | `admin:dashboard:access`, `admin:model:*`, `admin:settings:*` |
-| Audit | `audit:read` |
+| `*` | Wildcard permission code; the runtime bypass is actually `is_superuser` |
+| `admin:dashboard:access` | Dashboard access; the key permission distinguishing "admin" from "regular user" |
+
+### Administration Permissions (require `admin:dashboard:access`, granted by global roles)
+
+| Permission | Description |
+| --- | --- |
+| `admin:user:read/create/update/delete` | User management |
+| `admin:role:read/create/update/delete` | Role management |
+| `admin:permission:read` | View permission list |
+| `admin:model:read/create/update/delete` | Model management |
+| `admin:memory:read` | View memory records |
+| `admin:conversation:read/delete` | Dashboard conversation management |
+| `admin:notification:create/delete` | Dashboard notification management |
+| `admin:team:read/create/update/delete` | System-wide team management |
+| `admin:app:read/create/update/delete/publish/duplicate` | Cross-team Agent and workflow (App) management |
+| `admin:capability:read/create/update/delete/execute` | Cross-team tool and Skill (Capability) management |
+| `admin:knowledge-base:read/test/create/update/delete` | Knowledge base management from the admin |
+| `admin:settings:read` | View site settings |
+| `admin:settings:update` | Modify site settings |
+| `admin:sso:read` | View SSO providers and configuration |
+| `admin:sso:update` | Manage SSO providers and user SSO connections |
+| `audit:read` | View audit logs |
+| `audit:export` | Export audit logs |
+
+### Resource Permissions (subject to team data isolation; grantable via team/resource scoped roles)
+
+| Permission | Description |
+| --- | --- |
+| `team:read/create/update/delete/manage` | Team management |
+| `agent:read/create/update/delete/publish/chat` | Agent management |
+| `workflow:read/create/update/delete/publish/run/execute` | Workflow management |
+| `kb:read/test/create/update/delete` | Knowledge base management |
+| `tool:read/create/update/delete/execute` | Tool management |
+| `skill:read/create/update/delete/execute` | Skill management |
+| `apikey:read/create/update/delete` | API Key management |
+| `conversation:read/delete` | Conversation management |
+
+## Sidebar Menu Mapping
+
+| Menu item | Required permission | Super Admin | Admin | Member | Viewer |
+| --- | --- | :-: | :-: | :-: | :-: |
+| Dashboard | `admin:dashboard:access` | ✓ | ✓ | | |
+| Teams | `team:read` | ✓ | ✓ | ✓ | ✓ |
+| Knowledge Bases | `admin:knowledge-base:read` | ✓ | ✓ | | |
+| Activities | `conversation:read` | ✓ | ✓ | ✓ | ✓ |
+| Users | `admin:user:read` | ✓ | ✓ | | |
+| Roles | `admin:role:read` | ✓ | ✓ | | |
+| Permissions | `admin:permission:read` | ✓ | ✓ | | |
+| API Keys | `apikey:read` | ✓ | ✓ | ✓ | |
+| Models | `admin:model:read` | ✓ | ✓ | | |
+| Apps | `admin:app:read` | ✓ | ✓ | | |
+| Capabilities | `admin:capability:read` | ✓ | ✓ | | |
+| Memories | `admin:memory:read` | ✓ | ✓ | | |
+| Observability | `admin:dashboard:access` | ✓ | ✓ | | |
+| Notifications | `admin:dashboard:access` | ✓ | ✓ | | |
+| Audit Logs | `audit:read` | ✓ | ✓ | | |
+| Site Settings | `admin:settings:read` | ✓ | ✓ | | |
+
+The "Management" menu group (Users, Roles, Permissions, Models, Audit Logs, etc.) is visible only when the user has `admin:dashboard:access`.
 
 ## Check Order
 

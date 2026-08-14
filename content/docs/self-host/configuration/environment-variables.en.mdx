@@ -6,6 +6,8 @@ icon: Settings
 
 The following values follow the root-level `deploy/.env.example` and the backend `Settings`. Compose internal addresses use `api`, `db`, `redis`, and `qdrant`; source development usually uses `localhost`.
 
+Configuration has three layers: environment variables control startup-level configuration (connections, secrets, queues, sandbox, etc.); the database `SiteSetting` manages runtime settings (SMTP, SSO, session timeout, upload limits, etc.); LLM provider keys and base URLs are stored in the database, not environment variables.
+
 ## Application and Network
 
 | Variable | Default/Example | Description |
@@ -13,12 +15,14 @@ The following values follow the root-level `deploy/.env.example` and the backend
 | `PROJECT_NAME` | `Clouisle` | Site/application name |
 | `SECRET_KEY` | Example placeholder | JWT signing and some internal signatures; must change in production |
 | `TIMEZONE` | `Asia/Shanghai` | Timezone |
+| `ALGORITHM` | `HS256` | JWT signing algorithm; `HS256`/`HS384`/`HS512` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `11520` (8 days) | JWT fallback token lifetime; active sessions default to the `session_timeout_days` site setting (30 days) |
 | `API_BASE_URL` | Compose `http://api:8000` | Server-side API address |
 | `PUBLIC_API_URL` | Empty | Use when an absolute public URL is required |
 | `FRONTEND_URL` | `http://localhost:3000` | Public frontend/SSO callback base URL |
-| `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | JSON array of allowed frontend Origins |
+| `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed frontend Origins; accepts a JSON array or a comma-separated list |
 | `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | Browser API base path |
-| `BACKEND_INTERNAL_URL` | `http://api:8000` | Frontend server-side access to API |
+| `BACKEND_INTERNAL_URL` | `http://localhost:8000` | Frontend server-side access to API; `http://api:8000` inside Compose |
 
 ## Data Dependencies
 
@@ -26,10 +30,12 @@ The following values follow the root-level `deploy/.env.example` and the backend
 | --- | --- | --- |
 | `POSTGRES_SERVER` | `db` | PostgreSQL host |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / empty / `clouisle` | Database credentials |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / empty / `clouisle` | Database credentials; config default password is `password`; Compose fails to start when `POSTGRES_PASSWORD` is unset (required) |
 | `DATABASE_URL` | Auto-built | Takes precedence over the individual fields when set |
 | `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis connection |
 | `REDIS_PASSWORD` | Empty | Recommended in production |
+
+The Celery broker and result backend are derived from `REDIS_*` (broker `redis://…/0`, backend `redis://…/1`); there are no separate `REDIS_URL`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` variables.
 | `QDRANT_URL` | `http://qdrant:6333` | Vector store address |
 | `QDRANT_API_KEY` | Empty | Recommended in production |
 | `VECTOR_BACKEND` | `qdrant` | Vector backend |
@@ -40,17 +46,27 @@ The following values follow the root-level `deploy/.env.example` and the backend
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `INTERNAL_API_TOKEN` | Empty | Worker accesses the API file gateway; must be shared with the API |
+| `INTERNAL_API_TOKEN` | Empty (required in Compose/K8s) | Worker accesses the API file gateway; must be shared with the API |
 | `INTERNAL_API_TOKEN_FILE` | Empty | Read the internal Token from a file |
+| `API_INTERNAL_BASE_URL` | Empty | Worker gateway access for `UPLOAD_STORAGE_MODE=remote`; Compose sets `http://api:8000` |
+| `UPLOAD_STORAGE_MODE` | `local` | `local`/`remote`; Compose/K8s Worker and Sandbox Worker use `remote` without mounting the uploads volume |
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox artifact upload address |
 | `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | Empty | Can replace the default internal signing |
 | `SANDBOX_RUNTIME_ENABLED` | `true` | Enable the sandbox |
+| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | Fall back to the legacy code execution path when the sandbox runtime is unavailable |
 | `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | Compose `true` | Enable filesystem isolation |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | Compose `/usr/bin/bwrap` | Bubblewrap executable path |
+| `SANDBOX_WORKER_CONCURRENCY` | `1` | Number of concurrent sandbox worker slots |
+| `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | Host-side root for job and session directories |
 | `SANDBOX_MAX_DISK_MB` | `8192` | Maximum sandbox disk |
 | `SANDBOX_SESSION_TTL_HOURS` | `24` | Session retention |
+| `SANDBOX_SESSION_CLEANUP_BATCH_SIZE` | `100` | Session cleanup batch size |
+| `SANDBOX_DEFAULT_PYTHON_BINARIES` | `/usr/local/bin/python3`, `/usr/bin/python3`, `/bin/python3` | Candidate sandbox Python interpreter paths |
 | `SANDBOX_RESULT_TTL_SECONDS` | `86400` | Result retention |
 | `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` | `10` | Per-artifact limit |
 | `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB` | `10` | Total artifacts limit |
+
+With filesystem isolation enabled (`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`), the supplied deployments run the sandbox worker as root with `CAP_SYS_ADMIN`, so user namespace creation is privileged — no host sysctl changes are required. Only custom deployments that keep the worker non-root depend on the host kernel permitting unprivileged user namespaces, otherwise every sandbox job fails with `bwrap: No permissions to create new namespace`: on Ubuntu 23.10+ run `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; on Debian run `sysctl -w kernel.unprivileged_userns_clone=1` (host/node-level settings; in Kubernetes they must be applied to every node). Full details: [Code Sandbox → Host Kernel Requirements](../../usage/concepts/sandbox.mdx#kernel-requirements).
 
 ## Retrieval and External Services
 
@@ -58,7 +74,41 @@ The following values follow the root-level `deploy/.env.example` and the backend
 | --- | --- | --- |
 | `RETRIEVAL_HYBRID_KILL_SWITCH` | `false` | Force vector retrieval in emergencies |
 | `RETRIEVAL_SHADOW_ENABLED` | `false` | Shadow-run hybrid retrieval |
+| `RAG_QUERY_CONTEXTUALIZATION_ENABLED` | `false` | Query contextualization rewrite |
+| `RAG_QUERY_CONTEXTUALIZATION_TIMEOUT_SECONDS` | `2.0` | Query rewrite timeout (seconds) |
 | `TAVILY_API_KEY` | Empty | Web search built-in tool |
+
+## Streaming Timeouts
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `STREAM_GLOBAL_TIMEOUT` | `3600` | Global streaming timeout (seconds) |
+| `STREAM_GLOBAL_TIMEOUT_WITH_TOOLS` | `5400` | Global timeout with tools (seconds) |
+| `STREAM_HEARTBEAT_INTERVAL` | `15` | Heartbeat interval (seconds) |
+| `STREAM_IDLE_TIMEOUT` | `180` | Idle timeout (seconds) |
+| `STREAM_HTTP_CONNECT_TIMEOUT` | `10` | Upstream connect timeout (seconds) |
+| `STREAM_HTTP_READ_TIMEOUT` | `200` | Upstream read timeout (seconds) |
+| `STREAM_HTTP_REASONING_READ_TIMEOUT` | `300` | Reasoning content read timeout (seconds) |
+| `STREAM_HTTP_WRITE_TIMEOUT` | `10` | Upstream write timeout (seconds) |
+| `STREAM_TOOL_TIMEOUT_HTTP` | `30` | HTTP tool timeout (seconds) |
+| `STREAM_TOOL_TIMEOUT_CODE` | `60` | Code tool timeout (seconds) |
+| `STREAM_TOOL_TIMEOUT_MCP` | `60` | MCP tool timeout (seconds) |
+| `STREAM_TOOL_TIMEOUT_DOWNLOAD` | `60` | Download tool timeout (seconds) |
+
+## Celery and Background Tasks
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CELERY_VISIBILITY_TIMEOUT_SECONDS` | `3600` | Celery task visibility timeout (seconds) |
+| `KB_PROCESSING_RECOVERY_AFTER_SECONDS` | `600` | Wait before recovering a stuck Knowledge Base processing task (seconds) |
+
+## Frontend Build-time
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NEXT_PUBLIC_APP_VERSION` | `0.0.0-dev` | App version shown in the frontend (build-time ARG) |
+| `NEXT_PUBLIC_BUILD_DATE` | `unknown` | Build time shown in the frontend |
+| `DEV_ALLOWED_ORIGINS` | Empty | Dev-server LAN origins; ignored in production builds |
 
 ## GitHub Discussions Feedback
 

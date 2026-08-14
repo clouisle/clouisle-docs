@@ -8,7 +8,7 @@ A Knowledge Base converts documents into chunks that Agents and Workflows can re
 
 ### Processing pipeline
 
-After upload or URL import, a document starts in **Pending**. Processing performs text extraction, cleaning, chunking, embedding, and indexing, ending in **Completed** or **Failed**. The document-level states are `pending`, `processing`, `completed`, `error`.
+After upload or URL import, a document starts in **Pending**. Processing performs text extraction, cleaning, chunking, embedding, and indexing, ending in **Completed** or **Failed**. The document-level states are `pending`, `processing`, `completed`, `error`. Chunking uses deterministic character-level splitting (RecursiveCharacterTextSplitter); semantic/ML chunking is not supported. Vectors are stored in a dedicated Qdrant collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model.
 
 Chunks of a processed document can be viewed, edited, added, and deleted. Re-chunking replaces all existing chunks and vectors, and manual edits are lost.
 

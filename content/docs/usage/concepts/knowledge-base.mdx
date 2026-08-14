@@ -8,7 +8,7 @@ icon: Database
 
 ### 处理流水线
 
-上传或导入网址后，文档先处于**等待中**。处理会完成文本提取、清理、分块、嵌入和索引，最终进入**已完成**或**失败**。文档级状态为 `pending`、`processing`、`completed`、`error`。
+上传或导入网址后，文档先处于**等待中**。处理会完成文本提取、清理、分块、嵌入和索引，最终进入**已完成**或**失败**。文档级状态为 `pending`、`processing`、`completed`、`error`。分块使用确定性的字符级切分（RecursiveCharacterTextSplitter），不支持语义/ML 分块；向量按嵌入维度存储在 Qdrant 的独立集合中（`{prefix}_{dimension}`），维度由所选嵌入模型决定。
 
 已处理文档的分块可以查看、编辑、新增和删除。重新分块会替换所有现有分块及向量，手工编辑会丢失。
 

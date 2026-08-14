@@ -1,0 +1,46 @@
+---
+title: 用户管理
+description: 管理用户账户、密码策略、激活状态与 TOTP
+icon: Users
+---
+
+用户管理在**管理后台** > **用户**中操作，需要 `admin:user:*` 权限。用户列表支持搜索、按状态筛选，并展示系统角色与团队角色。
+
+## 创建用户
+
+逐个创建（`POST /api/v1/admin/users`），填写用户名、邮箱、密码与角色。无 CSV 批量导入（Roadmap）；启用 `sso_auto_create_users` 时，SSO 首次登录可自动创建用户。
+
+## 编辑与密码策略
+
+编辑基本信息与角色。管理员可执行密码策略操作：
+
+| 操作 | 端点 |
+| --- | --- |
+| 强制修改密码 | `POST /api/v1/admin/users/{user_id}/force-password-change` |
+| 重置密码过期计时 | `POST /api/v1/admin/users/{user_id}/reset-password-expiration` |
+| 免除密码过期 | `POST /api/v1/admin/users/{user_id}/exempt-password-expiration` |
+| 批量强制修改密码 | `POST /api/v1/admin/users/bulk-force-password-change` |
+| 密码过期概览 | `GET /api/v1/admin/users/password-expiration-stats` |
+| 即将过期用户 | `GET /api/v1/admin/users/expiring-passwords` |
+
+## 状态管理
+
+停用后用户不能登录，可重新激活，也可删除。批量操作仅支持批量强制改密与发送邮件（`POST /api/v1/admin/users/send-email`）；批量启用/停用、批量加入/移出团队、批量导出与批量删除未实现（Roadmap）。
+
+## TOTP 管理
+
+管理员可查看和禁用用户的 TOTP（仅超级管理员）：
+
+```bash
+curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -X POST "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/disable" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+---
+
+参见：
+- [登录与账户](./authentication.mdx) — 密码策略、TOTP 与账户恢复
+- [角色与权限](./roles-permissions.mdx) — 系统角色与团队角色
+- [团队与成员](./teams.mdx) — 团队内成员管理

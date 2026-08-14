@@ -16,7 +16,7 @@ icon: Settings
 | `theme_mode` | `system`、`light` 或 `dark` | `system` |
 | `theme_branding_display` | `full`、`name_only`、`icon_only` 或 `hidden` | `full` |
 | `allow_registration` | boolean | `true` |
-| `require_approval` | boolean | `false` |
+| `require_approval` | boolean | `true` |
 | `email_verification` | boolean | `true` |
 | `enable_captcha` | boolean | `false` |
 | `sso_enabled` | boolean | `false` |
@@ -34,7 +34,7 @@ icon: Settings
 
 ## 安全与运维字段
 
-安全设置还包括密码最小长度、复杂度、过期与历史、会话超时、单一会话、最大登录尝试、锁定时长、验证码和 TOTP。存储设置支持本地文件系统和对象存储；审计日志支持保留天数与归档路径。
+安全设置还包括密码最小长度、复杂度、过期与历史、会话超时（默认 `30` 天，`session_timeout_days`）、单一会话、最大登录尝试、锁定时长、验证码和 TOTP。存储设置支持本地文件系统和对象存储；审计日志支持保留天数与归档路径。
 
 ## 通知渠道
 

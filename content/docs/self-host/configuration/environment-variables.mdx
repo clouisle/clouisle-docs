@@ -6,6 +6,8 @@ icon: Settings
 
 以下值以根目录和 `deploy/.env.example`、后端 `Settings` 为准。Compose 内部地址使用 `api`、`db`、`redis` 和 `qdrant`；源码开发通常使用 `localhost`。
 
+配置分三层：环境变量控制启动级配置（连接、密钥、队列、沙箱等）；数据库 `SiteSetting` 管理运行时设置（SMTP、SSO、会话超时、上传限制等）；LLM 厂商的 Key 与 base_url 存数据库而非环境变量。
+
 ## 应用与网络
 
 | 变量 | 默认/示例 | 说明 |
@@ -13,12 +15,14 @@ icon: Settings
 | `PROJECT_NAME` | `Clouisle` | 站点/应用名称 |
 | `SECRET_KEY` | 示例占位 | JWT 签名和部分内部签名，生产必换 |
 | `TIMEZONE` | `Asia/Shanghai` | 时区 |
+| `ALGORITHM` | `HS256` | JWT 签名算法，可选 `HS256`/`HS384`/`HS512` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `11520`（8 天） | JWT fallback 令牌有效期；有效会话默认由站点设置 `session_timeout_days`（30 天）控制 |
 | `API_BASE_URL` | Compose `http://api:8000` | 服务端 API 地址 |
 | `PUBLIC_API_URL` | 空 | 需要绝对公开 URL 时使用 |
 | `FRONTEND_URL` | `http://localhost:3000` | 公开前端/SSO 回调基址 |
-| `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | JSON 数组，允许的前端 Origin |
+| `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | 允许的前端 Origin；接受 JSON 数组或逗号分隔列表 |
 | `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | 浏览器 API 基路径 |
-| `BACKEND_INTERNAL_URL` | `http://api:8000` | 前端服务端访问 API |
+| `BACKEND_INTERNAL_URL` | `http://localhost:8000` | 前端服务端访问 API；Compose 内为 `http://api:8000` |
 
 ## 数据依赖
 
@@ -26,10 +30,12 @@ icon: Settings
 | --- | --- | --- |
 | `POSTGRES_SERVER` | `db` | PostgreSQL 主机 |
 | `POSTGRES_PORT` | `5432` | PostgreSQL 端口 |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / 空 / `clouisle` | 数据库凭据 |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `postgres` / 空 / `clouisle` | 数据库凭据；config 默认密码 `password`，Compose 未设置 `POSTGRES_PASSWORD` 时启动即失败（必填） |
 | `DATABASE_URL` | 自动拼接 | 非空时优先于分字段 |
 | `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis 连接 |
 | `REDIS_PASSWORD` | 空 | 生产建议设置 |
+
+Celery broker 与结果后端由 `REDIS_*` 派生（broker `redis://…/0`、backend `redis://…/1`），无独立的 `REDIS_URL`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` 变量。
 | `QDRANT_URL` | `http://qdrant:6333` | 向量库地址 |
 | `QDRANT_API_KEY` | 空 | 生产建议设置 |
 | `VECTOR_BACKEND` | `qdrant` | 向量后端 |
@@ -40,17 +46,27 @@ icon: Settings
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `INTERNAL_API_TOKEN` | 空 | Worker 访问 API 文件网关，必须与 API 共享 |
+| `INTERNAL_API_TOKEN` | 空（Compose/K8s 必填） | Worker 访问 API 文件网关，必须与 API 共享 |
 | `INTERNAL_API_TOKEN_FILE` | 空 | 从文件读取内部 Token |
+| `API_INTERNAL_BASE_URL` | 空 | `UPLOAD_STORAGE_MODE=remote` 时 Worker 经此访问上传网关；Compose 设 `http://api:8000` |
+| `UPLOAD_STORAGE_MODE` | `local` | 取值 `local`/`remote`；Compose/K8s 的 Worker 与 Sandbox Worker 设 `remote` 且不挂 uploads 卷 |
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox 产物上传地址 |
 | `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | 空 | 可替代默认内部签名 |
 | `SANDBOX_RUNTIME_ENABLED` | `true` | 启用沙箱 |
+| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | 沙箱运行时不可用时回退到旧代码执行路径 |
 | `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | Compose `true` | 启用文件系统隔离 |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | Compose `/usr/bin/bwrap` | Bubblewrap 可执行文件路径 |
+| `SANDBOX_WORKER_CONCURRENCY` | `1` | Sandbox Worker 并发槽位数 |
+| `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | 任务和会话目录在 Worker 上的根路径 |
 | `SANDBOX_MAX_DISK_MB` | `8192` | 沙箱最大磁盘 |
 | `SANDBOX_SESSION_TTL_HOURS` | `24` | 会话保留 |
+| `SANDBOX_SESSION_CLEANUP_BATCH_SIZE` | `100` | 会话清理每批数量 |
+| `SANDBOX_DEFAULT_PYTHON_BINARIES` | `/usr/local/bin/python3`、`/usr/bin/python3`、`/bin/python3` | 沙箱 Python 解释器候选路径 |
 | `SANDBOX_RESULT_TTL_SECONDS` | `86400` | 结果保留 |
 | `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` | `10` | 单产物限制 |
 | `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB` | `10` | 总产物限制 |
+
+启用文件系统隔离（`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`）后，项目提供的部署以 root + `CAP_SYS_ADMIN` 运行 sandbox-worker，用户命名空间创建走特权路径，**无需修改宿主 sysctl**。仅当自定义部署保持 Worker 非 root 时，才依赖宿主内核允许非特权用户命名空间，否则所有沙箱任务报 `bwrap: No permissions to create new namespace`：Ubuntu 23.10+ 需 `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`，Debian 需 `sysctl -w kernel.unprivileged_userns_clone=1`（宿主/节点级设置，Kubernetes 中需对每个节点生效）。完整说明见 [代码沙箱 → 宿主内核要求](../../usage/concepts/sandbox.mdx#kernel-requirements)。
 
 ## 检索与外部服务
 
@@ -58,7 +74,41 @@ icon: Settings
 | --- | --- | --- |
 | `RETRIEVAL_HYBRID_KILL_SWITCH` | `false` | 紧急强制向量检索 |
 | `RETRIEVAL_SHADOW_ENABLED` | `false` | 混合检索影子运行 |
+| `RAG_QUERY_CONTEXTUALIZATION_ENABLED` | `false` | 查询上下文改写 |
+| `RAG_QUERY_CONTEXTUALIZATION_TIMEOUT_SECONDS` | `2.0` | 查询改写超时（秒） |
 | `TAVILY_API_KEY` | 空 | 网页搜索内置工具 |
+
+## 流式超时
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `STREAM_GLOBAL_TIMEOUT` | `3600` | 全局流式超时（秒） |
+| `STREAM_GLOBAL_TIMEOUT_WITH_TOOLS` | `5400` | 带工具的全局超时（秒） |
+| `STREAM_HEARTBEAT_INTERVAL` | `15` | 心跳间隔（秒） |
+| `STREAM_IDLE_TIMEOUT` | `180` | 空闲超时（秒） |
+| `STREAM_HTTP_CONNECT_TIMEOUT` | `10` | 上游连接超时（秒） |
+| `STREAM_HTTP_READ_TIMEOUT` | `200` | 上游读取超时（秒） |
+| `STREAM_HTTP_REASONING_READ_TIMEOUT` | `300` | 推理内容读取超时（秒） |
+| `STREAM_HTTP_WRITE_TIMEOUT` | `10` | 上游写入超时（秒） |
+| `STREAM_TOOL_TIMEOUT_HTTP` | `30` | HTTP 工具超时（秒） |
+| `STREAM_TOOL_TIMEOUT_CODE` | `60` | 代码工具超时（秒） |
+| `STREAM_TOOL_TIMEOUT_MCP` | `60` | MCP 工具超时（秒） |
+| `STREAM_TOOL_TIMEOUT_DOWNLOAD` | `60` | 下载工具超时（秒） |
+
+## Celery 与后台任务
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `CELERY_VISIBILITY_TIMEOUT_SECONDS` | `3600` | Celery 任务可见性超时（秒） |
+| `KB_PROCESSING_RECOVERY_AFTER_SECONDS` | `600` | 知识库处理卡死后的恢复等待时间（秒） |
+
+## 前端构建期
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_APP_VERSION` | `0.0.0-dev` | 前端显示的应用版本（构建期 ARG） |
+| `NEXT_PUBLIC_BUILD_DATE` | `unknown` | 前端显示的构建时间 |
+| `DEV_ALLOWED_ORIGINS` | 空 | 开发服务器 LAN 来源；生产构建忽略 |
 
 ## GitHub Discussions 反馈
 

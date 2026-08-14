@@ -12,6 +12,20 @@ The API response structure is fixed as:
 
 On failure, `code` is non-zero and `data` may be empty; the HTTP status should still be checked first.
 
+## HTTP Status Mapping
+
+The HTTP status and the business `code` are not 1:1; branch on the `code` in the response body:
+
+| Source | HTTP | Business code |
+| --- | --- | --- |
+| `BusinessError` (default) | `400` | its own `code` (e.g. `5002` for username exists) |
+| Validation errors (Pydantic) | `422` | `1001` |
+| JWT authentication failure | `403` | `2003` |
+| API Key expired / invalid | `401` | `2002` / `2001` |
+| No authentication provided | `401` | `2000` |
+| Permission denied | `403` | `3000` / `3001` |
+| Generic `HTTPException` 400/401/403/404 | matching status | `1000` / `2000` / `3000` / `4000` |
+
 ## Handling Table
 
 | HTTP/Business scope | How to handle |
@@ -20,6 +34,7 @@ On failure, `code` is non-zero and `data` may be empty; the HTTP status should s
 | 403, `3000-3004` | Check permissions, team membership, administrator/owner requirements, and API Key resource scope |
 | 404, `4000-4005` | Confirm the resource ID and current team |
 | 400, `1001-1004` | Fix JSON, required fields, types, or business validation |
+| `5000-5099` | Follow the registration, account creation, or verification flow |
 | `5100-5214` | Do not auto-retry; handle name conflicts, system resources, or ownership constraints |
 | `5300-5316` | Follow the account lockout, verification code, password, or TOTP prompts |
 | `5400` | Back off and retry, lower concurrency |

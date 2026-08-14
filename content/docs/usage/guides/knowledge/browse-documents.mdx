@@ -1,0 +1,49 @@
+---
+title: 浏览文档与元数据
+description: 查看知识库文档、系统字段与提取的元数据
+icon: FolderSearch
+---
+
+在**知识库**中选择一个知识库即可浏览文档列表，按名称搜索和按状态（等待中/处理中/已完成/失败）筛选；点击文档查看详情、分块与元数据。
+
+## 文档系统字段
+
+| 字段 | 说明 |
+| --- | --- |
+| `filename` / `name` | 文档名称 |
+| `doc_type` | 文件类型：`pdf`、`docx`、`doc`、`txt`、`markdown`、`html`、`csv`、`xlsx`、`xls`、`json`、`url` |
+| `file_size` | 文件大小（字节） |
+| `status` | `pending`、`processing`、`completed`、`error` |
+| `chunk_count` | 生成的分块数 |
+| `token_count` | 估算 Token 数 |
+| `source_url` | 来源 URL（通过网址导入的文档） |
+| `processed_at` | 处理完成时间 |
+| `created_at` / `updated_at` | 创建/更新时间 |
+
+## 提取的元数据
+
+`metadata` JSON 字段由处理管线自动提取（如 `title`、`author`、`language`、`section`，具体取决于文件格式与提取管线）。分块也带有自己的 `metadata`（如页码、章节），用于检索上下文。
+
+## 编辑
+
+文档唯一可编辑的字段是**名称**：
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "新名称"}'
+```
+
+`metadata` JSON 在处理时重新生成，没有独立的编辑端点。
+
+## 检索中的使用
+
+检索结果与 RAG 上下文会返回每个分块的 `metadata`。检索请求**不支持**基于 metadata 的过滤或加权——唯一的检索过滤是 `filter_doc_ids`（限制到指定文档 ID）。
+
+---
+
+参见：
+- [导入文档](./import-documents.mdx) — 上传与处理
+- [分块与处理](./chunking.mdx) — 分块预览与编辑
+- [检索与质量调优](./retrieval.mdx) — 检索实验室

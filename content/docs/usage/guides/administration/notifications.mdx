@@ -12,7 +12,7 @@ icon: BellRing
 
 ## 配置渠道
 
-在**站点设置** > **通知渠道**选择邮件、钉钉、企业微信、飞书、Slack 或 Webhook。填写渠道凭据后发送测试消息；不要把签名密钥放在 URL 查询参数中。
+在**站点设置** > **通知渠道**选择邮件、钉钉、企业微信、飞书、Slack 或 Webhook。填写渠道凭据后发送测试消息；不要把签名密钥放在 URL 查询参数中。Webhook 渠道配置 `webhook_secret` 后，出站请求带 `X-Webhook-Signature: sha256=<hex>` 与 `X-Webhook-Signature-256: <hex>` 两个签名头——HMAC-SHA256 对原始请求体计算；接收端应基于原始 body 做常量时间比较验证。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/notification-channel-settings.png" alt="通知渠道设置" />
@@ -24,7 +24,9 @@ icon: BellRing
 在**自动通知**页：
 
 1. 选择全局外部渠道。
-2. 按团队、用户、知识库、工作流、Agent、API Key 和安全分类启用事件。
+2. 按团队、用户、知识库、工作流、Agent、API Key 和安全分类启用事件（约 18 个默认事件类型）。
 3. 保存后用测试事件验证站内和外部状态。
+
+默认事件包括：文档处理、工作流运行、Agent 发布/下架、API Key 即将过期/已过期、登录异常、账户锁定、密码变更等。API Key 过期检查由 Celery Beat 每天 `09:00` 执行，过期前 `7`、`3`、`1` 天各提醒一次。登录异常检测记录最近 `30` 天、每用户最多 `10` 个 IP 与 `10` 台设备；从新 IP 或设备登录时触发异常通知。
 
 外部发送状态包括待发送、发送中、已发送和发送失败；失败记录重试次数。不要只依赖外部渠道，重要安全事件仍应在通知中心和审计日志确认。

@@ -12,7 +12,7 @@ Navigate to **Notifications** and filter by scope, priority, and type. Notificat
 
 ## Configure Channels
 
-In **Site settings** > **Notification channels**, select Email, DingTalk, WeCom, Feishu, Slack, or Webhook. Fill in the channel credentials and send a test message; do not put signing secrets in URL query parameters.
+In **Site settings** > **Notification channels**, select Email, DingTalk, WeCom, Feishu, Slack, or Webhook. Fill in the channel credentials and send a test message; do not put signing secrets in URL query parameters. When a `webhook_secret` is configured for the Webhook channel, outgoing requests include `X-Webhook-Signature: sha256=<hex>` and `X-Webhook-Signature-256: <hex>` — HMAC-SHA256 over the raw body; receivers should verify against the raw body with constant-time comparison.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/notification-channel-settings.png" alt="Notification channel settings" />
@@ -24,7 +24,9 @@ In **Site settings** > **Notification channels**, select Email, DingTalk, WeCom,
 On the **Automatic notifications** page:
 
 1. Select the global external channel.
-2. Enable events grouped by team, user, knowledge base, workflow, Agent, API Key, and security.
+2. Enable events grouped by team, user, knowledge base, workflow, Agent, API Key, and security (about 18 default event types).
 3. After saving, verify in-app and external status with a test event.
+
+Default events include document processing, workflow runs, Agent publish/unpublish, API Key expiring/expired, anomalous login, account lockout, and password change. The API Key expiration check runs via Celery Beat daily at `09:00`, with reminders `7`, `3`, and `1` day before expiration. Anomalous-login detection keeps the last `30` days, up to `10` IPs and `10` devices per user; logging in from a new IP or device triggers an anomaly notification.
 
 External delivery states include pending, sending, sent, and failed; failures record retry counts. Do not rely on external channels alone — confirm important security events in the notification center and audit log as well.

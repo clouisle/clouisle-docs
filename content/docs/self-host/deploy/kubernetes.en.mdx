@@ -6,6 +6,14 @@ icon: Boxes
 
 A Kubernetes deployment requires Kubernetes `1.25+`, a configured `kubectl`, an Ingress Controller, and access to an image registry; the Helm approach requires Helm 3. Scaling API replicas with local upload storage requires a StorageClass that supports `ReadWriteMany`.
 
+External service requirements: PostgreSQL `17+` with `pg_search` (0.24.3) and `pg_stat_statements` preloaded, Redis `6+`, Qdrant `1.7+`.
+
+## Storage and default replicas
+
+The single-file manifest creates three PVCs by default: `postgres-data` (`10Gi`, `RWO`), `qdrant-data` (`10Gi`, `RWO`), and `uploads-data` (`10Gi`, `RWX`, mounted by the API at `/app/uploads` only). Redis persistence differs: the single-file manifest uses `emptyDir` (cache recoverable), while Helm defaults to a `5Gi` PVC.
+
+Default replicas: api `2`, worker `2`, sandbox-worker `1`, beat `1` (`Recreate` strategy), frontend `2`. The manifest has no HPA; replicas are static and adjusted with `kubectl scale`.
+
 ## Helm (recommended)
 
 ```bash

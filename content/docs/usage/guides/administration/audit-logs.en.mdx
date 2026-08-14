@@ -1,0 +1,36 @@
+---
+title: Audit Logs
+description: View, filter, export, and archive system operation audit logs
+icon: ScrollText
+---
+
+Audit logs record resource operations across the system: the actor, action, resource, before/after change snapshots, and source IP. Sensitive fields are redacted at write and display time, so raw secrets never appear in logs. Viewing audit logs requires `audit:read`; exporting requires `audit:export`.
+
+## Viewing and Filtering
+
+Open **Admin** > **Audit Logs**. Each entry shows: timestamp, user, action, resource type, resource name, operation (create/read/update/delete), status, IP address, and details. Search by keyword, event type, user, team, and time range; logs cannot be filtered by changed field or before/after values (Roadmap).
+
+Main event types: authentication (`login_success`, `login_failed`, `logout`, `register`), user management (`create_user`, `update_user`, `delete_user`), teams (`create_team`, `add_team_member`, `remove_team_member`), Agents (`create_agent`, `update_agent`, `publish_agent`, `delete_agent`), API Keys (`create_api_key`, `activate_api_key`, `deactivate_api_key`), system settings, and security events.
+
+## Sensitive Data Redaction
+
+Fields whose keys contain `password`, `hashed_password`, `api_key`, `secret_key`, `access_token`, `refresh_token`, `private_key`, `secret`, or `token` are masked: string values longer than 8 characters show only the first 8 characters followed by `***`; other values are replaced with `***`. The change snapshots (`changes`) are visible in details and exports, but sensitive values are already redacted.
+
+## Export
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+`GET /api/v1/admin/audit-logs/export?format=csv|json` accepts the same filters as the list endpoint and returns up to `10,000` matching logs. CSV columns: ID, Time, User, Action, Resource Type, Resource Name, Operation, Status, IP Address, Error Message; JSON exports the full serialized entries (including `changes`). Exports are manual only; there is no scheduled export (Roadmap).
+
+## Retention and Archival
+
+Retention is controlled by the `audit_log_retention_days` site setting, default `365` days with a range of `30-3650`. Archival status is available via `GET /api/v1/admin/audit-logs/stats/retention`: configured retention days, cutoff date, logs to archive, oldest log, and next archive time.
+
+---
+
+See also:
+- [Roles & Permissions](./roles-permissions.mdx) — `audit:read` / `audit:export` permissions
+- [Notifications](./notifications.mdx) — security event notification channels

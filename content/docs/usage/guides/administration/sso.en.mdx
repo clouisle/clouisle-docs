@@ -6,6 +6,72 @@ icon: KeyRound
 
 SSO connections are managed by a super administrator in **Site settings** > **SSO**. The fields for each connection depend on the protocol; prepare the identity provider's callback address, client credentials, and certificates/metadata before saving.
 
+## Callback Address
+
+The callback address format is `{API_BASE_URL}/api/v1/sso/callback/{provider_name}`. The `provider_name` must match the name set in Clouisle; a mismatched callback address is the most common cause of SSO login failure.
+
+## Protocol Fields
+
+### OAuth2 / OIDC
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `client_id` | Yes | Client ID from the provider |
+| `client_secret` | Yes | Client Secret from the provider |
+| `authorization_url` | Yes | Provider authorization endpoint |
+| `token_url` | Yes | Token exchange endpoint |
+| `userinfo_url` | Yes | User info endpoint |
+| `scopes` | No | Space-separated scopes (default `openid email profile`) |
+
+Common provider endpoints: GitHub uses `https://github.com/login/oauth/authorize` / `…/login/oauth/access_token` / `https://api.github.com/user`; Google uses `https://accounts.google.com/o/oauth2/v2/auth` / `https://oauth2.googleapis.com/token` / `https://openidconnect.googleapis.com/v1/userinfo`.
+
+### SAML 2.0
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `sp_entity_id` | Yes | Service Provider Entity ID (your Clouisle instance identifier) |
+| `idp_entity_id` | Yes | Identity Provider Entity ID |
+| `sso_url` | Yes | IdP Single Sign-On URL |
+| `x509_cert` | Yes | IdP X.509 certificate (PEM, without header/footer) |
+| `acs_url` | Yes | Assertion Consumer Service URL (`{API_BASE_URL}/api/v1/sso/callback/{provider_name}`) |
+| `slo_url` | No | SP Single Logout URL |
+| `idp_slo_url` | No | IdP Single Logout URL |
+| `name_id_format` | No | NameID format (default `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified`) |
+
+### CAS
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `server_url` | Yes | CAS server base URL |
+| `service_url` | Yes | Service URL for CAS validation |
+| `version` | No | CAS protocol version `1`/`2`/`3` (default `3`) |
+
+## Attribute Mapping
+
+Attribute mapping maps provider user fields to Clouisle user fields: `email`, `username`, `avatar_url`. Use dot paths for simple nested objects:
+
+```json
+{
+  "email": "email",
+  "username": "profile.name",
+  "avatar_url": "profile.picture"
+}
+```
+
+For complex structures (arrays, filters), use JSONPath expressions starting with `$`; when multiple values match, the first is used.
+
+## Admin Permissions and API
+
+Listing providers requires `admin:sso:read`; creating, updating, deleting, testing providers, and disconnecting user SSO connections require `admin:sso:update` (the `Admin` role only has `admin:sso:read` by default; `admin:sso:update` is limited to Super Admin). The public endpoint `GET /api/v1/sso/providers` returns the enabled providers (for rendering login buttons).
+
+```http
+GET    /api/v1/sso/admin/providers
+POST   /api/v1/sso/admin/providers
+PUT    /api/v1/sso/admin/providers/{provider_id}
+DELETE /api/v1/sso/admin/providers/{provider_id}
+POST   /api/v1/sso/admin/providers/{provider_id}/test
+```
+
 ## General Flow
 
 1. Enable SSO.

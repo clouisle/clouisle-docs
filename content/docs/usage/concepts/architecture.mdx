@@ -1,0 +1,71 @@
+---
+title: 系统架构
+description: 理解 Clouisle 的技术栈、请求链路、扩展性与安全边界
+icon: Layers
+---
+
+Clouisle 采用前端、后端与基础设施分层的架构：Next.js 前端负责界面与 SSR，FastAPI 后端承载 Agent/工作流/知识库业务，Celery 处理异步任务，PostgreSQL、Redis 与 Qdrant 分别承担业务数据、缓存队列与向量检索。
+
+### 技术栈
+
+| 层 | 组件 | 说明 |
+| --- | --- | --- |
+| 前端 | Next.js 16（App Router）、TypeScript、Tailwind CSS 4 + shadcn/ui、Bun | 容器运行 Next.js standalone（`node server.js`），**不含 Nginx**；`deploy/nginx/default.conf` 仅是可选的外部反向代理示例 |
+| 后端 | FastAPI（Python 3.13）、Tortoise ORM + asyncpg、Celery + Redis | LangChain 适配器（对话/嵌入/文本切分）；自研 `WorkflowOrchestrator` 执行工作流；LangGraph 已声明但运行时未使用；MarkItDown 做文档转换 |
+| 基础设施 | PostgreSQL 17（`pg_search` 全文检索）、Redis 7（缓存/Celery broker/限速计数）、Qdrant（向量） | 向量按嵌入维度存入独立集合（`{prefix}_{dimension}`），维度由所选嵌入模型决定 |
+
+### 请求链路
+
+**用户请求**：
+
+```text
+浏览器 → （可选外部反代/Ingress）→ Next.js SSR → API → FastAPI → PostgreSQL → 响应
+```
+
+**聊天（RAG）**：
+
+```text
+用户消息 → FastAPI → Agent 引擎 → 知识库检索 → Qdrant
+                                         ↓
+                                   LLM 适配器 → 模型提供商 → SSE 流式响应 → 前端
+```
+
+**文档处理**：
+
+```text
+上传 → FastAPI → Celery 任务 → MarkItDown 提取文本 → 分块 → 嵌入 → Qdrant 存储 → 状态更新（PostgreSQL）
+```
+
+**工作流执行**：
+
+```text
+触发 → FastAPI → Celery 任务 → WorkflowOrchestrator → 节点执行（LLM/工具/代码等）→ 结果存储 → SSE（实时场景）
+```
+
+### 扩展性
+
+前端与 API 无状态，可多副本水平扩展；Celery Worker 按队列（`default`、`knowledge`、`workflow`）独立扩展。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。部署拓扑与卷说明见 [部署架构](../self-host/architecture.mdx)。
+
+### 安全与多租户
+
+- **认证**：密码（bcrypt）、SSO（OAuth2/OIDC/SAML/CAS）、API Key（`clou_` + `Authorization: Bearer`）。
+- **授权**：JWT 校验 + 权限检查（`resource:action` / `admin:resource:action`），超级管理员绕过。
+- **数据隔离**：资源按团队归属，查询按团队成员自动过滤；普通用户只能看到自己的会话（详见 [团队与安全](./security.mdx)）。
+- **审计**：记录操作者、操作与变更前后快照，支持保留天数与归档。
+
+### 性能与缓存
+
+用户会话默认 `30` 天（站点设置 `session_timeout_days` 控制），JWT 兜底令牌 `8` 天；站点设置不缓存、每次直读数据库；限速按 API Key 每分钟计数（`rate_limit`，默认 `1000`）。
+
+### 健康检查
+
+- `/api/v1/health` — 公开基础健康检查（容器 HEALTHCHECK 使用）。
+- `/api/v1/admin/observability/system/health` — 管理端观测健康（CPU/内存/磁盘/数据库/Redis/Worker），需 `admin:dashboard:access`。
+
+---
+
+参见：
+- [部署架构](../self-host/architecture.mdx) — 3 镜像 5 服务拓扑与卷
+- [Agent](./agent.mdx)、[工作流](./workflow.mdx)、[知识库](./knowledge-base.mdx) — 核心资源概念
+- [团队与安全](./security.mdx) — 多租户与权限边界
+- [环境变量参考](../self-host/configuration/environment-variables.mdx) — 启动级配置

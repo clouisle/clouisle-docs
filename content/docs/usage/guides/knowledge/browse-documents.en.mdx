@@ -1,0 +1,49 @@
+---
+title: Browsing Documents & Metadata
+description: View Knowledge Base documents, system fields, and extracted metadata
+icon: FolderSearch
+---
+
+In **Knowledge Bases**, select a Knowledge Base to browse its document list, search by name, and filter by status (pending/processing/completed/error); open a document to view details, chunks, and metadata.
+
+## Document System Fields
+
+| Field | Description |
+| --- | --- |
+| `filename` / `name` | Document name |
+| `doc_type` | File type: `pdf`, `docx`, `doc`, `txt`, `markdown`, `html`, `csv`, `xlsx`, `xls`, `json`, `url` |
+| `file_size` | File size in bytes |
+| `status` | `pending`, `processing`, `completed`, `error` |
+| `chunk_count` | Number of chunks generated |
+| `token_count` | Estimated token count |
+| `source_url` | Original URL (for documents added via URL) |
+| `processed_at` | When processing completed |
+| `created_at` / `updated_at` | Timestamps |
+
+## Extracted Metadata
+
+The `metadata` JSON field is extracted automatically by the processing pipeline (e.g. `title`, `author`, `language`, `section`; the exact contents depend on the file format and extraction pipeline). Chunks also carry their own `metadata` (e.g. page number, section) used for retrieval context.
+
+## Editing
+
+The only editable document field is the **name**:
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "New name"}'
+```
+
+The `metadata` JSON is regenerated during processing; there is no dedicated metadata editing endpoint.
+
+## Usage in Retrieval
+
+Retrieval results and RAG context include each chunk's `metadata`. Search requests do **not** support metadata-based filtering or boosting — the only search filter is `filter_doc_ids` (restrict to specific document IDs).
+
+---
+
+See also:
+- [Import Documents](./import-documents.mdx) — upload and processing
+- [Chunking & Processing](./chunking.mdx) — chunk preview and editing
+- [Retrieval & Quality Tuning](./retrieval.mdx) — retrieval lab

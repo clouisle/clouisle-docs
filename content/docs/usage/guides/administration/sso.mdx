@@ -6,6 +6,72 @@ icon: KeyRound
 
 SSO 连接由超级管理员在**站点设置** > **SSO**管理。不同连接的字段取决于协议；保存前先准备身份提供商的回调地址、客户端凭据和证书/元数据。
 
+## 回调地址
+
+回调地址格式为 `{API_BASE_URL}/api/v1/sso/callback/{provider_name}`。`provider_name` 必须与在 Clouisle 中设置的提供商名称一致；回调地址不匹配是 SSO 登录失败最常见的原因。
+
+## 协议字段
+
+### OAuth2 / OIDC
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `client_id` | 是 | 提供商颁发的 Client ID |
+| `client_secret` | 是 | 提供商颁发的 Client Secret |
+| `authorization_url` | 是 | 提供商授权端点 |
+| `token_url` | 是 | Token 交换端点 |
+| `userinfo_url` | 是 | 用户信息端点 |
+| `scopes` | 否 | 空格分隔的 scope（默认 `openid email profile`） |
+
+常见提供商端点：GitHub 为 `https://github.com/login/oauth/authorize` / `…/login/oauth/access_token` / `https://api.github.com/user`；Google 为 `https://accounts.google.com/o/oauth2/v2/auth` / `https://oauth2.googleapis.com/token` / `https://openidconnect.googleapis.com/v1/userinfo`。
+
+### SAML 2.0
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `sp_entity_id` | 是 | Service Provider Entity ID（本实例标识） |
+| `idp_entity_id` | 是 | IdP Entity ID |
+| `sso_url` | 是 | IdP 单点登录 URL |
+| `x509_cert` | 是 | IdP X.509 证书（PEM，不含头尾） |
+| `acs_url` | 是 | Assertion Consumer Service URL（`{API_BASE_URL}/api/v1/sso/callback/{provider_name}`） |
+| `slo_url` | 否 | SP 单点登出 URL |
+| `idp_slo_url` | 否 | IdP 单点登出 URL |
+| `name_id_format` | 否 | NameID 格式（默认 `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified`） |
+
+### CAS
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `server_url` | 是 | CAS 服务器基地址 |
+| `service_url` | 是 | CAS 校验用 Service URL |
+| `version` | 否 | CAS 协议版本 `1`/`2`/`3`（默认 `3`） |
+
+## 属性映射
+
+属性映射把提供商返回的用户字段映射到 Clouisle 用户字段：`email`、`username`、`avatar_url`。简单嵌套对象用点号路径：
+
+```json
+{
+  "email": "email",
+  "username": "profile.name",
+  "avatar_url": "profile.picture"
+}
+```
+
+复杂结构（数组、过滤）用 `$` 开头的 JSONPath 表达式；多个匹配时取第一个。
+
+## 管理权限与 API
+
+列出提供商需要 `admin:sso:read`；创建、更新、删除、测试提供商及解绑用户 SSO 连接需要 `admin:sso:update`（`Admin` 角色默认只有 `admin:sso:read`，`admin:sso:update` 仅超级管理员）。公开端点 `GET /api/v1/sso/providers` 返回启用的提供商列表（用于登录页按钮）。
+
+```http
+GET    /api/v1/sso/admin/providers
+POST   /api/v1/sso/admin/providers
+PUT    /api/v1/sso/admin/providers/{provider_id}
+DELETE /api/v1/sso/admin/providers/{provider_id}
+POST   /api/v1/sso/admin/providers/{provider_id}/test
+```
+
 ## 通用流程
 
 1. 启用 SSO。

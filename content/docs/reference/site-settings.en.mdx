@@ -16,7 +16,7 @@ Public settings are provided by the backend `PublicSiteSettingsResponse`. The fo
 | `theme_mode` | `system`, `light` or `dark` | `system` |
 | `theme_branding_display` | `full`, `name_only`, `icon_only` or `hidden` | `full` |
 | `allow_registration` | boolean | `true` |
-| `require_approval` | boolean | `false` |
+| `require_approval` | boolean | `true` |
 | `email_verification` | boolean | `true` |
 | `enable_captcha` | boolean | `false` |
 | `sso_enabled` | boolean | `false` |
@@ -34,7 +34,7 @@ The theme supports page, card, border, sidebar, top navigation, accent, muted, a
 
 ## Security & Operations Fields
 
-Security settings also include password minimum length, complexity, expiration, and history, session timeout, single session, maximum login attempts, lockout duration, captcha, and TOTP. Storage settings support the local file system and object storage; audit logs support retention days and archive paths.
+Security settings also include password minimum length, complexity, expiration, and history, session timeout (default `30` days, `session_timeout_days`), single session, maximum login attempts, lockout duration, captcha, and TOTP. Storage settings support the local file system and object storage; audit logs support retention days and archive paths.
 
 ## Notification Channels
 

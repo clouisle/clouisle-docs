@@ -3,10 +3,13 @@
   "icon": "Settings",
   "pages": [
     "authentication",
+    "profile",
     "teams",
     "roles-permissions",
+    "user-management",
     "sso",
     "notifications",
-    "site-settings"
+    "site-settings",
+    "audit-logs"
   ]
 }

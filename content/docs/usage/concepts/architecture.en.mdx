@@ -1,0 +1,71 @@
+---
+title: System Architecture
+description: Understand the Clouisle tech stack, request flows, scalability, and security boundaries
+icon: Layers
+---
+
+Clouisle uses a layered architecture separating frontend, backend, and infrastructure: a Next.js frontend for UI and SSR, a FastAPI backend for Agents/Workflows/Knowledge Base, Celery for async tasks, and PostgreSQL, Redis, and Qdrant for business data, caching/queues, and vector retrieval.
+
+### Technology Stack
+
+| Layer | Components | Notes |
+| --- | --- | --- |
+| Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS 4 + shadcn/ui, Bun | The container runs the Next.js standalone server (`node server.js`) and does **not** include Nginx; `deploy/nginx/default.conf` is only an optional external reverse-proxy example |
+| Backend | FastAPI (Python 3.13), Tortoise ORM + asyncpg, Celery + Redis | LangChain adapters (chat/embeddings/text splitting); self-built `WorkflowOrchestrator` for workflow execution; LangGraph is declared but not used at runtime; MarkItDown for document conversion |
+| Infrastructure | PostgreSQL 17 (`pg_search` full-text), Redis 7 (cache/Celery broker/rate-limit counters), Qdrant (vectors) | Vectors are stored in a dedicated collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model |
+
+### Request Flows
+
+**User request**:
+
+```text
+Browser → (optional external reverse proxy / Ingress) → Next.js SSR → API → FastAPI → PostgreSQL → response
+```
+
+**Chat (RAG)**:
+
+```text
+User message → FastAPI → Agent engine → Knowledge Base retrieval → Qdrant
+                                         ↓
+                                   LLM adapter → model provider → SSE stream → frontend
+```
+
+**Document processing**:
+
+```text
+Upload → FastAPI → Celery task → MarkItDown text extraction → chunking → embedding → Qdrant storage → status update (PostgreSQL)
+```
+
+**Workflow execution**:
+
+```text
+Trigger → FastAPI → Celery task → WorkflowOrchestrator → node execution (LLM/tools/code, etc.) → result storage → SSE (real-time scenarios)
+```
+
+### Scalability
+
+The frontend and API are stateless and scale horizontally; Celery Workers scale independently by queue (`default`, `knowledge`, `workflow`). **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. See [Deployment Architecture](../self-host/architecture.mdx) for the service topology and volumes.
+
+### Security and Multi-tenancy
+
+- **Authentication**: password (bcrypt), SSO (OAuth2/OIDC/SAML/CAS), API Keys (`clou_` prefix + `Authorization: Bearer`).
+- **Authorization**: JWT validation + permission checks (`resource:action` / `admin:resource:action`); Super Admin bypasses.
+- **Data isolation**: resources belong to a team, queries are filtered by team membership automatically; regular users only see their own conversations (see [Teams & Security](./security.mdx)).
+- **Audit**: records the actor, operation, and before/after snapshots, with retention days and archiving.
+
+### Performance and Caching
+
+User sessions default to `30` days (controlled by the `session_timeout_days` site setting), with a `8`-day JWT fallback token; site settings are not cached and are read directly from the database on every lookup; rate limiting counts per API Key per minute (`rate_limit`, default `1000`).
+
+### Health Checks
+
+- `/api/v1/health` — public basic health check (used by the container HEALTHCHECK).
+- `/api/v1/admin/observability/system/health` — admin observability health (CPU/memory/disk/database/Redis/worker), requires `admin:dashboard:access`.
+
+---
+
+See also:
+- [Deployment Architecture](../self-host/architecture.mdx) — 3 images / 5 services topology and volumes
+- [Agent](./agent.mdx), [Workflow](./workflow.mdx), [Knowledge Base](./knowledge-base.mdx) — core resource concepts
+- [Teams & Security](./security.mdx) — multi-tenancy and permission boundaries
+- [Environment Variables Reference](../self-host/configuration/environment-variables.mdx) — startup-level configuration

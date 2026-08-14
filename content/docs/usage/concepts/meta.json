@@ -2,11 +2,13 @@
   "title": "核心概念",
   "icon": "Lightbulb",
   "pages": [
+    "architecture",
     "agent",
     "workflow",
     "knowledge-base",
     "model",
     "tool",
+    "sandbox",
     "security"
   ]
 }

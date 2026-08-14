@@ -22,6 +22,38 @@ icon: CircleAlert
 
 确认 `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`、API 与 Sandbox Worker 使用相同签名配置，或配置专用 `SANDBOX_ARTIFACT_UPLOAD_API_KEY`。检查产物路径是否位于 `/workspace`、文件是否超过 `10MB` 默认上限。
 
+## 沙箱任务报 bwrap 用户命名空间错误 [#bwrap-user-namespace-error]
+
+```text
+bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.
+```
+
+项目提供的部署（Docker Compose、Helm、Kubernetes）让 sandbox-worker 以 root + `CAP_SYS_ADMIN` 运行，用户命名空间创建走特权路径，不应出现此错误。出现该错误通常说明：Worker 未按提供的安全配置运行（如自定义部署保持非 root、`cap_add: SYS_ADMIN` 缺失、`seccomp=unconfined` 被覆盖）。自定义非 root 部署需在**节点级别**启用非特权用户命名空间（`seccomp=unconfined` 无效）：Ubuntu 23.10+ 执行 `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`；Debian 执行 `sysctl -w kernel.unprivileged_userns_clone=1`，通过 `/etc/sysctl.d/` 持久化后用 `unshare -U true` 验证。Kubernetes 中需对每个节点生效，无法按 Pod 设置。完整说明见 [代码沙箱 → 宿主内核要求](../../usage/concepts/sandbox.mdx#kernel-requirements)。
+
+## Redis 连接失败
+
+确认 Redis 运行：`docker compose ps redis` 与 `docker compose logs redis`；用 `docker compose exec redis redis-cli ping`（期望 `PONG`，有密码时 `-a <password>`）测试；核对 `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`。Celery broker 与结果后端由 `REDIS_*` 派生，无需单独配置。
+
+## Qdrant 连接失败
+
+确认 Qdrant 运行：`docker compose ps qdrant`；用 `curl http://localhost:6333/healthz` 测试；核对 `QDRANT_URL`（Compose 为 `http://qdrant:6333`）与 `QDRANT_API_KEY`。
+
+## SSO 登录失败
+
+SSO 提供商通过**站点设置** > **SSO** 配置（无 CLI 检查命令）。核对回调地址与 `FRONTEND_URL` 一致；查看提供商日志；清除浏览器 Cookie 和 SSO 会话后重试。
+
+## Agent 无响应
+
+检查 API 日志中的 agent 相关错误；LLM 的 Key/base_url 按提供商存在**数据库**中、由 **模型** 页面管理——不是环境变量（`env | grep OPENAI_API_KEY` 查不到属正常）。用**模型**页面的连接测试功能验证；检查提供商配额/限速；查看 Worker 日志。
+
+## 工作流执行失败
+
+`docker compose logs api | grep workflow` 查看执行日志；确认 Worker 与 Beat 运行（`docker compose ps worker`）；工作流卡在**运行中**时重启 `docker compose restart worker beat`；检查节点配置、循环依赖和单个节点测试。
+
+## 文档上传失败
+
+知识库单文件上传上限由站点设置 `kb_document_max_upload_size_mb` 控制（默认 `50MB`），不是环境变量。API 独占上传目录（Worker 走内部上传网关）：`docker compose exec api df -h /app/uploads` 检查磁盘。上传成功后处理失败可从知识库文档界面重新触发处理。
+
 ## 检索失败
 
 1. 文档状态必须是 `completed`。

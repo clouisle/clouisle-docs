@@ -1,0 +1,46 @@
+---
+title: User Management
+description: Manage user accounts, password policies, active status, and TOTP
+icon: Users
+---
+
+User management lives under **Admin** > **Users** and requires `admin:user:*` permissions. The user list supports search, status filtering, and shows system and team roles.
+
+## Creating Users
+
+Create users one at a time (`POST /api/v1/admin/users`) with username, email, password, and role. There is no CSV bulk import (Roadmap); when `sso_auto_create_users` is enabled, the first SSO login can provision users automatically.
+
+## Editing and Password Policies
+
+Edit basic information and roles. Administrators can run password policy operations:
+
+| Operation | Endpoint |
+| --- | --- |
+| Force password change | `POST /api/v1/admin/users/{user_id}/force-password-change` |
+| Reset password expiration timer | `POST /api/v1/admin/users/{user_id}/reset-password-expiration` |
+| Exempt from password expiration | `POST /api/v1/admin/users/{user_id}/exempt-password-expiration` |
+| Bulk force password change | `POST /api/v1/admin/users/bulk-force-password-change` |
+| Password expiration overview | `GET /api/v1/admin/users/password-expiration-stats` |
+| Expiring passwords list | `GET /api/v1/admin/users/expiring-passwords` |
+
+## Status Management
+
+Deactivating a user blocks sign-in; the user can be reactivated later, or deleted. Bulk operations only cover force password change and sending email (`POST /api/v1/admin/users/send-email`); bulk activate/deactivate, bulk add/remove from teams, bulk export, and bulk delete are not implemented (Roadmap).
+
+## TOTP Management
+
+Administrators can view and disable a user's TOTP (Super Admin only):
+
+```bash
+curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -X POST "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/disable" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+---
+
+See also:
+- [Sign-in & Accounts](./authentication.mdx) — password policies, TOTP, and account recovery
+- [Roles & Permissions](./roles-permissions.mdx) — system and team roles
+- [Teams & Members](./teams.mdx) — member management inside teams
