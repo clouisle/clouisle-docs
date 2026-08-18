@@ -1,14 +1,14 @@
 ---
 title: 部署 Clouisle
-description: 使用 Docker Compose 或 Kubernetes 部署并运营 Clouisle
+description: 使用 Docker Compose、Kubernetes 或 Sealos 部署并运营 Clouisle
 icon: Server
 ---
 
-Clouisle 部署由前端、FastAPI API、Celery Worker、Sandbox Worker、Beat 和 PostgreSQL、Redis、Qdrant 组成。单机优先使用引导式安装器和 Docker Compose；生产集群优先使用 Helm。
+官方 Docker Compose 和 Kubernetes 部署由前端、FastAPI API、Celery Worker、Sandbox Worker、Beat 和 PostgreSQL、Redis、Qdrant 组成。单机优先使用引导式安装器和 Docker Compose；生产集群优先使用 Helm；也可使用 Sealos 上的社区维护模板。
 
 <Cards>
   <Card title="架构" href="/self-host/architecture">理解应用服务、基础设施依赖、请求路由和数据卷。</Card>
-  <Card title="部署" href="/self-host/deploy">选择引导式安装、Docker Compose、Helm 或 Kubernetes manifest。</Card>
+  <Card title="部署" href="/self-host/deploy">选择引导式安装、Docker Compose、Helm、Kubernetes manifest 或 Sealos 社区模板。</Card>
   <Card title="配置" href="/self-host/configuration">查看环境变量、密钥、端口、内网地址和检索开关。</Card>
   <Card title="运维" href="/self-host/operations">处理存储、备份、升级、监控和故障排查。</Card>
   <Card title="部署 FAQ" href="/self-host/faq">快速定位服务、数据库、Worker 和沙箱常见问题。</Card>
@@ -20,9 +20,10 @@ Clouisle 部署由前端、FastAPI API、Celery Worker、Sandbox Worker、Beat �
 | --- | --- | --- |
 | 单机试用或小规模生产 | Docker Compose | 一台服务器、外部反向代理 |
 | 可扩展生产集群 | Helm | Kubernetes、Ingress、共享存储 |
+| Sealos workspace | Sealos 社区模板 | PostgreSQL、Redis、Qdrant 和持久化上传存储；Sandbox Worker 默认关闭 |
 | 受控审阅部署 | 生成单文件 manifest | 需要在 apply 前审阅 Secret 和资源 |
 | 本地开发 | 后端 + 前端源码 | 贡献代码、调试产品 |
 
 <Callout type="error">
-  生产部署必须替换示例 `SECRET_KEY`、数据库密码、Redis/Qdrant 凭据和内部 Worker 网关 Token。不要直接暴露 API 服务端口到公网。
+  使用官方 Compose、Helm 或单文件 manifest 的生产部署必须替换示例 `SECRET_KEY`、数据库密码、Redis/Qdrant 凭据和内部 Worker 网关 Token。不要直接暴露 API 服务端口到公网。
 </Callout>

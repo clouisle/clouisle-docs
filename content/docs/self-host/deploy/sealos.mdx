@@ -1,0 +1,27 @@
+---
+title: Sealos 部署
+description: 使用 Sealos 社区模板部署 Clouisle
+icon: Rocket
+---
+
+Sealos 提供由社区维护的 Clouisle 模板。模板会配置 PostgreSQL、Redis、Qdrant 和持久化上传存储。上传存储可使用本地存储，或选择可选的私有 Sealos 对象存储桶。
+
+[在 Sealos 上部署 Clouisle](https://sealos.io/products/app-store/clouisle)
+
+## 模板包含
+
+| 服务或数据 | 模板提供内容 |
+| --- | --- |
+| PostgreSQL | PostgreSQL 数据库。 |
+| Redis | Redis 服务。 |
+| Qdrant | Qdrant 向量存储。 |
+| 上传文件 | 持久化本地上传存储，或可选的私有 Sealos 对象存储桶。 |
+
+## 初始超级管理员
+
+注册第一个账户后，该账户会成为初始 Super Admin。
+
+## Sandbox Worker 限制
+
+模板默认禁用 Sandbox Worker。它需要 `Unconfined` seccomp 策略，或等效的 `Localhost` profile；只在满足该条件的 workspace 中启用它。
+

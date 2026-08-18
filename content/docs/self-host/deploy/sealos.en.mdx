@@ -1,0 +1,27 @@
+---
+title: Deploy on Sealos
+description: Deploy Clouisle with the community-maintained Sealos template
+icon: Rocket
+---
+
+Sealos provides a community-maintained Clouisle template. It provisions PostgreSQL, Redis, Qdrant, and persistent upload storage. Uploads can use local storage or an optional private Sealos object-storage bucket.
+
+[Deploy Clouisle on Sealos](https://sealos.io/products/app-store/clouisle)
+
+## What the template provides
+
+| Service or data | Template provision |
+| --- | --- |
+| PostgreSQL | A PostgreSQL database. |
+| Redis | A Redis service. |
+| Qdrant | A Qdrant vector store. |
+| Uploaded files | Persistent local upload storage or an optional private Sealos object-storage bucket. |
+
+## Initial Super Admin
+
+The first registered account becomes the initial Super Admin.
+
+## Sandbox Worker limitation
+
+The template keeps the Sandbox Worker disabled by default. It requires an `Unconfined` seccomp policy or an equivalent `Localhost` profile; enable it only in a workspace that meets that condition.
+

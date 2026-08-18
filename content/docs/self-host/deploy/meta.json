@@ -3,6 +3,7 @@
   "icon": "Rocket",
   "pages": [
     "docker-compose",
+    "sealos",
     "kubernetes",
     "source-code"
   ]
