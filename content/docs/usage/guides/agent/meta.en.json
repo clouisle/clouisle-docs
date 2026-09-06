@@ -4,6 +4,7 @@
   "pages": [
     "create-agent",
     "conversation",
+    "embed-and-share",
     "memory",
     "media"
   ]

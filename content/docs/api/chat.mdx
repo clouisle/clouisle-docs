@@ -4,7 +4,23 @@ description: 发送 Agent 消息并接收正文、来源、工具和媒体结果
 icon: MessagesSquare
 ---
 
-## 端点
+Chat API 用于向 Agent 发送消息、接收流式响应、管理运行和会话。聊天端点挂载在 `/api/v1/agents` 下；会话管理端点分别挂载在 `/api/v1/conversations` 和 `/api/v1/agents/conversations` 下。
+
+## 认证
+
+`POST /api/v1/agents/{agent_id}/chat` 和 `/chat/stream` 支持 JWT Bearer Token 或 API Key。会话管理和消息版本端点要求认证为会话所有者。
+
+**所需作用域：**
+- `agent:read` - 查看 Agent
+- `agent:chat` - 与 Agent 聊天
+- `conversation:read` - 列出和查看会话
+- `conversation:delete` - 删除会话
+
+<Callout type="info">
+Agent 必须已发布。API Key 需要对应权限，并且如果绑定了 Agent，只能访问允许列表中的 ID。Agent 的附件限制、工具迭代上限和模型配额仍然生效。
+</Callout>
+
+## 端点总览
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -15,25 +31,588 @@ icon: MessagesSquare
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | 编辑用户消息并生成分支 |
 | GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | 查询消息版本 |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | 切换版本 |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | 运行状态（所有者范围） |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | 回放 N 之后的事件 |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问（`delivery: steer / follow_up / auto`） |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | 提交等待中 `ask_user` 调用的结构化答案 |
+| GET | `/api/v1/conversations` | 列出会话 |
+| GET | `/api/v1/conversations/{conversation_id}` | 获取会话及消息 |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | 更新会话标题 |
+| DELETE | `/api/v1/conversations/{conversation_id}` | 删除会话 |
 
-## 请求体
+## 发送消息
 
-`message` 必填；`conversation_id` 首次可为 `null`；`variables` 用于 Agent 定义的变量；`images` 和 `file_urls` 用于附件。图片对象至少应包含 URL；文件 URL 对象需要 `url`、`filename`、`mime_type` 和 `size`。
+向 Agent 发送消息并接收响应。
+
+### 端点
+
+```
+POST /api/v1/agents/{agent_id}/chat
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求体
 
 ```json
 {
-  "message": "请根据资料总结退款规则",
-  "conversation_id": null,
-  "variables": {"customer_type": "enterprise"},
-  "images": [],
-  "file_urls": []
+  "message": "营业时间是什么？",
+  "conversation_id": "conv-123",
+  "files": [
+    {
+      "name": "document.pdf",
+      "url": "https://example.com/document.pdf",
+      "type": "application/pdf"
+    }
+  ],
+  "file_urls": [
+    {
+      "asset_id": "asset-456",
+      "url": "https://your-domain.com/api/v1/upload/files/asset-456",
+      "filename": "report.pdf"
+    }
+  ],
+  "variables": {
+    "customer_tier": "premium"
+  }
 }
 ```
 
-## 非流式响应
+### 请求字段
 
-成功响应的 `data` 包含会话/消息标识、正文、RAG 上下文、工具调用、媒体结果、Token 用量和耗时。非流式适合短响应；长任务推荐 SSE。
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `message` | string | 是 | 用户消息（最多 32000 字符） |
+| `images` | array | 否 | 视觉图片（name, url, type） |
+| `files` | array | 否 | 已解析的上传文件（已弃用，使用 `file_urls`） |
+| `file_urls` | array | 否 | 原始上传的 Asset 元数据（`asset_id`, `url`, `filename`） |
+| `conversation_id` | string | 否 | 会话 UUID（不提供则创建新会话） |
+| `variables` | object | 否 | 聊天输入表单的变量值 |
+| `history_override` | array | 否 | 覆盖会话历史（用于版本切换/重新生成） |
 
-## 访问边界
+### 请求示例
 
-Agent 必须已发布。API Key 需要对应权限，并且如果绑定了 Agent，只能访问允许列表中的 ID。Agent 的附件限制、工具迭代上限和模型配额仍然生效。
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "营业时间是什么？",
+    "conversation_id": "conv-123"
+  }'
+```
+
+### 非流式响应
+
+**成功 (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "conversation_id": "conv-123",
+    "message": {
+      "id": "msg-456",
+      "conversation_id": "conv-123",
+      "role": "assistant",
+      "content": "我们的营业时间是周一至周五，美国东部时间上午 9 点至下午 5 点。",
+      "tool_calls": [],
+      "tool_name": null,
+      "model_used": "gpt-4",
+      "token_usage": {
+        "prompt": 150,
+        "completion": 25,
+        "total": 175
+      },
+      "duration_ms": 2300,
+      "rag_context": [
+        {
+          "document_id": "doc-789",
+          "document_name": "营业时间政策",
+          "chunk_id": "chunk-012",
+          "content": "营业时间：周一至周五，美东时间上午 9 点至下午 5 点",
+          "score": 0.95
+        }
+      ],
+      "created_at": "2026-02-11T16:00:00Z",
+      "version_number": 1,
+      "version_count": 1
+    },
+    "usage": {
+      "prompt": 150,
+      "completion": 25,
+      "total": 175
+    }
+  },
+  "msg": "success"
+}
+```
+
+## 流式响应
+
+流式响应使用独立端点，`POST /chat` 上没有 `stream` 标志。
+
+**端点：** `POST /api/v1/agents/{agent_id}/chat/stream`
+
+请求体与非流式的 `ChatRequest` 相同。响应以 Server-Sent Events (SSE) 发送。
+
+**Content-Type**: `text/event-stream`
+
+**事件格式：**
+
+```
+event: message_start
+data: {"conversation_id": "conv-123", "message_id": "msg-456"}
+
+event: content_delta
+data: {"delta": "我们的"}
+
+event: content_delta
+data: {"delta": "营业时间"}
+
+event: content_delta
+data: {"delta": "是"}
+
+event: rag_context
+data: {"contexts": [{"document_name": "常见问题", "content": "...", "score": 0.95}]}
+
+event: message_end
+data: {"usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 175}, "timing": {"first_token_ms": 320, "duration_ms": 2300, "tokens_per_second": 10.9}}
+```
+
+详见 [SSE 流式事件](./streaming)。
+
+## 持久运行与控制
+
+聊天执行由持久化的 `AgentRun` 支持，浏览器断开连接不会停止模型循环。流式端点流式传输相同的 SSE 事件；此外，运行范围的事件携带包含 `run_id`、`sequence`、`timestamp`、`round_id`、`message_id` 和 `type` 的信封，以便重连后无需重复（`after_sequence`）恢复。
+
+额外的运行事件：`run_start`（运行身份/状态）、`run_status`（queued/running/stopping 转换）、`input_accepted`（排队的引导/追问已提交）、`run_end`（恰好一个终止事件：`completed | stopped | failed | interrupted`）。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | 运行状态（所有者范围） |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | 回放 N 之后的事件 |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问（`delivery: steer / follow_up / auto`） |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | 提交等待中 `ask_user` 调用的结构化答案 |
+
+提交等待中 `ask_user` 调用的答案：
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
+```
+
+**请求体：**
+```json
+{
+  "tool_call_id": "call-123",
+  "answers": {
+    "deployment_target": "云端"
+  },
+  "skipped": false
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `tool_call_id` | string | 是 | 来自 `run_status` 等待事件的待处理工具调用 ID |
+| `answers` | object | 否 | ID 键控的答案映射；每个值为所选选项或自定义字符串 |
+| `skipped` | boolean | 否 | 显式跳过所有问题（发送 `{ "answers": {}, "skipped": true }`） |
+
+运行必须处于 `waiting` 状态，且 `tool_call_id` 必须匹配待处理的交互。成功后运行从暂停状态恢复。
+
+当运行活跃时，编辑器可以排队引导（中途）或追问（最终边界），而不是被禁用；停止发送服务器命令并等待终止 `run_end` 事件。
+
+## 重新生成
+
+重新生成助手消息。此端点挂载在 agents 路由器下，由 `agent_id` + `message_id` 寻址（路径中无 `conversation_id`）。
+
+### 端点
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/regenerate
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+| `message_id` | string | 是 | 要重新生成的消息 UUID |
+
+### 请求体
+
+```json
+{
+  "variables": {}
+}
+```
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/agent-123/messages/msg-002/regenerate" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "variables": {}
+  }'
+```
+
+### 响应
+
+**成功 (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "conversation_id": "conv-123",
+    "message": {
+      "id": "msg-003",
+      "conversation_id": "conv-123",
+      "role": "assistant",
+      "content": "我们的营业时间是周一到周五，美国东部标准时间上午 9:00 到下午 5:00。",
+      "token_usage": {
+        "total": 180
+      },
+      "created_at": "2026-02-11T16:15:00Z",
+      "version_number": 2,
+      "version_count": 2
+    },
+    "usage": {
+      "total": 180
+    }
+  },
+  "msg": "success"
+}
+```
+
+## 编辑用户消息并重新生成 (SSE)
+
+编辑用户消息、创建新版本并流式传输重新生成的回复：
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/edit/stream
+```
+
+请求体：
+
+```json
+{"content": "你们的节假日营业时间是多少？"}
+```
+
+只能编辑用户消息。响应为认证的 SSE 流（`text/event-stream`），使用聊天流事件格式；最终的 `message_end` 事件包含 `edited_version_number` 和 `edited_version_count`。
+
+## 消息版本
+
+### 列出版本
+
+列出消息版本组中的版本。此路由要求认证为会话所有者。
+
+```
+GET /api/v1/agents/{agent_id}/messages/{message_id}/versions
+```
+
+`200 OK` 响应为消息版本对象数组，包含 `id`、`version_number`、`is_active`、`content` 和 `created_at`。
+
+### 切换版本
+
+在同一消息组中激活不同版本。选中消息之后的版本会被停用，因为它们基于之前的分支。
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/switch-version
+```
+
+请求体：
+
+```json
+{"version_id": "msg-version-003"}
+```
+
+`200 OK` 响应返回选中的 `MessageOut`，包含版本信息。认证用户必须拥有该会话。
+
+## 会话管理
+
+### 列出会话
+
+```
+GET /api/v1/conversations
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页条数（最多 100） |
+| `team_id` | string | 否 | - | 按团队筛选 |
+| `agent_id` | string | 否 | - | 按 Agent ID 筛选 |
+| `user_id` | string | 否 | - | 按用户筛选（仅管理员/仪表盘访问） |
+| `search` | string | 否 | - | 按标题搜索 |
+| `untitled_only` | boolean | 否 | false | 仅显示无标题会话 |
+
+**成功 (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "conv-123",
+        "agent_id": "agent-456",
+        "agent_name": "客服 Agent",
+        "agent_icon": "🤖",
+        "title": "营业时间咨询",
+        "message_count": 5,
+        "created_at": "2026-02-11T16:00:00Z",
+        "updated_at": "2026-02-11T16:05:00Z",
+        "user_id": "user-123",
+        "user_name": "alice"
+      }
+    ],
+    "total": 42,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+### 获取会话
+
+```
+GET /api/v1/conversations/{conversation_id}
+```
+
+**成功 (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "conv-123",
+    "agent_id": "agent-456",
+    "agent_name": "客服 Agent",
+    "agent_icon": "🤖",
+    "title": "营业时间咨询",
+    "variables": {},
+    "message_count": 5,
+    "token_usage": 875,
+    "created_at": "2026-02-11T16:00:00Z",
+    "updated_at": "2026-02-11T16:05:00Z",
+    "messages": [
+      {
+        "id": "msg-001",
+        "conversation_id": "conv-123",
+        "role": "user",
+        "content": "你们的营业时间是什么？",
+        "created_at": "2026-02-11T16:00:00Z",
+        "version_number": 1,
+        "version_count": 1
+      },
+      {
+        "id": "msg-002",
+        "conversation_id": "conv-123",
+        "role": "assistant",
+        "content": "我们的营业时间是周一至周五，美国东部时间上午 9 点至下午 5 点。",
+        "tool_calls": [],
+        "rag_context": [
+          {
+            "document_id": "doc-789",
+            "document_name": "营业时间政策",
+            "score": 0.95
+          }
+        ],
+        "created_at": "2026-02-11T16:00:02Z",
+        "version_number": 1,
+        "version_count": 1
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="warn">
+获取会话消息（分页 `GET /conversations/{id}/messages`）尚未实现 / Roadmap。消息内联包含在 `GET /api/v1/conversations/{conversation_id}` 中。
+</Callout>
+
+### 更新会话
+
+更新会话详情（如重命名）。此端点挂载在 agents 路由器下。
+
+```
+PATCH /api/v1/agents/conversations/{conversation_id}
+```
+
+**请求体：**
+```json
+{
+  "title": "更新后的会话标题"
+}
+```
+
+**成功 (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "conv-123",
+    "title": "更新后的会话标题",
+    "updated_at": "2026-02-11T16:10:00Z"
+  },
+  "msg": "Conversation updated successfully"
+}
+```
+
+### 删除会话
+
+永久删除会话。
+
+```
+DELETE /api/v1/conversations/{conversation_id}
+```
+
+**成功 (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Conversation deleted successfully"
+}
+```
+
+> 用户范围的会话端点（如 `GET /api/v1/agents/conversations/my`）详见 [会话 API](./conversations)。
+
+## 错误码
+
+| 代码 | 消息 | 说明 |
+| --- | --- | --- |
+| `6200` | Agent not found | Agent 不存在 |
+| `6210` | Conversation not found | 会话不存在 |
+| `6211` | Message not found | 消息不存在 |
+| `3000` | Permission denied | 权限不足 |
+| `1001` | Validation failed | 请求数据无效 |
+
+<Callout type="warn">
+这些端点没有实现每端点速率限制。没有速率限制中间件。
+</Callout>
+
+完整的错误处理和重试策略详见 [API 错误与重试](./errors)。
+
+## 最佳实践
+
+### 消息处理
+
+**✅ 推荐：**
+- 保持消息简洁清晰
+- 需要时提供上下文
+- 使用 `conversation_id` 保持上下文
+- 处理流式响应以获得更好的用户体验
+- 为失败实现重试逻辑
+
+**❌ 避免：**
+- 发送过长的消息
+- 每条消息都创建新会话
+- 忽略错误响应
+- 跳过错误处理
+- 频繁请求 API
+
+### 会话管理
+
+**✅ 推荐：**
+- 使用描述性会话标题
+- 清理旧会话
+- 监控会话数量
+
+**❌ 避免：**
+- 创建不必要的会话
+- 永久保留所有会话
+- 忘记删除测试会话
+
+## 代码示例
+
+### Python
+
+```python
+import requests
+
+def chat_with_agent(agent_id, message, conversation_id=None):
+    """向 Agent 发送消息。"""
+    url = f"https://your-domain.com/api/v1/agents/{agent_id}/chat"
+    headers = {
+        "Authorization": "Bearer YOUR_TOKEN",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "message": message,
+        "conversation_id": conversation_id
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+    result = response.json()
+
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+# 用法
+response = chat_with_agent(
+    agent_id="agent-123",
+    message="你们的营业时间是什么？",
+    conversation_id="conv-123"
+)
+
+print(f"响应: {response['message']['content']}")
+print(f"会话 ID: {response['conversation_id']}")
+```
+
+### JavaScript
+
+```javascript
+async function chatWithAgent(agentId, message, conversationId = null) {
+  const url = `https://your-domain.com/api/v1/agents/${agentId}/chat`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer YOUR_TOKEN',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message: message,
+      conversation_id: conversationId,
+    }),
+  });
+
+  const result = await response.json();
+
+  if (result.code === 0) {
+    return result.data;
+  } else {
+    throw new Error(result.msg);
+  }
+}
+
+// 用法
+const response = await chatWithAgent(
+  'agent-123',
+  '你们的营业时间是什么？',
+  'conv-123'
+);
+
+console.log('响应:', response.message.content);
+console.log('会话 ID:', response.conversation_id);
+```
+
+## 相关文档
+
+- [SSE 流式事件](./streaming) - 流式响应
+- [API 错误与重试](./errors) - 错误详情
+- [会话 API](./conversations) - 会话管理

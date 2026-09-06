@@ -4,37 +4,336 @@ description: 管理知识库、文档、分块和检索请求
 icon: Database
 ---
 
-知识库资源端点基础路径为 `/api/v1/knowledge-bases`。
+知识库资源端点基础路径为 `/api/v1/knowledge-bases`。所有端点都需要经过认证的 JWT 用户会话，不接受 API Key 认证。
 
-## 资源端点
+## 所需权限
+
+| 权限 | 说明 |
+| --- | --- |
+| `kb:read` | 列出和查看知识库 |
+| `kb:test` | 对知识库执行检索 |
+| `kb:create` | 创建知识库 |
+| `kb:update` | 更新知识库和上传文档 |
+| `kb:delete` | 删除知识库和文档 |
+
+## 端点总览
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET/POST | `/knowledge-bases` | 分页查询/创建知识库 |
-| GET/PUT/DELETE | `/knowledge-bases/{kb_id}` | 详情/更新/删除 |
-| GET | `/knowledge-bases/{kb_id}/stats` | 统计 |
+| GET/POST | `/knowledge-bases` | 分页查询 / 创建知识库 |
+| GET/PUT/DELETE | `/knowledge-bases/{kb_id}` | 详情 / 更新 / 删除 |
+| GET | `/knowledge-bases/{kb_id}/stats` | 统计信息 |
 | GET | `/knowledge-bases/{kb_id}/documents` | 文档列表 |
 | POST | `/knowledge-bases/{kb_id}/documents/upload` | 上传文件 |
 | POST | `/knowledge-bases/{kb_id}/documents/url` | 导入 URL |
+| GET | `/knowledge-bases/{kb_id}/documents/{doc_id}` | 文档详情 |
+| PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}` | 更新文档元数据 |
+| DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}` | 删除文档 |
 | POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process` | 处理文档 |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | 使用编辑后的分块处理 |
 | POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/preview-chunks` | 预览分块 |
 | POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | 重新处理 |
-| GET/PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | 查询/编辑分块 |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | 重试失败分块 |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | 重试单个分块嵌入 |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | 重新分块 |
+| GET/POST/PUT/DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | 分块 CRUD |
 | POST | `/knowledge-bases/{kb_id}/search` | 单次检索 |
-| POST | `/knowledge-bases/{kb_id}/search/batch` | 多配置对比 |
+| POST | `/knowledge-bases/{kb_id}/search/batch` | 多配置对比检索 |
 
-## 检索请求
+## 知识库管理
 
-```json
-{
-  "query": "如何重置密码？",
-  "search_mode": "hybrid",
-  "top_k": 5,
-  "score_threshold": 0,
-  "dense_weight": 1,
-  "lexical_weight": 1,
-  "rrf_k": 60
-}
+### 列出知识库
+
+```
+GET /api/v1/knowledge-bases
 ```
 
-查询为 `1-1000` 字符；混合权重不能同时为 `0`。结果包含 `chunk_id`、文档名、内容、最终分数以及各阶段排名/分数。
+查询参数：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页数量 |
+| `team_id` | string | 否 | - | 按团队 ID 过滤 |
+| `status` | array | 否 | - | 按状态过滤：`active`、`processing`、`error`、`archived`（可重复） |
+| `search` | string | 否 | - | 按名称或描述搜索 |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/knowledge-bases?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+响应 `data.items` 中每个知识库对象包含 `id`、`name`、`description`、`icon`、`team`、`created_by`、`status`、`embedding_model`、`rerank_model`、`embedding_dimension`、`document_count`、`total_chunks`、`total_tokens`、`created_at`。响应包装在 `items`/`total`/`page`/`page_size` 分页结构中。
+
+### 获取知识库详情
+
+```
+GET /api/v1/knowledge-bases/{kb_id}
+```
+
+返回单个知识库，比列表响应多出 `settings` 和 `updated_at` 字段。`settings` 对象包含 `chunk_size`、`chunk_overlap`、`rerank_enabled`、`rerank_candidate_k`、`search_mode`、`top_k`、`score_threshold`。
+
+### 创建知识库
+
+```
+POST /api/v1/knowledge-bases
+```
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 知识库名称（最多 100 字符） |
+| `description` | string | 否 | 描述（最多 500 字符） |
+| `icon` | string | 否 | 图标名或 emoji（最多 50 字符） |
+| `team_id` | string | 是 | 团队 UUID |
+| `embedding_model_id` | string | 否 | 嵌入模型 UUID（必须已授权给团队） |
+| `rerank_model_id` | string | 否 | 重排模型 UUID（必须已授权给团队） |
+| `settings` | object | 否 | 知识库设置：`chunk_size`（默认 1000，最小 100）、`chunk_overlap`（默认 100，最小 0）、`separator`、`rerank_enabled`（默认 true）、`rerank_candidate_k`（默认 10）、`rerank_score_threshold`、`search_mode`（`vector`/`fulltext`/`hybrid`）、`top_k`、`score_threshold`、`dense_weight`、`lexical_weight`、`rrf_k` |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "产品文档",
+    "description": "产品资料与常见问题",
+    "team_id": "team-123",
+    "embedding_model_id": "model-emb-01",
+    "settings": {"chunk_size": 1000}
+  }'
+```
+
+### 更新知识库
+
+```
+PUT /api/v1/knowledge-bases/{kb_id}
+```
+
+所有字段可选，只需包含要更新的字段：`name`、`description`、`icon`、`settings`。
+
+<Callout type="warn">嵌入模型在知识库创建时选定，无法通过更新端点更改。</Callout>
+
+### 删除知识库
+
+```
+DELETE /api/v1/knowledge-bases/{kb_id}
+```
+
+成功响应 `data` 为 `null`，`msg` 为 `"Knowledge base deleted successfully"`。
+
+## 文档管理
+
+### 上传文档
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/upload
+```
+
+Content-Type 为 `multipart/form-data`，字段 `file` 为必填，支持 `.pdf`、`.docx`、`.txt`、`.md` 等格式。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/documents/upload" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@document.pdf"
+```
+
+上传成功后文档状态为 `pending`，需要调用处理端点才会开始嵌入。
+
+### 导入 URL
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/url
+```
+
+请求体：
+
+```json
+{"name": "页面标题", "source_url": "https://example.com/page", "doc_type": "url"}
+```
+
+### 列出文档
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/documents
+```
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页数量 |
+| `status` | array | 否 | - | `pending`、`processing`、`completed`、`error`（可重复） |
+| `doc_type` | array | 否 | - | `pdf`、`docx`、`txt`、`markdown`、`url` 等（可重复） |
+| `search` | string | 否 | - | 按文档名称搜索 |
+
+### 获取文档详情
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
+```
+
+返回文档完整信息，包含 `uploaded_by`、`processed_at` 等字段。
+
+### 更新文档
+
+```
+PUT /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
+```
+
+仅支持更新文档名称：
+
+```json
+{"name": "新标题.pdf"}
+```
+
+### 删除文档
+
+```
+DELETE /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
+```
+
+成功响应 `data` 为 `null`。
+
+## 文档处理生命周期
+
+上传文档后状态为 `pending`，需要显式调用处理端点才会开始嵌入。处理流程为：`pending` → `processing` → `completed`（或 `error`）。
+
+### 处理待处理文档
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process
+```
+
+可选 JSON 请求体：
+
+```json
+{"chunk_size": 1000, "chunk_overlap": 100, "separator": null, "clean_text": true}
+```
+
+返回 `200 OK` 及文档对象，状态通常转为 `processing`，嵌入异步完成。
+
+### 使用编辑后的分块处理
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process-with-chunks
+```
+
+请求体包含自定义分块数组：
+
+```json
+{"chunks": [{"content": "分块文本", "chunk_index": 0}]}
+```
+
+这会替换文档分块并开始嵌入。
+
+### 预览分块
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/preview-chunks
+```
+
+需要 `kb:read` 权限。请求体接受 `chunk_size`（最小 100）、`chunk_overlap`、可选 `separator` 和 `clean_text`。响应包含 `total_chunks`、`total_tokens`、`total_chars` 和 `chunks` 数组。
+
+### 重新处理和重试
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess
+POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks
+POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding
+```
+
+- `reprocess`：重新分块并重新嵌入文档
+- `retry-failed-chunks`：重试所有嵌入失败的分块
+- `retry-embedding`：重试单个失败分块
+
+每个端点返回 `200 OK` 及文档对象。
+
+## 文档分块
+
+```
+GET    /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks?page=1&page_size=50
+POST   /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks?after_index=0
+PUT    /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks/{chunk_id}
+DELETE /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks/{chunk_id}
+POST   /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/rechunk
+```
+
+- **列表**：使用 `items`/`total`/`page`/`page_size` 分页结构
+- **创建**：在 `after_index` 位置后插入新分块，请求体 `{"content": "..."}`
+- **更新**：请求体 `{"content": "..."}`
+- **重新分块**：接受 `chunk_size`、`chunk_overlap` 和可选 `separator`
+
+各端点按操作需要 `kb:read`/`kb:update`/`kb:delete` 权限。
+
+## 检索
+
+### 单次检索
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/search
+```
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `query` | string | 是 | 搜索查询（最多 1000 字符） |
+| `search_mode` | string | 否 | `vector`、`fulltext`、`hybrid`（默认 `hybrid`） |
+| `top_k` | integer | 否 | 结果数量（默认 5，最大 20） |
+| `score_threshold` | float | 否 | 最低相似度分数（0.0-1.0，默认 0.0） |
+| `dense_weight` | float | 否 | 稠密 RRF 权重（默认 1.0） |
+| `lexical_weight` | float | 否 | 词汇 RRF 权重（默认 1.0） |
+| `rrf_k` | integer | 否 | RRF 排名常数（默认 60） |
+| `filter_doc_ids` | array | 否 | 限定在指定文档 ID 内搜索 |
+| `rerank_enabled` | boolean | 否 | 覆盖重排启用设置 |
+| `rerank_candidate_k` | integer | 否 | 覆盖重排候选池大小 |
+| `rerank_score_threshold` | float | 否 | 覆盖重排分数阈值（null 禁用） |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/search" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "如何重置密码？", "search_mode": "hybrid", "top_k": 5}'
+```
+
+查询长度限制为 1-1000 字符；混合检索时 `dense_weight` 与 `lexical_weight` 不能同时为 0。
+
+响应 `results` 数组中每个结果包含 `chunk_id`、`document_id`、`document_name`、`content`、`score`、`metadata`、`search_type`，以及各阶段分数：`dense_score`、`lexical_score`、`fusion_score`、`rerank_score`、`rerank_rank`。`timings` 数组记录 `recall`、`rerank`、`total` 各阶段延迟（毫秒）。
+
+<Callout type="warn">
+  混合检索模式下，`dense_weight` 与 `lexical_weight` 不能同时为 `0`，否则请求会被拒绝。
+</Callout>
+
+### 多配置对比检索
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/search/batch
+```
+
+请求体为检索配置数组，每种配置独立执行并返回结果，用于对比不同参数的效果。
+
+## 知识库统计
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/stats
+```
+
+返回 `document_count`、`total_chunks`、`total_tokens`、`documents_by_status`（按状态分布）、`documents_by_type`（按类型分布）、`embedding_dimension`、`embedding_stats`（`total_vectors`、`missing_vectors`）。
+
+## 错误码
+
+| 错误码 | 消息 | 说明 |
+| --- | --- | --- |
+| `6000` | KB not found | 知识库不存在 |
+| `6001` | Name already exists | 知识库名称已被占用 |
+| `6002` | Document not found | 文档不存在 |
+| `6003` | Invalid document type | 不支持的文档类型 |
+| `6004` | Document processing failed | 文档处理出错 |
+| `3000` | Permission denied | 权限不足 |
+| `1001` | Validation failed | 请求数据无效 |
+
+<Callout type="info">
+  知识库端点没有单独的速率限制，这些端点上未实施限流中间件。
+</Callout>

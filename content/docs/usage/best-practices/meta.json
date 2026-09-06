@@ -1,0 +1,10 @@
+{
+  "title": "最佳实践",
+  "icon": "Lightbulb",
+  "pages": [
+    "performance-tuning",
+    "kb-optimization",
+    "prompt-engineering",
+    "workflow-patterns"
+  ]
+}

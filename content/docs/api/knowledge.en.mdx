@@ -4,9 +4,19 @@ description: Manage knowledge bases, documents, chunks, and retrieval requests
 icon: Database
 ---
 
-Knowledge base resource endpoints have a base path of `/api/v1/knowledge-bases`.
+Knowledge base resource endpoints have a base path of `/api/v1/knowledge-bases`. All endpoints require an authenticated JWT user session; API-key authentication is not accepted.
 
-## Resource Endpoints
+## Required Scopes
+
+| Scope | Description |
+| --- | --- |
+| `kb:read` | List and view knowledge bases |
+| `kb:test` | Run searches against knowledge bases |
+| `kb:create` | Create knowledge bases |
+| `kb:update` | Update knowledge bases and upload documents |
+| `kb:delete` | Delete knowledge bases and documents |
+
+## Endpoint Overview
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -16,25 +26,314 @@ Knowledge base resource endpoints have a base path of `/api/v1/knowledge-bases`.
 | GET | `/knowledge-bases/{kb_id}/documents` | Document list |
 | POST | `/knowledge-bases/{kb_id}/documents/upload` | Upload a file |
 | POST | `/knowledge-bases/{kb_id}/documents/url` | Import a URL |
-| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process a document |
+| GET | `/knowledge-bases/{kb_id}/documents/{doc_id}` | Document details |
+| PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}` | Update document metadata |
+| DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}` | Delete document |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process document |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | Process with edited chunks |
 | POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/preview-chunks` | Preview chunks |
 | POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | Reprocess |
-| GET/PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | Query / edit chunks |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | Retry failed chunks |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | Retry single chunk embedding |
+| POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | Rechunk |
+| GET/POST/PUT/DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | Chunk CRUD |
 | POST | `/knowledge-bases/{kb_id}/search` | Single retrieval |
-| POST | `/knowledge-bases/{kb_id}/search/batch` | Multi-config comparison |
+| POST | `/knowledge-bases/{kb_id}/search/batch` | Multi-config comparison retrieval |
 
-## Retrieval Request
+## Knowledge Base Management
 
-```json
-{
-  "query": "How do I reset my password?",
-  "search_mode": "hybrid",
-  "top_k": 5,
-  "score_threshold": 0,
-  "dense_weight": 1,
-  "lexical_weight": 1,
-  "rrf_k": 60
-}
+### List Knowledge Bases
+
+```
+GET /api/v1/knowledge-bases
 ```
 
-Queries are `1-1000` characters; hybrid weights cannot both be `0`. Results contain `chunk_id`, document name, content, final score, and per-stage ranking/scores.
+Query parameters:
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `page` | integer | No | 1 | Page number |
+| `page_size` | integer | No | 20 | Items per page |
+| `team_id` | string | No | - | Filter by team ID |
+| `status` | array | No | - | Filter by status: `active`, `processing`, `error`, `archived` (repeatable) |
+| `search` | string | No | - | Search by name or description |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/knowledge-bases?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Each KB object in `data.items` contains `id`, `name`, `description`, `icon`, `team`, `created_by`, `status`, `embedding_model`, `rerank_model`, `embedding_dimension`, `document_count`, `total_chunks`, `total_tokens`, `created_at`. Response is wrapped in `items`/`total`/`page`/`page_size` pagination structure.
+
+### Get Knowledge Base Details
+
+```
+GET /api/v1/knowledge-bases/{kb_id}
+```
+
+Returns a single KB with additional `settings` and `updated_at` fields. The `settings` object contains `chunk_size`, `chunk_overlap`, `rerank_enabled`, `rerank_candidate_k`, `search_mode`, `top_k`, `score_threshold`.
+
+### Create Knowledge Base
+
+```
+POST /api/v1/knowledge-bases
+```
+
+Request fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Yes | KB name (max 100 chars) |
+| `description` | string | No | KB description (max 500 chars) |
+| `icon` | string | No | Icon name or emoji (max 50 chars) |
+| `team_id` | string | Yes | Team UUID |
+| `embedding_model_id` | string | No | Embedding model UUID (must be authorized for the team) |
+| `rerank_model_id` | string | No | Rerank model UUID (must be authorized for the team) |
+| `settings` | object | No | KB settings: `chunk_size` (default 1000, min 100), `chunk_overlap` (default 100, min 0), `separator`, `rerank_enabled` (default true), `rerank_candidate_k` (default 10), `rerank_score_threshold`, `search_mode` (`vector`/`fulltext`/`hybrid`), `top_k`, `score_threshold`, `dense_weight`, `lexical_weight`, `rrf_k` |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Product Documentation",
+    "description": "Product docs and FAQs",
+    "team_id": "team-123",
+    "embedding_model_id": "model-emb-01",
+    "settings": {"chunk_size": 1000}
+  }'
+```
+
+### Update Knowledge Base
+
+```
+PUT /api/v1/knowledge-bases/{kb_id}
+```
+
+All fields are optional; include only the fields you want to update: `name`, `description`, `icon`, `settings`.
+
+<Callout type="warn">The embedding model is selected when the knowledge base is created and cannot be changed by the update endpoint.</Callout>
+
+### Delete Knowledge Base
+
+```
+DELETE /api/v1/knowledge-bases/{kb_id}
+```
+
+Successful response has `data: null` and `msg: "Knowledge base deleted successfully"`.
+
+## Document Management
+
+### Upload Document
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/upload
+```
+
+Content-Type is `multipart/form-data`; the `file` field is required. Supports `.pdf`, `.docx`, `.txt`, `.md`, etc.
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/documents/upload" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@document.pdf"
+```
+
+After upload, the document status is `pending`; you must call a process endpoint to begin embedding.
+
+### Import URL
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/url
+```
+
+Request body:
+
+```json
+{"name": "Page Title", "source_url": "https://example.com/page", "doc_type": "url"}
+```
+
+### List Documents
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/documents
+```
+
+Query parameters:
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `page` | integer | No | 1 | Page number |
+| `page_size` | integer | No | 20 | Items per page |
+| `status` | array | No | - | `pending`, `processing`, `completed`, `error` (repeatable) |
+| `doc_type` | array | No | - | `pdf`, `docx`, `txt`, `markdown`, `url`, etc. (repeatable) |
+| `search` | string | No | - | Search by document name |
+
+### Get Document Details
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
+```
+
+Returns full document info including `uploaded_by`, `processed_at`, etc.
+
+### Update Document
+
+```
+PUT /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
+```
+
+Only the document name can be updated:
+
+```json
+{"name": "Updated Title.pdf"}
+```
+
+### Delete Document
+
+```
+DELETE /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
+```
+
+Successful response has `data: null`.
+
+## Document Processing Lifecycle
+
+Uploading a document creates it with `status: "pending"`; upload does not process it automatically. The processing flow is: `pending` → `processing` → `completed` (or `error`).
+
+### Process a Pending Document
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process
+```
+
+Optional JSON body:
+
+```json
+{"chunk_size": 1000, "chunk_overlap": 100, "separator": null, "clean_text": true}
+```
+
+Returns `200 OK` with the document object, normally transitioning to `processing` before asynchronous embedding completes.
+
+### Process with Edited Chunks
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process-with-chunks
+```
+
+Request body contains custom chunks:
+
+```json
+{"chunks": [{"content": "A chunk of text", "chunk_index": 0}]}
+```
+
+This replaces the document chunks and starts embedding.
+
+### Preview Chunks
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/preview-chunks
+```
+
+Requires `kb:read` scope. Body accepts `chunk_size` (minimum 100), `chunk_overlap`, optional `separator`, and `clean_text`. Response contains `total_chunks`, `total_tokens`, `total_chars`, and `chunks` array.
+
+### Reprocess and Retry
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess
+POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks
+POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding
+```
+
+- `reprocess`: Re-chunks and re-embeds the document
+- `retry-failed-chunks`: Re-runs all failed chunk embeddings
+- `retry-embedding`: Re-runs a single failed chunk
+
+Each returns `200 OK` with the document object.
+
+## Document Chunks
+
+```
+GET    /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks?page=1&page_size=50
+POST   /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks?after_index=0
+PUT    /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks/{chunk_id}
+DELETE /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/chunks/{chunk_id}
+POST   /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/rechunk
+```
+
+- **List**: Uses `items`/`total`/`page`/`page_size` pagination
+- **Create**: Inserts a new chunk after `after_index`; body `{"content": "..."}`
+- **Update**: Body `{"content": "..."}`
+- **Rechunk**: Accepts `chunk_size`, `chunk_overlap`, and optional `separator`
+
+Each endpoint requires `kb:read`/`kb:update`/`kb:delete` according to the operation.
+
+## Retrieval
+
+### Single Retrieval
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/search
+```
+
+Request fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `query` | string | Yes | Search query (max 1000 chars) |
+| `search_mode` | string | No | `vector`, `fulltext`, `hybrid` (default: `hybrid`) |
+| `top_k` | integer | No | Number of results (default: 5, max: 20) |
+| `score_threshold` | float | No | Minimum dense similarity score (0.0-1.0, default: 0.0) |
+| `dense_weight` | float | No | Dense RRF weight (default: 1.0) |
+| `lexical_weight` | float | No | Lexical RRF weight (default: 1.0) |
+| `rrf_k` | integer | No | RRF rank constant (default: 60) |
+| `filter_doc_ids` | array | No | Restrict search to specific document IDs |
+| `rerank_enabled` | boolean | No | Override rerank enabled setting |
+| `rerank_candidate_k` | integer | No | Override rerank candidate pool size |
+| `rerank_score_threshold` | float | No | Override rerank score threshold (null disables) |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/search" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How to reset password", "search_mode": "hybrid", "top_k": 5}'
+```
+
+Query length is limited to 1-1000 characters; in hybrid mode, `dense_weight` and `lexical_weight` cannot both be 0.
+
+Each result in the response `results` array contains `chunk_id`, `document_id`, `document_name`, `content`, `score`, `metadata`, `search_type`, and per-stage scores: `dense_score`, `lexical_score`, `fusion_score`, `rerank_score`, `rerank_rank`. The `timings` array records `recall`, `rerank`, `total` stage latencies in milliseconds.
+
+<Callout type="warn">
+  In hybrid retrieval mode, `dense_weight` and `lexical_weight` cannot both be `0`; the request will be rejected.
+</Callout>
+
+### Multi-Config Comparison Retrieval
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/search/batch
+```
+
+Request body is an array of retrieval configs, each executed independently and returned for parameter comparison.
+
+## Knowledge Base Statistics
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/stats
+```
+
+Returns `document_count`, `total_chunks`, `total_tokens`, `documents_by_status` (distribution by status), `documents_by_type` (distribution by type), `embedding_dimension`, `embedding_stats` (`total_vectors`, `missing_vectors`).
+
+## Error Codes
+
+| Code | Message | Description |
+| --- | --- | --- |
+| `6000` | KB not found | Knowledge base does not exist |
+| `6001` | Name already exists | KB name is taken |
+| `6002` | Document not found | Document does not exist |
+| `6003` | Invalid document type | Document type is not supported |
+| `6004` | Document processing failed | Document processing error |
+| `3000` | Permission denied | Insufficient permissions |
+| `1001` | Validation failed | Invalid request data |
+
+<Callout type="info">
+  There are no per-endpoint rate limits; no rate-limit middleware is implemented on these endpoints.
+</Callout>

@@ -2,11 +2,13 @@
   "title": "Core concepts",
   "icon": "Lightbulb",
   "pages": [
+    "architecture",
     "agent",
     "workflow",
     "knowledge-base",
     "model",
     "tool",
+    "sandbox",
     "security"
   ]
 }

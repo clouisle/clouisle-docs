@@ -1,0 +1,546 @@
+---
+title: Teams API
+description: 管理与团队成员
+icon: UsersRound
+---
+
+## 端点
+
+| 方法 | 路径 | 用途 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/my` | 列出当前用户所属团队 | `team:read` |
+| GET | `/api/v1/teams/{team_id}` | 获取团队详情（含成员列表） | `team:read` |
+| POST | `/api/v1/admin/teams` | 创建团队 | `admin:team:create` |
+| PUT | `/api/v1/teams/{team_id}` | 更新团队信息 | `team:update` |
+| DELETE | `/api/v1/admin/teams/{team_id}` | 删除团队 | `admin:team:delete` |
+| POST | `/api/v1/teams/{team_id}/members` | 添加团队成员 | `team:manage` |
+| PUT | `/api/v1/teams/{team_id}/members/{user_id}` | 更新成员角色 | `team:manage` |
+| DELETE | `/api/v1/teams/{team_id}/members/{user_id}` | 移除团队成员 | `team:manage` |
+
+## 基础 URL
+
+- 平台接口：`/api/v1/teams`
+- 管理接口：`/api/v1/admin/teams`
+
+## 认证
+
+所有团队端点都需要经过认证的 JWT 用户会话，不接受 API Key 认证。
+
+**所需权限范围：**
+
+| 范围 | 说明 |
+| --- | --- |
+| `team:read` | 查看团队信息 |
+| `team:update` | 更新团队详情 |
+| `team:manage` | 管理团队成员和成员操作 |
+| `admin:team:create` | 创建团队（管理员） |
+| `admin:team:delete` | 删除团队（管理员） |
+
+## 列出我的团队
+
+获取当前用户所属的所有团队，以及用户在每个团队中的角色。
+
+```
+GET /api/v1/teams/my
+```
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/teams/my" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "team-123",
+      "name": "Marketing Team",
+      "description": "Marketing and content creation team",
+      "avatar_url": null,
+      "role": "member",
+      "joined_at": "2026-01-15T10:00:00Z"
+    }
+  ],
+  "msg": "success"
+}
+```
+
+<Callout type="info">
+  没有 `GET /api/v1/teams` 列出所有团队的端点。管理员可通过 `GET /api/v1/admin/teams`（分页，支持按名称或描述 `search`，默认 `page_size` 50）列出所有团队，需要 `admin:team:read` 权限。
+</Callout>
+
+## 获取团队详情
+
+获取指定团队的详细信息，包括成员列表。
+
+```
+GET /api/v1/teams/{team_id}
+```
+
+**路径参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/teams/team-123" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "team-123",
+    "name": "Marketing Team",
+    "description": "Marketing and content creation team",
+    "avatar_url": null,
+    "is_default": false,
+    "owner": {
+      "id": "user-456",
+      "username": "alice",
+      "email": "alice@example.com",
+      "avatar_url": "https://example.com/avatars/alice.jpg"
+    },
+    "created_at": "2026-01-15T10:00:00Z",
+    "updated_at": "2026-02-11T15:30:00Z",
+    "members": [
+      {
+        "id": "membership-001",
+        "user_id": "user-456",
+        "username": "alice",
+        "email": "alice@example.com",
+        "avatar_url": "https://example.com/avatars/alice.jpg",
+        "role": "owner",
+        "joined_at": "2026-01-15T10:00:00Z"
+      },
+      {
+        "id": "membership-002",
+        "user_id": "user-789",
+        "username": "bob",
+        "email": "bob@example.com",
+        "avatar_url": null,
+        "role": "member",
+        "joined_at": "2026-01-16T10:00:00Z"
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+## 创建团队
+
+创建新团队（仅管理员）。
+
+```
+POST /api/v1/admin/teams
+```
+
+**请求体：**
+
+```json
+{
+  "name": "Sales Team",
+  "description": "Sales and customer relations team",
+  "avatar_url": null
+}
+```
+
+**请求字段：**
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 团队名称 |
+| `description` | string | 否 | 团队描述 |
+| `avatar_url` | string | 否 | 团队头像 URL |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/teams" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Sales Team",
+    "description": "Sales and customer relations team"
+  }'
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "team-456",
+    "name": "Sales Team",
+    "description": "Sales and customer relations team",
+    "avatar_url": null,
+    "is_default": false,
+    "owner": null,
+    "created_at": "2026-02-11T16:00:00Z",
+    "updated_at": "2026-02-11T16:00:00Z"
+  },
+  "msg": "Team created successfully"
+}
+```
+
+## 更新团队
+
+更新团队信息。
+
+```
+PUT /api/v1/teams/{team_id}
+```
+
+**路径参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+
+**请求体：** 所有字段均为可选，只需包含要更新的字段。
+
+```json
+{
+  "name": "Updated Team Name",
+  "description": "Updated description",
+  "avatar_url": null
+}
+```
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/teams/team-123" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Team Name"
+  }'
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "team-123",
+    "name": "Updated Team Name",
+    "description": null,
+    "avatar_url": null,
+    "is_default": false,
+    "owner": {
+      "id": "user-456",
+      "username": "alice",
+      "email": "alice@example.com",
+      "avatar_url": null
+    },
+    "created_at": "2026-01-15T10:00:00Z",
+    "updated_at": "2026-02-11T16:05:00Z"
+  },
+  "msg": "Team updated successfully"
+}
+```
+
+## 删除团队
+
+永久删除团队（仅管理员）。
+
+```
+DELETE /api/v1/admin/teams/{team_id}
+```
+
+**路径参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/admin/teams/team-123" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Team deleted successfully"
+}
+```
+
+## 添加团队成员
+
+向团队添加成员。
+
+```
+POST /api/v1/teams/{team_id}/members
+```
+
+**路径参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+
+**请求体：**
+
+```json
+{
+  "user_id": "user-999",
+  "role": "member"
+}
+```
+
+**请求字段：**
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | string | 是 | 要添加的用户 UUID |
+| `role` | string | 否 | 成员角色：`admin`、`member`、`viewer`（默认 `member`） |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/teams/team-123/members" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-999",
+    "role": "member"
+  }'
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "membership-003",
+    "user_id": "user-999",
+    "username": "carol",
+    "email": "carol@example.com",
+    "avatar_url": null,
+    "role": "member",
+    "joined_at": "2026-02-11T16:00:00Z"
+  },
+  "msg": "Member added successfully"
+}
+```
+
+## 更新团队成员角色
+
+更新团队成员的角色。
+
+```
+PUT /api/v1/teams/{team_id}/members/{user_id}
+```
+
+**路径参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+| `user_id` | string | 是 | 用户 UUID |
+
+**请求体：**
+
+```json
+{
+  "role": "admin"
+}
+```
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/teams/team-123/members/user-999" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "admin"
+  }'
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "membership-003",
+    "user_id": "user-999",
+    "username": "carol",
+    "email": "carol@example.com",
+    "avatar_url": null,
+    "role": "admin",
+    "joined_at": "2026-02-11T16:00:00Z"
+  },
+  "msg": "Member role updated successfully"
+}
+```
+
+## 移除团队成员
+
+从团队中移除成员。
+
+```
+DELETE /api/v1/teams/{team_id}/members/{user_id}
+```
+
+**路径参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+| `user_id` | string | 是 | 用户 UUID |
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/teams/team-123/members/user-999" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Member removed successfully"
+}
+```
+
+## 未实现功能
+
+<Callout type="warn">
+  以下功能尚未实现，属于 Roadmap 规划：
+  - **列出团队成员**：没有独立的 `GET /teams/{team_id}/members` 端点。完整成员列表包含在 `GET /api/v1/teams/{team_id}` 的响应中（参见 [获取团队详情](#获取团队详情)）。
+  - **团队统计**：没有团队统计端点。
+</Callout>
+
+## 错误码
+
+| 代码 | 消息 | 说明 |
+| --- | --- | --- |
+| `4004` | Team not found | 团队不存在 |
+| `3000` | Permission denied | 权限不足 |
+| `3002` | Not team member | 用户不是团队成员 |
+| `1001` | Validation failed | 请求数据无效 |
+| `5102` | Name already exists | 团队名称已存在 |
+| `5103` | Already team member | 用户已是团队成员 |
+
+<Callout type="info">
+  这些端点没有实现单独的速率限制，端点上没有速率限制中间件。
+</Callout>
+
+## 代码示例
+
+### Python
+
+```python
+import requests
+
+def list_my_teams(token):
+    """列出当前用户所属的团队。"""
+    url = "https://your-domain.com/api/v1/teams/my"
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    response = requests.get(url, headers=headers)
+    result = response.json()
+
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+def add_team_member(token, team_id, user_id, role="member"):
+    """向团队添加成员。"""
+    url = f"https://your-domain.com/api/v1/teams/{team_id}/members"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "user_id": user_id,
+        "role": role
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+    result = response.json()
+
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+# 使用示例
+teams = list_my_teams("YOUR_TOKEN")
+for team in teams:
+    print(f"Team: {team['name']} (role: {team['role']})")
+
+member = add_team_member("YOUR_TOKEN", "team-123", "user-999", "member")
+print(f"Added member: {member['user_id']}")
+```
+
+### JavaScript
+
+```javascript
+async function listMyTeams(token) {
+  const response = await fetch(
+    'https://your-domain.com/api/v1/teams/my',
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    }
+  );
+
+  const result = await response.json();
+
+  if (result.code === 0) {
+    return result.data;
+  } else {
+    throw new Error(result.msg);
+  }
+}
+
+async function addTeamMember(token, teamId, userId, role = 'member') {
+  const response = await fetch(
+    `https://your-domain.com/api/v1/teams/${teamId}/members`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        role: role,
+      }),
+    }
+  );
+
+  const result = await response.json();
+
+  if (result.code === 0) {
+    return result.data;
+  } else {
+    throw new Error(result.msg);
+  }
+}
+
+// 使用示例
+const teams = await listMyTeams('YOUR_TOKEN');
+teams.forEach(team => {
+  console.log(`Team: ${team.name} (role: ${team.role})`);
+});
+
+const member = await addTeamMember('YOUR_TOKEN', 'team-123', 'user-999', 'member');
+console.log('Added member:', member.user_id);
+```

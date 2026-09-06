@@ -1,33 +1,817 @@
 ---
-title: 工作流执行 API
-description: 运行工作流、调用 Webhook、取消任务并订阅执行流
+title: 工作流 API
+description: 管理工作流、执行运行、订阅执行流与 Webhook 触发
 icon: Workflow
 ---
 
-## 主要端点
+## 概述
+
+工作流 API 用于管理工作流的全生命周期与执行：
+
+- **管理工作流**：列出、获取、创建、更新、删除工作流
+- **执行工作流**：运行已发布的工作流并传入输入参数
+- **查询执行状态**：获取运行详情与节点级执行信息
+- **列出执行历史**：分页查看工作流的运行记录
+- **取消执行**：终止正在运行的执行
+- **Webhook 触发**：通过 Webhook 异步触发工作流
+- **统计信息**：获取工作流的运行统计与趋势
+
+**Base URL**: `/api/v1/workflows`
+
+## 认证
+
+工作流管理与用户发起的运行/状态路由需要已认证的 JWT 用户会话；这些路由**不接受**API Key 认证。唯一的例外是 Webhook 触发：`POST /api/v1/workflows/webhook/{webhook_token}` 需要在 `Authorization` 头中携带 `clou_` 前缀的 API Key。
+
+**所需权限范围：**
+
+| 范围 | 用途 |
+| --- | --- |
+| `workflow:read` | 列出和查看工作流 |
+| `workflow:create` | 创建工作流 |
+| `workflow:update` | 更新工作流 |
+| `workflow:delete` | 删除工作流 |
+| `workflow:run` | 执行工作流 |
+
+## 端点总览
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| POST | `/api/v1/workflows/{workflow_id}/run` | 运行已发布工作流 |
-| POST | `/api/v1/workflows/{workflow_id}/debug` | 使用草稿调试 |
-| POST | `/api/v1/workflows/webhook/{webhook_token}` | 通过 Webhook 异步触发 |
-| GET | `/api/v1/workflows/runs/{run_id}/stream` | SSE 执行事件 |
-| POST | `/api/v1/workflows/runs/{run_id}/cancel` | 取消运行 |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | 查询当前用户运行 |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | 查看运行详情 |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}/nodes` | 查看节点执行 |
+| GET | `/api/v1/workflows` | 列出工作流 |
+| POST | `/api/v1/workflows` | 创建工作流 |
+| GET | `/api/v1/workflows/{workflow_id}` | 获取工作流详情 |
+| PUT | `/api/v1/workflows/{workflow_id}` | 更新工作流 |
+| DELETE | `/api/v1/workflows/{workflow_id}` | 删除工作流 |
+| POST | `/api/v1/workflows/{workflow_id}/run` | 执行工作流 |
+| GET | `/api/v1/workflows/runs/{run_id}` | 获取执行状态 |
+| GET | `/api/v1/workflows/{workflow_id}/runs` | 列出执行历史 |
+| POST | `/api/v1/workflows/runs/{run_id}/cancel` | 取消执行 |
+| GET | `/api/v1/workflows/runs/{run_id}/stream` | SSE 执行事件流 |
+| GET | `/api/v1/workflows/runs/{run_id}/nodes` | 节点执行详情 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-request` | 获取等待中暂停/审批请求 |
+| POST | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-requests/{req_id}/submit` | 提交审批或变量以恢复运行 |
+| POST | `/api/v1/workflows/webhook/{webhook_token}` | Webhook 触发 |
+| GET | `/api/v1/workflows/{workflow_id}/stats` | 工作流统计 |
+| GET | `/api/v1/workflows/{workflow_id}/stats/trends` | 趋势数据 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | 当前用户的运行 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | 当前用户的运行详情 |
+| POST | `/api/v1/workflows/{workflow_id}/regenerate-webhook-token` | 重新生成 Webhook Token |
+---
 
-## 运行请求
+## 列出工作流
 
-```json
-{"inputs":{"query":"检查订单状态"}}
+获取当前用户有权限访问的所有工作流。
+
+### 端点
+
+```
+GET /api/v1/workflows
 ```
 
-`inputs` 默认空对象。Webhook 必须携带 API Key，工作流必须已发布且启用 Webhook。初始响应包含 `run_id`、`status` 和 `stream_url`。
+### 查询参数
 
-## 运行流
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页条数 |
+| `team_id` | string | 否 | - | 按团队 ID 过滤 |
+| `status` | string | 否 | - | 按状态过滤：`draft`、`published`、`archived` |
+| `trigger_type` | string | 否 | - | 按触发类型过滤：`manual`、`cron`、`webhook` |
+| `visibility` | string | 否 | - | 按可见性过滤：`private`、`team`、`public` |
+| `keyword` | string | 否 | - | 按名称或描述搜索 |
+| `own_only` | boolean | 否 | false | 仅显示当前用户创建的工作流 |
 
-连接 `stream_url` 获取节点开始、输出、跳过、完成和错误等事件。断线后使用 `from_sequence` 从已知序号继续；不要重复执行带外部副作用的节点来“补偿”断线。
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/workflows?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Document Summarizer",
+        "description": "自动总结文档",
+        "icon": "📄",
+        "status": "published",
+        "visibility": "team",
+        "trigger_type": "manual",
+        "run_count": 156,
+        "success_count": 147,
+        "fail_count": 9,
+        "created_by_id": "user-001",
+        "created_by_name": "alice",
+        "created_at": "2026-02-11T10:00:00Z",
+        "updated_at": "2026-02-11T15:30:00Z"
+      }
+    ],
+    "total": 42,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 获取工作流详情
+
+获取指定工作流的完整信息，包含定义、变量、触发配置等。
+
+### 端点
+
+```
+GET /api/v1/workflows/{workflow_id}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `workflow_id` | string | 是 | 工作流 UUID |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "team_id": "team-123",
+    "name": "Document Summarizer",
+    "description": "自动总结文档",
+    "icon": "📄",
+    "definition": {
+      "nodes": [
+        {
+          "id": "node-1",
+          "type": "start",
+          "position": {"x": 100, "y": 100}
+        },
+        {
+          "id": "node-2",
+          "type": "http_request",
+          "config": {
+            "url": "{{input.document_url}}",
+            "method": "GET"
+          },
+          "position": {"x": 300, "y": 100}
+        }
+      ],
+      "edges": [
+        {
+          "id": "edge-1",
+          "source": "node-1",
+          "target": "node-2"
+        }
+      ]
+    },
+    "variables": [],
+    "status": "published",
+    "visibility": "team",
+    "version": 2,
+    "trigger_type": "manual",
+    "trigger_config": {},
+    "webhook_token": "wh_abc123...",
+    "embed_config": {},
+    "run_page_config": {
+      "presentation_mode": "simple"
+    },
+    "run_count": 156,
+    "success_count": 147,
+    "fail_count": 9,
+    "created_by_id": "user-001",
+    "created_at": "2026-02-11T10:00:00Z",
+    "updated_at": "2026-02-11T15:30:00Z"
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 创建工作流
+
+创建一个新工作流。工作流定义和变量需通过 `PUT /api/v1/workflows/{workflow_id}` 和版本端点后续添加。
+
+### 端点
+
+```
+POST /api/v1/workflows
+```
+
+### 请求体
+
+```json
+{
+  "team_id": "team-123",
+  "name": "Document Summarizer",
+  "description": "自动总结文档",
+  "icon": "📄",
+  "visibility": "private"
+}
+```
+
+### 请求字段
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 团队 UUID |
+| `name` | string | 是 | 工作流名称（最多 100 字符） |
+| `description` | string | 否 | 工作流描述 |
+| `icon` | string | 否 | 图标 |
+| `visibility` | string | 否 | `private`、`team` 或 `public`（默认：`private`） |
+
+<Callout type="info">
+  工作流定义和变量需通过 `PUT /api/v1/workflows/{workflow_id}` 和版本端点后续添加。
+</Callout>
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "team_id": "team-123",
+    "name": "Document Summarizer",
+    "description": "自动总结文档",
+    "visibility": "private"
+  }'
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "team_id": "team-123",
+    "name": "Document Summarizer",
+    "description": "自动总结文档",
+    "icon": null,
+    "definition": {
+      "nodes": [{"id": "user_input-1", "type": "user_input"}],
+      "edges": [],
+      "viewport": {"x": 0, "y": 0, "zoom": 1}
+    },
+    "variables": [],
+    "status": "draft",
+    "visibility": "private",
+    "version": 1,
+    "trigger_type": "manual",
+    "trigger_config": {},
+    "webhook_token": null,
+    "embed_config": {},
+    "run_page_config": {
+      "presentation_mode": "simple"
+    },
+    "run_count": 0,
+    "success_count": 0,
+    "fail_count": 0,
+    "created_by_id": "user-001",
+    "created_at": "2026-02-11T10:00:00Z",
+    "updated_at": "2026-02-11T10:00:00Z"
+  },
+  "msg": "Workflow created successfully"
+}
+```
+
+---
+
+## 更新工作流
+
+更新现有工作流。所有字段均为可选，只需包含需要更新的字段。
+
+### 端点
+
+```
+PUT /api/v1/workflows/{workflow_id}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `workflow_id` | string | 是 | 工作流 UUID |
+
+### 请求体
+
+```json
+{
+  "name": "Updated Workflow Name",
+  "description": "Updated description",
+  "icon": "📄",
+  "definition": {},
+  "variables": [],
+  "trigger_type": "manual",
+  "trigger_config": {},
+  "visibility": "team",
+  "embed_config": {},
+  "run_page_config": {
+    "presentation_mode": "simple"
+  }
+}
+```
+
+### 请求示例
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Workflow Name",
+    "description": "Updated description"
+  }'
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Updated Workflow Name",
+    "description": "Updated description",
+    "status": "draft",
+    "visibility": "private",
+    "version": 2,
+    "trigger_type": "manual",
+    "updated_at": "2026-02-11T16:00:00Z"
+  },
+  "msg": "Workflow updated successfully"
+}
+```
+
+---
+
+## 删除工作流
+
+永久删除工作流。
+
+### 端点
+
+```
+DELETE /api/v1/workflows/{workflow_id}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `workflow_id` | string | 是 | 工作流 UUID |
+
+### 请求示例
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Workflow deleted successfully"
+}
+```
+
+---
+
+## 执行工作流
+
+使用输入参数运行工作流。执行始终为异步：运行提交到 Celery 后，端点立即返回运行 ID 和流 URL。工作流必须已发布（`status: published`）才能运行。
+
+### 端点
+
+```
+POST /api/v1/workflows/{workflow_id}/run
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `workflow_id` | string | 是 | 工作流 UUID |
+
+### 请求体
+
+```json
+{
+  "inputs": {
+    "document_url": "https://example.com/document.pdf",
+    "summary_length": "short"
+  }
+}
+```
+
+### 请求字段
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `inputs` | object | 否 | 工作流的输入变量（默认：`{}`） |
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000/run" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "document_url": "https://example.com/document.pdf",
+      "summary_length": "short"
+    }
+  }'
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-789",
+    "stream_url": "/api/v1/workflows/runs/run-789/stream"
+  },
+  "msg": "Workflow execution started"
+}
+```
+
+进度可通过 `GET /api/v1/workflows/runs/{run_id}/stream`（SSE，可选 `from_sequence` 查询参数）和 `GET /api/v1/workflows/runs/{run_id}` 获取。SSE 流需要有权限访问该工作流的认证用户；Webhook Token 或流 URL 不是公共授权机制。
+
+---
+
+## 获取执行状态
+
+检查工作流运行的状态。
+
+### 端点
+
+```
+GET /api/v1/workflows/runs/{run_id}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `run_id` | string | 是 | 运行 UUID |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/workflows/runs/run-789" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "run-789",
+    "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+    "trigger_type": "manual",
+    "triggered_by_id": "user-001",
+    "is_debug": false,
+    "status": "success",
+    "inputs": {
+      "document_url": "https://example.com/document.pdf",
+      "summary_length": "short"
+    },
+    "outputs": {
+      "summary": "文档讨论了...",
+      "word_count": 1234,
+      "key_points": ["要点 1", "要点 2", "要点 3"]
+    },
+    "parent_run_id": null,
+    "root_run_id": "run-789",
+    "depth": 0,
+    "created_at": "2026-02-11T14:30:00Z",
+    "started_at": "2026-02-11T14:30:00Z",
+    "finished_at": "2026-02-11T14:31:23Z",
+    "total_nodes": 6,
+    "executed_nodes": 6,
+    "failed_nodes": 0,
+    "skipped_nodes": 0,
+    "total_duration_ms": 83000,
+    "total_token_usage": {},
+    "error_message": null,
+    "error_node_id": null
+  },
+  "msg": "success"
+}
+```
+
+**运行状态值：** `pending`、`running`、`success`、`waiting`、`failed`、`cancelled`、`timeout`。
+
+<Callout type="info">
+  用户自己发布的运行也可通过 `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}` 获取（需要 `workflow:run`）。节点级执行详情可通过 `GET /api/v1/workflows/runs/{run_id}/nodes` 获取。
+</Callout>
+
+---
+
+## 列出执行历史
+
+获取工作流的执行历史。
+
+### 端点
+
+```
+GET /api/v1/workflows/{workflow_id}/runs
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `workflow_id` | string | 是 | 工作流 UUID |
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页条数（最大 100） |
+| `status` | string | 否 | - | 按状态过滤：`pending`、`running`、`success`、`waiting`、`failed`、`cancelled`、`timeout` |
+| `is_debug` | boolean | 否 | - | 按调试运行过滤 |
+| `search` | string | 否 | - | 搜索运行 |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000/runs?page=1&page_size=20&status=success" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "run-789",
+        "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+        "trigger_type": "manual",
+        "triggered_by_id": "user-001",
+        "is_debug": false,
+        "status": "success",
+        "inputs": {},
+        "outputs": {},
+        "parent_run_id": null,
+        "root_run_id": "run-789",
+        "depth": 0,
+        "created_at": "2026-02-11T14:30:00Z",
+        "started_at": "2026-02-11T14:30:00Z",
+        "finished_at": "2026-02-11T14:31:23Z",
+        "total_nodes": 6,
+        "executed_nodes": 6,
+        "failed_nodes": 0,
+        "skipped_nodes": 0,
+        "total_duration_ms": 83000,
+        "total_token_usage": {},
+        "error_message": null,
+        "error_node_id": null,
+        "execution_duration_ms": 83000,
+        "config_snapshot": null,
+        "model_used": null
+      }
+    ],
+    "total": 156,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 取消执行
+
+取消正在运行的工作流执行。
+
+### 端点
+
+```
+POST /api/v1/workflows/runs/{run_id}/cancel
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `run_id` | string | 是 | 运行 UUID |
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/runs/run-789/cancel" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-789",
+    "status": "cancelled"
+  },
+  "msg": "Workflow execution cancelled"
+}
+```
+
+---
+
+## Webhook 触发
+
+通过 Webhook 触发工作流。Webhook Token 在 URL 路径中，请求必须额外通过 `Authorization` 头使用 API Key 认证（`Bearer clou_...`）。工作流必须已发布且触发类型为 `webhook`。API Key 必须被允许访问该工作流。Token 和流 URL 不是公共/无授权访问；工作流访问仍然被强制执行。
+
+### 端点
+
+```
+POST /api/v1/workflows/webhook/{webhook_token}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `webhook_token` | string | 是 | 工作流的 Webhook Token |
+
+### 认证
+
+```
+Authorization: Bearer {api_key}
+```
+
+其中 `{api_key}` 是以 `clou_` 开头的 API Key。工作流的 Webhook Token 本身不是认证凭证；API Key 认证调用者，Token 选择工作流。
+
+### 请求体
+
+工作流输入的原始 JSON 对象：
+
+```json
+{
+  "document_url": "https://example.com/document.pdf",
+  "summary_length": "short"
+}
+```
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/webhook/wh_abc123" \
+  -H "Authorization: Bearer clou_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "document_url": "https://example.com/document.pdf",
+    "summary_length": "short"
+  }'
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-789",
+    "status": "pending",
+    "stream_url": "/api/v1/workflows/runs/run-789/stream"
+  },
+  "msg": "Workflow execution started"
+}
+```
+
+<Callout type="info">
+  新的 Webhook Token 可通过 `POST /api/v1/workflows/{workflow_id}/regenerate-webhook-token` 生成。
+</Callout>
+
+---
+
+## 获取工作流统计
+
+获取工作流的使用统计。
+
+### 端点
+
+```
+GET /api/v1/workflows/{workflow_id}/stats
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `workflow_id` | string | 是 | 工作流 UUID |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000/stats" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应
+
+**成功 (200 OK)：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "total_runs": 156,
+    "success_count": 147,
+    "failed_count": 9,
+    "timeout_count": 0,
+    "avg_duration_ms": 83000,
+    "last_run_at": "2026-02-11T14:30:00Z"
+  },
+  "msg": "success"
+}
+```
+
+趋势端点同样可用：`GET /api/v1/workflows/{workflow_id}/stats/trends?period=7d`（period：`7d`、`30d`）。
+
+---
+
+## 错误代码
+
+| 代码 | 消息 | 说明 |
+| --- | --- | --- |
+| `4000` | Not found | 工作流或运行不存在 |
+| `1004` | Forbidden | 工作流未发布 / Webhook 触发已禁用 / 无效的 Webhook Token |
+| `3000` | Permission denied | 权限不足 |
+| `1001` | Validation failed | 请求数据无效 |
+| `5104` | Duplicate name | 工作流名称已被占用 |
+
+<Callout type="info">
+  当前未实现每端点速率限制。这些端点上没有速率限制中间件。
+</Callout>
+
+---
+
+## 执行流
+
+连接 `GET /api/v1/workflows/runs/{run_id}/stream` 获取 SSE 执行事件流，包含节点开始、输出、跳过、完成和错误等事件。
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `from_sequence` | integer | 否 | 从已知序号继续，用于断线重连 |
+
+<Callout type="warn">
+  断线后使用 `from_sequence` 从已知序号继续；不要通过重新运行具有外部副作用的节点来"补偿"断线。
+</Callout>
+
+---
 
 ## 发布与范围
 

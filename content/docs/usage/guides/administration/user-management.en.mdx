@@ -4,15 +4,78 @@ description: Manage user accounts, password policies, active status, and TOTP
 icon: Users
 ---
 
-User management lives under **Admin** > **Users** and requires `admin:user:*` permissions. The user list supports search, status filtering, and shows system and team roles.
+User management lives under **Admin** > **Users** and requires `admin:user:*` permissions. Administrators can create users, manage accounts, control access, assign roles, enforce policies, and send emails.
+
+## Accessing User Management
+
+From the admin dashboard:
+
+1. Log in as administrator
+2. Go to **Admin** section
+3. Click **"Users"** in sidebar
+4. View user management interface
+
+Or navigate directly to `/users`. The user list supports search, status filtering, and shows system and team roles.
 
 ## Creating Users
 
-Create users one at a time (`POST /api/v1/admin/users`) with username, email, password, and role. There is no CSV bulk import (Roadmap); when `sso_auto_create_users` is enabled, the first SSO login can provision users automatically.
+### Manual User Creation
 
-## Editing and Password Policies
+1. Click **"+ Create User"** button
+2. Fill in user information:
+   - **Username**: Unique username
+   - **Email**: User's email address
+   - **Password**: Initial password
+   - **Active**: Whether the account is active (`is_active`)
+3. Click **"Create User"**
+4. User is created
 
-Edit basic information and roles. Administrators can run password policy operations:
+> **Note:** Global roles and team roles are assigned after creation from the corresponding edit or team-management flows; the create-user form does not assign roles or teams.
+
+### Bulk User Import
+
+> **Note:** Not implemented / Roadmap. There is no CSV user import. Users are created one at a time (`POST /api/v1/admin/users`) or provisioned automatically through SSO when `sso_auto_create_users` is enabled.
+
+### SSO User Provisioning
+
+Automatic user creation via SSO:
+
+1. Configure SSO provider
+2. Enable `sso_auto_create_users` in the SSO settings
+3. Users log in via SSO
+4. Accounts created automatically
+5. Assigned to the default role and default team (if configured)
+
+SSO auto-provisioning settings (Site Settings → Security/SSO):
+
+| Setting | Description |
+| --- | --- |
+| Enable auto-provisioning | `sso_auto_create_users` |
+| Default Role | `default_role_id` — Viewer by default |
+| Default Team | `default_team_id` + `default_team_role` |
+| Match by email | `sso_match_by_email` |
+| Require approval | `sso_require_approval` |
+
+> **Note:** Not implemented / Roadmap: email-domain restrictions for SSO provisioning are not available.
+
+## Viewing User Details
+
+Click on a user to open the details panel and view complete user information, including: `last_login`, `force_password_change`, `password_expiration_exempt`, the user's `roles`, and SSO connection information. Does not expose login-count, failed-login-count, or last-password-change fields.
+
+> **Note:** Not implemented / Roadmap: there is no per-user activity view inside user management. User actions can be reviewed through **Audit Logs** filtered by the user.
+
+## Editing Users
+
+### Update User Information
+
+1. Open user details
+2. Click **"Edit"** button
+3. Update fields: email, username, global role, active status
+4. Click **"Save Changes"**
+
+### Password Policies (Admin)
+
+There is no "reset password to a temporary password" flow. Administrators manage password policy per user instead:
 
 | Operation | Endpoint |
 | --- | --- |
@@ -23,13 +86,88 @@ Edit basic information and roles. Administrators can run password policy operati
 | Password expiration overview | `GET /api/v1/admin/users/password-expiration-stats` |
 | Expiring passwords list | `GET /api/v1/admin/users/expiring-passwords` |
 
-## Status Management
+> **Note:** Not implemented / Roadmap: generating a temporary password or sending a reset email from the admin panel is not available.
 
-Deactivating a user blocks sign-in; the user can be reactivated later, or deleted. Bulk operations only cover force password change and sending email (`POST /api/v1/admin/users/send-email`); bulk activate/deactivate, bulk add/remove from teams, bulk export, and bulk delete are not implemented (Roadmap).
+### Manage Team Memberships
 
-## TOTP Management
+View the user's teams and roles in the user details. Adding/removing users and changing team roles is done from the **Teams** page (Add Member, Change Role, Remove Member, Transfer Ownership), not from the user detail view.
 
-Administrators can view and disable a user's TOTP (Super Admin only):
+## User Status Management
+
+### Activating Users
+
+1. Find inactive user
+2. Click **"..."** menu
+3. Select **"Activate"**
+4. Confirm activation
+5. User can log in again
+
+After activation: User can log in, access to resources restored, team memberships active, API keys enabled.
+
+### Deactivating Users
+
+1. Open user details
+2. Click **"Deactivate"** button
+3. Provide reason (optional)
+4. Confirm deactivation
+5. User is deactivated
+
+After deactivation: User cannot log in, API keys disabled, resources preserved, team memberships preserved, can be reactivated.
+
+### Deleting Users
+
+1. Open user details
+2. Click **"Delete"** button
+3. Review what will be deleted
+4. Type username to confirm
+5. Click **"Delete Permanently"**
+
+After deletion: User account and profile, personal conversations, API keys, personal resources (if no team) are deleted. Team resources (transferred to team), audit logs (for compliance), team memberships (removed) are preserved.
+
+## Bulk Operations
+
+Available bulk actions:
+
+| Operation | Endpoint |
+| --- | --- |
+| Bulk force password change | `POST /api/v1/admin/users/bulk-force-password-change` |
+| Send email | `POST /api/v1/admin/users/send-email` |
+
+> **Note:** Not implemented / Roadmap: bulk activate/deactivate, bulk add/remove from teams, bulk export, and bulk delete are not available. There is no user export (CSV/JSON/Excel) and no user import.
+
+## User Permissions
+
+### System Roles
+
+| Role | Permissions |
+| --- | --- |
+| **Super Admin** | All permissions (`*`) |
+| **Admin** | Dashboard access, system read visibility, team-scoped resource management |
+| **Member** | Daily resource creation and editing without dashboard access |
+| **Viewer** | Default read-only role with chat/run/execute permissions |
+
+Changing user role: Open user details → Edit → Change **Global Role** → Save.
+
+### Team Roles
+
+Users can have different roles in different teams:
+
+- Owner: Full team control
+- Admin: Manage team members and resources
+- Member: Create and use resources
+- Viewer: Read-only access
+
+## Security Features
+
+### Account Security
+
+Security settings per user:
+
+1. **Password Policy**: Enforced globally (Site Settings → Security)
+2. **2FA (TOTP)**: Check status and disable per user (admin endpoints)
+3. **Password Expiration**: Force change, reset expiration, or exempt per user
+
+Admin TOTP endpoints:
 
 ```bash
 curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
@@ -37,6 +175,75 @@ curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
 curl -X POST "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/disable" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
+
+> **Note:** Not implemented / Roadmap: per-user session management (active sessions list, revoke sessions) and login history views are not available in user management. Account lockout is enforced by the global login policy (`max_login_attempts`, `lockout_duration_minutes`).
+
+### Audit Logging
+
+1. All user actions are logged
+2. Review audit logs filtered by user (Audit Logs page)
+3. Export logs for compliance (CSV/JSON)
+
+## Best Practices
+
+### User Management
+
+- Review user accounts regularly
+- Deactivate inactive users
+- Enforce strong password policies
+- Enable 2FA for privileged accounts
+- Monitor failed login attempts
+- Document user changes
+
+### Security
+
+- Require 2FA for admins
+- Monitor audit logs
+- Set password expiration
+- Lock accounts after failed attempts
+- Regular security audits
+
+## Troubleshooting
+
+### Cannot Create User
+
+1. Check email is unique
+2. Verify username is unique
+3. Check email format
+4. Verify password meets requirements
+5. Review error message
+
+### User Cannot Log In
+
+1. Check account is active
+2. Verify password is correct
+3. Check if account is locked
+4. Review failed login attempts
+5. Reset password
+6. Check 2FA settings
+7. Review audit logs
+
+### Cannot Delete User
+
+1. Check if user is team owner
+2. Transfer team ownership first
+3. Check if user has active resources
+4. Deactivate user instead
+
+## API Endpoints Reference
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/api/v1/admin/users` | POST | Create user |
+| `/api/v1/admin/users/{user_id}/force-password-change` | POST | Force password change |
+| `/api/v1/admin/users/{user_id}/reset-password-expiration` | POST | Reset password expiration timer |
+| `/api/v1/admin/users/{user_id}/exempt-password-expiration` | POST | Exempt from password expiration |
+| `/api/v1/admin/users/bulk-force-password-change` | POST | Bulk force password change |
+| `/api/v1/admin/users/password-expiration-stats` | GET | Password expiration overview |
+| `/api/v1/admin/users/expiring-passwords` | GET | Expiring passwords list |
+| `/api/v1/admin/users/send-email` | POST | Send email |
+| `/api/v1/admin/totp/users/{user_id}/status` | GET | Check TOTP status |
+| `/api/v1/admin/totp/users/{user_id}/disable` | POST | Disable TOTP |
 
 ---
 

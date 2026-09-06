@@ -4,7 +4,12 @@ description: 配置模型、提示词、变量、知识库、工具并发布 Age
 icon: Bot
 ---
 
-Agent 编辑器把核心编排和最终呈现分开：主区域配置提示词、变量、知识库和能力；**Agent 设置**配置名称、模型、对话呈现与迭代上限。
+import { TypeTable } from 'fumadocs-ui/components/type-table';
+
+Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排配置与实时交互合二为一：
+- **左侧编排区（Orchestration Editor）**：模块化卡片配置模型选择、系统提示词、动态变量、知识库绑定、工具与能力开关及高级运行参数。
+- **右侧即时预览面板（Live Preview Panel）**：持久运行的独立沙箱会话，保存配置即时热生效，支持流式交互、变量表单测试与工具调用观察。
+- **顶部操作栏**：展示 Agent 元数据、发布状态（`草稿 / 已发布`）、嵌入抽屉入口（`Embed`）与高级设置（`Settings`）。
 
 <Callout type="info">
   当前团队必须已授权一个启用的 `chat` 模型。创建需要 `agent:create`；发布需要 `agent:publish`。
@@ -13,9 +18,26 @@ Agent 编辑器把核心编排和最终呈现分开：主区域配置提示词�
 ## 创建 Agent
 
 1. 前往**应用**，选择**创建应用** > **Agent**。
-2. 填写名称。名称为 `1-100` 字符；描述最多 `500` 字符。
-3. 进入编排页后选择右上角 **Agent 设置**，选择模型并配置名称、图标、开场消息、建议问题和可见性。
-4. 可见性选择**私有**或**团队**。
+2. 填写名称（`1-100` 字符）与描述（最多 `500` 字符）。
+3. 选择所属团队。
+4. 进入 Agent Studio 编排页后选择右上角 **Agent 设置**，配置模型、开场消息、建议问题与可见性。
+5. 可见性选择**私有**或**团队**。
+
+<TypeTable
+  type={{
+    name: { description: 'Agent 显示名称', type: 'string', required: true },
+    description: { description: 'Agent 用途和能力描述', type: 'string' },
+    team_id: { description: '所属团队 ID', type: 'string', required: true },
+    model_id: { description: 'LLM 模型（团队授权的 TeamModel）', type: 'string', required: true },
+    system_prompt: { description: '定义 Agent 行为的系统提示词', type: 'string' },
+    max_iterations: { description: '工具调用迭代上限', type: 'number', default: 5 },
+    visibility: { description: '可见性', type: "'private' | 'team'", default: 'private' },
+  }}
+/>
+
+<Callout type="info">
+  Agent 不暴露逐采样参数（Temperature、Max Tokens、Top P、Frequency/Presence Penalty）。LLM 采样默认值配置在模型本身的 `default_params` 中。Agent 只配置 `model_id`、`system_prompt`、`max_iterations`、工具集和知识库关联。
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-settings-drawer.png" alt="Agent 设置抽屉" />
@@ -29,28 +51,192 @@ Agent 编辑器把核心编排和最终呈现分开：主区域配置提示词�
 3. 在**变量**中添加用户输入字段。变量名最长 `50` 字符；可配置显示名、必填、隐藏、默认值、选项、数值范围或最大长度。
 4. 在右侧预览中填入变量，确认替换结果。
 
-## 关联知识库
+## 配置知识库与 RAG
 
 1. 在**知识库**区域选择**添加**。
 2. 选择知识库以及 `vector`、`fulltext` 或 `hybrid` 检索方式。
 3. 设置 Top K（`1-100`，默认 `5`）和阈值（`0-1`，默认 `0.3`）。
-4. 设置整体 RAG 模式：**Agentic RAG**、**Naive RAG**或**关闭**。
+4. 可选启用**重排序（Rerank）**以提高召回精度。
+5. 设置整体 RAG 模式：**关闭**、**自动（Auto）** 或 **智能体（Agentic）**。
+
+<TypeTable
+  type={{
+    rag_mode: { description: '整体 RAG 模式', type: "'off' | 'auto' | 'agentic'", default: 'auto' },
+    search_mode: { description: '单知识库检索方式', type: "'vector' | 'fulltext' | 'hybrid'", default: 'hybrid' },
+    top_k: { description: '单知识库返回结果数', type: 'number', default: 5 },
+    score_threshold: { description: '最低召回分数', type: 'number', default: 0.3 },
+    rerank: { description: '是否启用重排序', type: 'boolean', default: false },
+  }}
+/>
+
+知识库顺序通过 `knowledge_base_configs` 列表定义，编辑 Agent 时可调整排列顺序，该顺序在 Agent 检索上下文时生效。
 
 ## 添加工具和能力
 
-在**工具**区域选择内置工具、自定义工具、MCP 或 Skill。工具显示“需要配置”时，先前往**能力**完成凭据。启用附件、用户输入请求、记忆、生图或生视频时，分别检查对应的限制和默认模型。
+在**工具**区域选择内置工具、自定义工具、MCP 或 Skill。
+
+| 工具类型 | 说明 | 前置条件 |
+| --- | --- | --- |
+| Web Search | 网络搜索，基于 Tavily | 工具配置中存储 `TAVILY_API_KEY` |
+| Calculator | 数学计算 | 无 |
+| Date/Time | 日期与时间查询 | 无 |
+| Unit Converter | 单位换算 | 无 |
+| Custom Tool | 自定义工具 | 先在**能力**中创建并测试 |
+| MCP | Model Context Protocol 工具 | 先在**能力**中配置 |
+| Skill | 预定义技能 | 无 |
+
+工具显示"需要配置"时，先前往**能力**完成凭据。自定义工具先在**能力**中创建和测试，再按 Agent 启用。
+
+<TypeTable
+  type={{
+    max_tool_call_iterations: { description: '最大工具调用迭代次数', type: 'number', default: 5 },
+    tool_timeout: { description: '单次工具调用超时', type: 'string', default: '30s' },
+  }}
+/>
+
+## 配置附件、媒体与记忆
+
+启用附件、生图、生视频和跨会话记忆前，先在 Agent **编排**中开启对应能力：
+
+| 能力 | 配置路径 | 详细说明 |
+| --- | --- | --- |
+| 附件 | **文件与图片** | 单文件 `10MB`（`1KB-50MB`），每条消息 `5` 个（`1-10`） |
+| 生图 | **生图** | 默认 `1024×1024`（`256-4096`），单次最多 `4` 张（`1-10`） |
+| 生视频 | **生视频** | 默认 `5` 秒（`1-30` 秒），宽高比 `16:9` |
+| 记忆 | **记忆** | 最大记忆数 `10`（`1-50`），自动提取默认开启 |
+
+详细配置请参阅[附件与媒体](./media)和[记忆与上下文](./memory)。
+
+## 设置可见性与发布
+
+1. 选择**私有**或**团队**可见性。
+2. 选择**发布**。发布后状态变为 `published`，Agent 可接收消息。
+3. 发布后可打开**公开页面**、**嵌入**和**访问 API**。
+
+<Callout type="info">
+  `public` 可见性仅保留用于历史记录，新 Agent 应使用 `private` 或 `team`。
+</Callout>
+
+<Callout type="warn">
+  Agent 仅有 `draft` 和 `published` 两种状态。没有 `active`/`inactive` 或 `archived` 状态，也没有归档/恢复工作流。要让 Agent 停止使用，取消发布或删除（`DELETE /api/v1/admin/agents/{agent_id}`）。
+</Callout>
+
+<figure>
+  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-published-toolbar.png" alt="已发布 Agent 的操作栏" />
+  <figcaption>已发布 Agent 的操作栏</figcaption>
+</figure>
 
 ## 保存、调试与发布
 
 1. 选择**保存**。验证错误会列出具体字段。
 2. 在**调试与预览**发送覆盖正常和失败路径的问题。
 3. 有工具时验证工具参数、失败提示与最大迭代终止行为。
-4. 选择**发布**。发布后可打开**公开页面**、**嵌入**和**访问 API**。
+4. 选择**发布**。
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-published-toolbar.png" alt="已发布 Agent 的操作栏" />
-  <figcaption>已发布 Agent 的操作栏</figcaption>
-</figure>
+## 监控与统计
+
+通过统计端点 `GET /api/v1/agents/{agent_id}/stats` 获取 Agent 在指定时间段内的指标（`period`: `24h`、`7d`、`30d`、`all`）：
+
+| 指标 | 端点 | 说明 |
+| --- | --- | --- |
+| 会话与消息数 | `/stats` | 总会话数、总消息数、活跃用户数 |
+| Token 用量 | `/stats` | `prompt_tokens`、`completion_tokens`、`total_tokens` |
+| 平均响应时间 | `/stats` | 端到端平均耗时 |
+| 工具调用 | `/stats/tool-usage` | 各工具调用次数统计 |
+| 使用趋势 | `/stats/trends` | 按时间聚合的使用量变化 |
+| 最近会话 | `/stats/recent-conversations` | 最近的对话列表 |
+
+<Callout type="info">
+  统计指标在 Agent 列表/详情中暴露，没有单独的**统计**标签页。
+</Callout>
+
+<Callout type="warn">
+  未实现/路线图：逐 Agent 成本拆分、响应时间百分位数（p50/p95/p99）、统计导出（CSV/PDF）、定时使用报告。统计端点仅返回上述指标。
+</Callout>
+
+## API 端点
+
+管理端点位于 `/api/v1/admin/agents`，需要 `admin:app:*` 权限。
+
+```ts
+// 列出所有 Agent（按状态、可见性、团队、创建者、关键词过滤）
+const agents = await api.get("/api/v1/admin/agents", { params: { status: ["published"] } });
+
+// 为团队创建 Agent
+const agent = await api.post("/api/v1/admin/agents", {
+    name: "Support Agent",
+    team_id: "team-123",
+    model_id: "model-456",  // TeamModel ID（团队授权的模型）
+    system_prompt: "You are a helpful assistant.",
+    rag_mode: "agentic"
+});
+
+// 更新 Agent（使用 PUT，不是 PATCH）
+const updated = await api.put(`/api/v1/admin/agents/${agent_id}`, {
+    name: "Support Agent v2"
+});
+
+// 发布 / 取消发布 / 复制
+await api.post(`/api/v1/admin/agents/${agent_id}/publish`);
+await api.post(`/api/v1/admin/agents/${agent_id}/unpublish`);
+await api.post(`/api/v1/admin/agents/${agent_id}/duplicate`);
+
+// 获取 Agent 统计（period: 24h, 7d, 30d, all）
+const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { period: "30d" } });
+```
+
+完整 API 请参阅 [Agents API](/reference/api/endpoints/agents)。
+
+## 最佳实践
+
+### Agent 设计
+
+- ✅ 编写清晰、具体的系统提示词
+- ✅ 部署前充分测试
+- ✅ 为任务选择合适的模型
+- ✅ 启用 RAG 以提高事实准确性
+- ✅ 通过统计端点监控使用量
+- ✅ 收集用户反馈并迭代
+
+- ❌ 使用模糊的系统提示词
+- ❌ 部署未经测试的 Agent
+- ❌ 简单任务使用昂贵模型
+- ❌ 忽略错误率
+- ❌ 不监控成本
+
+### 性能
+
+- ✅ 启用流式输出提升体验
+- ✅ 优化知识库搜索
+- ✅ 设置合理的超时时间
+
+- ❌ 长任务使用同步处理
+- ❌ 给 Agent 加载过多知识库
+- ❌ 设置过高的 `max_tokens`
+
+## 故障排查
+
+### Agent 无响应
+
+1. **检查 Agent 状态**：确认已发布；检查模型可用性。
+2. **检查模型配置**：验证 API 密钥有效；测试模型连通性；检查速率限制。
+3. **检查知识库**：确认已索引；确认搜索正常。
+4. **检查审计日志**：筛选资源类型为 `agent` 且资源 ID 匹配的错误。
+
+### 回复质量差
+
+1. **审查系统提示词**：让指令更清晰；添加示例；设定边界。
+2. **改善知识库**：添加相关文档；更新过时内容；优化分块策略。
+3. **启用 Agentic RAG**：让 Agent 自主决定何时检索，提升事实准确性。
+
+### 成本过高
+
+1. **审查用量**：通过 `GET /api/v1/agents/{agent_id}/stats` 查看 Token 用量和会话数，定位高用量 Agent。
+2. **优化提示词**：缩短系统提示词；减少上下文长度；简单任务使用更便宜的模型。
+
+<Callout type="warn">
+  未实现/路线图：逐 Agent Token 限制、每日用量上限、成本告警均不可用。使用量监控仅通过统计端点只读暴露。
+</Callout>
 
 ## 常见问题
 
@@ -58,3 +244,15 @@ Agent 编辑器把核心编排和最终呈现分开：主区域配置提示词�
 - **工具未调用**：检查模型函数调用能力、工具是否启用，以及提示词是否定义调用条件。
 - **发布失败**：确认拥有发布权限，且模型、变量引用和能力配置有效。
 - **公开页无法访问**：确认 Agent 已发布；私有/团队可见性仍受登录和团队访问控制影响。
+
+## 限制与未实现功能
+
+| 功能 | 状态 | 替代方案 |
+| --- | --- | --- |
+| 逐 Agent 采样参数（Temperature 等） | 未实现 | 在模型 `default_params` 中配置 |
+| 团队/Agent 资源限额 | 未实现 | 无配额门控 |
+| Agent 模板库 | 未实现 | 使用复制（`POST .../duplicate`） |
+| 批量编辑 | 未实现 | 单个 Agent 通过 `PUT` 更新 |
+| 归档/恢复 | 未实现 | 取消发布或删除 |
+| 成本拆分/百分位数 | 未实现 | 仅基础统计 |
+| 导入/导出 | 未实现 | 无 |

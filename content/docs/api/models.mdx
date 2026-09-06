@@ -1,0 +1,807 @@
+---
+title: Models API
+description: 发现与管理 LLM 模型
+icon: Cpu
+---
+
+## 端点
+
+| 方法 | 路径 | 用途 | 认证 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/models/providers` | 获取支持的 LLM 提供商列表 | 无需 |
+| GET | `/api/v1/models/types` | 获取支持的模型类型列表 | 无需 |
+| GET | `/api/v1/models/available` | 获取已启用的模型（下拉选择） | JWT |
+| GET | `/api/v1/models/default/{model_type}` | 获取指定类型的默认模型 | JWT |
+| GET | `/api/v1/admin/models` | 分页列出所有已配置模型 | admin:model:read |
+| GET | `/api/v1/admin/models/{model_id}` | 获取单个模型详情 | admin:model:read |
+| POST | `/api/v1/admin/models` | 创建新模型 | admin:model:create |
+| PUT | `/api/v1/admin/models/{model_id}` | 更新模型配置 | admin:model:update |
+| DELETE | `/api/v1/admin/models/{model_id}` | 删除模型 | admin:model:delete |
+| POST | `/api/v1/admin/models/{model_id}/set-default` | 设为默认模型 | admin:model:update |
+| POST | `/api/v1/admin/models/{model_id}/test` | 测试已保存模型连通性 | admin:model:update |
+| POST | `/api/v1/admin/models/test` | 测试模型配置（不保存） | admin:model:create |
+| POST | `/api/v1/admin/models/discover` | 发现提供商可用模型 | admin:model:read |
+
+<Callout type="warn">
+  `/api/v1/admin/models/*` 是管理后台使用的受保护端点，需要对应的管理员权限范围（scope）。
+</Callout>
+
+## 公共目录端点
+
+以下端点用于发现可用的提供商和模型，无需管理员权限。
+
+### 获取提供商列表
+
+```
+GET /api/v1/models/providers
+```
+
+无需认证。返回系统支持的所有 LLM 提供商。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/models/providers"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "code": "openai",
+      "name": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "icon": "openai"
+    },
+    {
+      "code": "anthropic",
+      "name": "Anthropic",
+      "base_url": "https://api.anthropic.com",
+      "icon": "anthropic"
+    },
+    {
+      "code": "azure",
+      "name": "Azure OpenAI",
+      "base_url": null,
+      "icon": "azure"
+    }
+  ],
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | string | 提供商标识符 |
+| `name` | string | 显示名称 |
+| `base_url` | string | 默认 API 地址（无则为 `null`） |
+| `icon` | string | 图标标识符 |
+
+### 获取模型类型列表
+
+```
+GET /api/v1/models/types
+```
+
+无需认证。返回系统支持的所有模型类型。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/models/types"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    { "code": "chat", "name": "Chat", "description": "对话模型" },
+    { "code": "embedding", "name": "Embedding", "description": "嵌入模型" },
+    { "code": "rerank", "name": "Rerank", "description": "重排序模型" },
+    { "code": "tts", "name": "TTS", "description": "语音合成" },
+    { "code": "stt", "name": "STT", "description": "语音识别" },
+    { "code": "audio_generation", "name": "Audio Generation", "description": "音频生成" },
+    { "code": "text_to_image", "name": "Text to Image", "description": "文生图" },
+    { "code": "text_to_video", "name": "Text to Video", "description": "文生视频" }
+  ],
+  "msg": "success"
+}
+```
+
+### 获取可用模型
+
+```
+GET /api/v1/models/available
+```
+
+需要 JWT 认证。返回已启用的模型列表，可用于下拉选择。
+
+| 查询参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `model_type` | string | 否 | - | 按模型类型过滤（如 `chat`、`embedding`） |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/models/available?model_type=chat" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "GPT-4 Turbo",
+      "provider": "openai",
+      "provider_display_name": null,
+      "model_id": "gpt-4-turbo-preview",
+      "model_type": "chat",
+      "capabilities": {
+        "streaming": true,
+        "function_calling": true
+      }
+    }
+  ],
+  "msg": "success"
+}
+```
+
+### 获取默认模型
+
+```
+GET /api/v1/models/default/{model_type}
+```
+
+需要 JWT 认证。返回指定类型的默认启用模型。
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_type` | string | 是 | 模型类型（如 `chat`、`embedding`） |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/models/default/chat" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+返回单个 `ModelBrief` 对象（与可用模型列表项结构相同），若无默认模型则返回 `null`。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "GPT-4 Turbo",
+    "provider": "openai",
+    "provider_display_name": null,
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "capabilities": {
+      "streaming": true,
+      "function_calling": true
+    }
+  },
+  "msg": "success"
+}
+```
+
+## 管理端点
+
+以下端点用于管理模型配置，需要对应的管理员权限范围。
+
+### 权限范围
+
+| 范围 | 说明 |
+| --- | --- |
+| `admin:model:read` | 列出和查看模型 |
+| `admin:model:create` | 创建和测试新模型 |
+| `admin:model:update` | 更新模型、设置默认、测试已保存模型 |
+| `admin:model:delete` | 删除模型 |
+
+### 列出模型
+
+```
+GET /api/v1/admin/models
+```
+
+需要 `admin:model:read` 权限。返回分页的已配置模型列表。
+
+| 查询参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页条数（最大 100） |
+| `provider` | array | 否 | - | 按提供商过滤（可重复） |
+| `model_type` | array | 否 | - | 按模型类型过滤（可重复） |
+| `is_enabled` | boolean | 否 | - | 按启用状态过滤 |
+| `search` | string | 否 | - | 按名称或模型 ID 搜索 |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/models?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "GPT-4 Turbo",
+        "provider": "openai",
+        "provider_display_name": null,
+        "model_id": "gpt-4-turbo-preview",
+        "model_type": "chat",
+        "base_url": "https://api.openai.com/v1",
+        "has_api_key": true,
+        "context_length": 128000,
+        "max_output_tokens": 4096,
+        "input_price": 0.01,
+        "output_price": 0.03,
+        "default_params": {
+          "temperature": 0.7
+        },
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true,
+          "vision": false
+        },
+        "config": {},
+        "is_enabled": true,
+        "is_default": true,
+        "sort_order": 0,
+        "created_at": "2026-01-15T10:00:00Z",
+        "updated_at": "2026-02-11T15:30:00Z"
+      }
+    ],
+    "total": 12,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+**响应字段：**
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 模型 UUID |
+| `name` | string | 显示名称 |
+| `provider` | string | 提供商标识符 |
+| `provider_display_name` | string | 可选的用户侧提供商/网关名称 |
+| `model_id` | string | 模型标识符（如 `gpt-4-turbo-preview`） |
+| `model_type` | string | 模型类型：`chat`、`embedding`、`rerank`、`tts`、`stt`、`audio_generation`、`text_to_image`、`text_to_video` |
+| `base_url` | string | 自定义 API 地址 |
+| `has_api_key` | boolean | 是否已配置 API 密钥（密钥本身隐藏） |
+| `context_length` | integer | 上下文长度 |
+| `max_output_tokens` | integer | 最大输出 token 数 |
+| `input_price` | number | 输入价格（每 1M token） |
+| `output_price` | number | 输出价格（每 1M token） |
+| `default_params` | object | 默认推理参数 |
+| `capabilities` | object | 模型能力（如 `streaming`、`function_calling`、`vision`） |
+| `config` | object | 额外提供商特定配置 |
+| `is_enabled` | boolean | 启用状态 |
+| `is_default` | boolean | 是否为该类型的默认模型 |
+| `sort_order` | integer | 排序顺序 |
+| `created_at` | string | ISO 8601 时间戳 |
+| `updated_at` | string | ISO 8601 时间戳 |
+
+### 获取模型详情
+
+```
+GET /api/v1/admin/models/{model_id}
+```
+
+需要 `admin:model:read` 权限。
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_id` | string | 是 | 模型 UUID |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/models/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：** 返回单个 `ModelResponse` 对象（与列表项结构相同）。
+
+**错误响应（404 Not Found）：**
+
+```json
+{
+  "code": 6100,
+  "data": null,
+  "msg": "Model not found"
+}
+```
+
+### 创建模型
+
+```
+POST /api/v1/admin/models
+```
+
+需要 `admin:model:create` 权限。
+
+**请求体字段：**
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 显示名称（最多 100 字符） |
+| `provider` | string | 是 | 提供商标识符（必须是支持的提供商） |
+| `model_id` | string | 是 | 模型标识符（最多 100 字符） |
+| `model_type` | string | 是 | 模型类型 |
+| `provider_display_name` | string | 否 | 可选的用户侧提供商或网关名称 |
+| `base_url` | string | 否 | 自定义 API 地址（最多 512 字符） |
+| `api_key` | string | 否 | API 密钥（本地提供商可选） |
+| `context_length` | integer | 否 | 上下文长度 |
+| `max_output_tokens` | integer | 否 | 最大输出 token 数 |
+| `input_price` | number | 否 | 输入价格（每 1M token） |
+| `output_price` | number | 否 | 输出价格（每 1M token） |
+| `default_params` | object | 否 | 默认推理参数 |
+| `capabilities` | object | 否 | 模型能力 |
+| `config` | object | 否 | 额外配置 |
+| `is_enabled` | boolean | 否 | 启用状态（默认 `true`） |
+| `is_default` | boolean | 否 | 默认模型标记（默认 `false`） |
+| `sort_order` | integer | 否 | 排序顺序（默认 `0`） |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/models" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "GPT-4 Turbo",
+    "provider": "openai",
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "sk-...",
+    "is_enabled": true
+  }'
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "GPT-4 Turbo",
+    "provider": "openai",
+    "provider_display_name": null,
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "base_url": "https://api.openai.com/v1",
+    "has_api_key": true,
+    "context_length": null,
+    "max_output_tokens": null,
+    "input_price": null,
+    "output_price": null,
+    "default_params": null,
+    "capabilities": null,
+    "config": null,
+    "is_enabled": true,
+    "is_default": false,
+    "sort_order": 0,
+    "created_at": "2026-02-11T16:00:00Z",
+    "updated_at": "2026-02-11T16:00:00Z"
+  },
+  "msg": "Model created successfully"
+}
+```
+
+### 更新模型
+
+```
+PUT /api/v1/admin/models/{model_id}
+```
+
+需要 `admin:model:update` 权限。所有字段均为可选，只需包含要更新的字段。
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_id` | string | 是 | 模型 UUID |
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/admin/models/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "GPT-4 Turbo (Updated)",
+    "default_params": {
+      "temperature": 0.8
+    }
+  }'
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "GPT-4 Turbo (Updated)",
+    "provider": "openai",
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "is_enabled": true,
+    "updated_at": "2026-02-11T16:05:00Z"
+  },
+  "msg": "Model updated successfully"
+}
+```
+
+### 删除模型
+
+```
+DELETE /api/v1/admin/models/{model_id}
+```
+
+需要 `admin:model:delete` 权限。永久删除模型。
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_id` | string | 是 | 模型 UUID |
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/admin/models/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "GPT-4 Turbo (Updated)",
+    "provider": "openai",
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "is_enabled": true,
+    "updated_at": "2026-02-11T16:05:00Z"
+  },
+  "msg": "Model deleted successfully"
+}
+```
+
+### 设为默认模型
+
+```
+POST /api/v1/admin/models/{model_id}/set-default
+```
+
+需要 `admin:model:update` 权限。将指定模型设为该类型的默认模型。
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_id` | string | 是 | 模型 UUID |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/models/550e8400-e29b-41d4-a716-446655440000/set-default" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：** 返回更新后的 `ModelResponse`，其中 `is_default: true`。
+
+### 测试已保存模型
+
+```
+POST /api/v1/admin/models/{model_id}/test
+```
+
+需要 `admin:model:update` 权限。测试已保存模型的连通性，无需请求体。
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_id` | string | 是 | 模型 UUID |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/models/550e8400-e29b-41d4-a716-446655440000/test" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "success": true,
+    "message": "Model connection successful",
+    "latency_ms": 1200
+  },
+  "msg": "Model test successful"
+}
+```
+
+**错误响应（500 Internal Server Error）：**
+
+```json
+{
+  "code": 6100,
+  "data": null,
+  "msg": "Model test failed"
+}
+```
+
+### 测试模型配置（不保存）
+
+```
+POST /api/v1/admin/models/test
+```
+
+需要 `admin:model:create` 权限。在保存前测试提供商/模型配置的连通性。
+
+```json
+{
+  "provider": "openai",
+  "model_id": "gpt-4-turbo-preview",
+  "model_type": "chat",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "sk-...",
+  "default_params": {
+    "temperature": 0.7
+  },
+  "config": {}
+}
+```
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/models/test" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "openai",
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "api_key": "sk-..."
+  }'
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "success": true,
+    "message": "Model connection successful",
+    "latency_ms": 1100
+  },
+  "msg": "Model test successful"
+}
+```
+
+### 发现提供商模型
+
+```
+POST /api/v1/admin/models/discover
+```
+
+需要 `admin:model:read` 权限。列出提供商暴露的模型，不持久化提供的密钥。
+
+```json
+{
+  "provider": "openai",
+  "base_url": "https://api.openai.com/v1",
+  "api_key": "sk-..."
+}
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "success": true,
+    "message": "Discovered 3 models",
+    "models": [
+      {
+        "id": "gpt-4-turbo-preview",
+        "name": "GPT-4 Turbo",
+        "context_length": 128000,
+        "max_output_tokens": 4096,
+        "capabilities": {
+          "streaming": true,
+          "function_calling": true
+        }
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+## 错误码
+
+| 错误码 | 消息 | 说明 |
+| --- | --- | --- |
+| `6100` | Model not found | 模型不存在 |
+| `6101` | Team model not found | 团队模型授权不存在 |
+| `6102` | Team model exists | 团队模型授权已存在 |
+| `6103` | Model quota exceeded | 团队模型配额已用尽 |
+| `3000` | Permission denied | 权限不足 |
+| `1001` | Validation failed | 请求数据无效 |
+
+<Callout type="info">
+  当前未实现按端点的速率限制，这些端点没有速率限制中间件。
+</Callout>
+
+## 最佳实践
+
+### 模型配置
+
+**✅ 推荐：**
+- 配置后测试模型连通性
+- 设置合理的定价信息
+- 使用描述性的模型名称
+- 妥善保管 API 密钥
+- 设置合理的默认推理参数
+
+**❌ 避免：**
+- 在日志中暴露 API 密钥
+- 在开发环境使用生产密钥
+- 忘记更新定价信息
+- 启用未经测试的模型
+
+### 提供商选择
+
+**✅ 推荐：**
+- 根据使用场景选择模型
+- 权衡成本与性能
+- 测试多个提供商
+- 监控模型可用性
+- 规划提供商故障转移
+
+**❌ 避免：**
+- 所有任务使用单一提供商
+- 忽略模型局限性
+
+## 代码示例
+
+### Python
+
+```python
+import requests
+
+def list_available_models(token, model_type="chat"):
+    """列出指定类型的已启用模型。"""
+    url = "https://your-domain.com/api/v1/models/available"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(url, headers=headers, params={"model_type": model_type})
+    result = response.json()
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+def create_model(token, name, model_id, provider, model_type, api_key):
+    """创建新模型（管理员）。"""
+    url = "https://your-domain.com/api/v1/admin/models"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "name": name,
+        "provider": provider,
+        "model_id": model_id,
+        "model_type": model_type,
+        "api_key": api_key
+    }
+    response = requests.post(url, headers=headers, json=data)
+    result = response.json()
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+def test_model(token, model_id):
+    """测试已保存模型（管理员）。"""
+    url = f"https://your-domain.com/api/v1/admin/models/{model_id}/test"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.post(url, headers=headers)
+    result = response.json()
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+# 使用示例
+models = list_available_models("YOUR_TOKEN", "chat")
+for model in models:
+    print(f"Model: {model['name']} ({model['provider']})")
+
+# 创建模型（管理员）
+new_model = create_model(
+    "YOUR_ADMIN_TOKEN",
+    "GPT-4 Turbo",
+    "gpt-4-turbo-preview",
+    "openai",
+    "chat",
+    "sk-..."
+)
+print(f"Created model: {new_model['id']}")
+
+# 测试模型（管理员）
+test_result = test_model("YOUR_ADMIN_TOKEN", new_model['id'])
+print(f"Test success: {test_result['success']}")
+```
+
+### JavaScript
+
+```javascript
+async function listAvailableModels(token, modelType = 'chat') {
+  const response = await fetch(
+    `https://your-domain.com/api/v1/models/available?model_type=${modelType}`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  const result = await response.json();
+  if (result.code === 0) {
+    return result.data;
+  } else {
+    throw new Error(result.msg);
+  }
+}
+
+async function createModel(token, name, modelId, provider, modelType, apiKey) {
+  const response = await fetch(
+    'https://your-domain.com/api/v1/admin/models',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: name,
+        provider: provider,
+        model_id: modelId,
+        model_type: modelType,
+        api_key: apiKey,
+      }),
+    }
+  );
+  const result = await response.json();
+  if (result.code === 0) {
+    return result.data;
+  } else {
+    throw new Error(result.msg);
+  }
+}
+
+// 使用示例
+const models = await listAvailableModels('YOUR_TOKEN', 'chat');
+models.forEach(model => {
+  console.log(`Model: ${model.name} (${model.provider})`);
+});
+
+// 创建模型（管理员）
+const newModel = await createModel(
+  'YOUR_ADMIN_TOKEN',
+  'GPT-4 Turbo',
+  'gpt-4-turbo-preview',
+  'openai',
+  'chat',
+  'sk-...'
+);
+console.log('Created model:', newModel.id);
+```
+
+## 相关文档
+
+- [认证](../authentication.md) - 认证方法
+- [模型管理](../../admin-guide/models/model-management.md) - 管理指南
+- [Agent 配置](../../user-guide/agents/agent-configuration.md) - 在 Agent 中使用模型

@@ -6,11 +6,23 @@ icon: Database
 
 A knowledge base must belong to a team. The embedding model selected at creation determines the vector dimensions; do not switch embedding models after documents are first processed. If you must switch, rebuild the index.
 
+## Creating a Knowledge Base
+
 1. Navigate to **Knowledge Bases**, select **Create Knowledge Base**.
-2. Fill in the name (`1-100` characters) and description (up to `500` characters).
-3. Select the current team.
-4. Select an authorized `embedding` model; optionally select a `rerank` model.
-5. Set the chunk size (default `1000` characters) and overlap (default `100` characters), then save.
+2. Fill in basic information:
+   - **Name**: `1-100` characters, displayed in the knowledge base list.
+   - **Description**: Up to `500` characters, describing the KB's purpose and content scope.
+   - **Team**: Select the team that owns this knowledge base.
+3. Select models:
+   - **Embedding Model**: Choose a team-authorized `embedding` model, or use the platform default. `embedding_model_id` cannot be changed after creation.
+   - **Rerank Model**: Optional, select a `rerank` model to improve retrieval precision.
+4. Configure chunking and retrieval settings:
+   - **Chunk Size**: Characters per chunk, default `1000`, minimum `100`.
+   - **Chunk Overlap**: Overlapping characters between adjacent chunks, default `100`, minimum `0`.
+   - **Separator**: Custom text separator (optional).
+   - **Search Mode**: `vector`, `fulltext`, or `hybrid` (default `hybrid`).
+   - **Rerank**: Enable reranking to optimize retrieval results.
+5. Click **Create Knowledge Base**.
 6. Open the knowledge base details and confirm the status is **Enabled**.
 
 <figure>
@@ -21,3 +33,227 @@ A knowledge base must belong to a team. The embedding model selected at creation
 <Callout type="error">
   Document processing and retrieval fail when the embedding model does not exist, is not authorized, or its vector dimensions do not match the existing index. First confirm authorization in the [models guide](../models/manage-models.mdx).
 </Callout>
+
+## Embedding and Rerank Models
+
+Embedding models are regular platform models with `model_type = embedding` (for example OpenAI `text-embedding-3-small` or compatible local models), granted to teams via model authorization. A KB references one embedding model (`embedding_model_id`) and optionally a rerank model (`rerank_model_id`).
+
+### Embedding Model Lock
+
+The embedding model is fixed when the knowledge base is created because stored vectors depend on that model. The admin edit form does not allow changing `embedding_model_id` after creation; attempting to update it is rejected. To use another embedding model, create a new knowledge base and process its documents with the new model.
+
+## Document Management
+
+Document management includes upload, processing, reprocessing, and deletion. For detailed operations, see [Import Documents](./import-documents.mdx) and [Chunking & Document Processing](./chunking.mdx).
+
+### Upload Documents
+
+- **Single Upload**: Select knowledge base → **Upload Document** → Choose files → **Upload**. Upload completes via `POST /api/v1/knowledge-bases/{kb_id}/documents/upload` (multipart). After upload, document status is `pending`; extraction or embedding does not start automatically.
+- **Bulk Actions**: Select multiple documents in the table to **Quick Process** pending documents, **Retry Failed Chunks** for error documents, or **Delete** selected documents.
+- **Supported Formats**: PDF, DOC/DOCX, TXT, Markdown, HTML, CSV, XLS/XLSX, PPT/PPTX, JSON, URL.
+
+<Callout type="warn">
+  Uploading and processing documents are two separate stages. A document appearing in the list does not mean embedding is complete; only documents with **Completed** status are suitable for binding to an Agent.
+</Callout>
+
+### Document Processing Pipeline
+
+```
+Upload → Extract Text → Clean → Chunk → Generate Embeddings → Index
+```
+
+**Processing Status:**
+- **Pending**: Uploaded, waiting for an administrator to start processing.
+- **Processing**: Currently extracting, chunking, embedding, or indexing.
+- **Completed**: Successfully indexed, available for retrieval.
+- **Error**: Processing error; inspect the error message and retry or reprocess.
+
+### Reprocess Documents
+
+- **Single Reprocess**: Select a completed or error document → **Reprocess** → Preview Chunks → **Process**.
+- **Retry Failed Chunks**: Select an error document → **Retry Failed Chunks**.
+- Bulk reprocessing uses the selection toolbar to quick-process pending documents or retry failed chunks.
+
+### Delete Documents
+
+- **Single Delete**: Select document → **Delete** → Confirm.
+- **Bulk Delete**: Select multiple documents → **Bulk Delete** → Confirm.
+
+## Retrieval Configuration
+
+Retrieval is configured per KB via KB settings. For detailed field descriptions, see [Knowledge Base Settings Reference](/en/reference/knowledge-settings). For retrieval comparison, see [Retrieval & Quality Tuning](./retrieval.mdx).
+
+### Retrieval Modes
+
+| Mode | Description |
+| --- | --- |
+| `vector` | Pure vector retrieval, based on semantic similarity |
+| `fulltext` | Full-text retrieval, based on keyword matching |
+| `hybrid` | Hybrid retrieval, fusing vector and full-text results (default) |
+
+### Hybrid Retrieval Parameters
+
+- **Dense Weight**: RRF weight for vector retrieval, default `1.0`.
+- **Lexical Weight**: RRF weight for full-text retrieval, default `1.0`.
+- **RRF K**: Reciprocal rank fusion parameter, default `60`, range `1-1000`.
+- At least one of dense weight or lexical weight must be greater than `0`.
+
+### Reranking
+
+- **Enable Reranking**: When enabled, reranks retrieval results to improve precision.
+- **Candidate Pool Size**: `1-100`, default `10`.
+- **Score Threshold**: Optional, `0-1`.
+
+### Test Retrieval
+
+1. Select knowledge base → **Hit Test**.
+2. Enter a `1-1000` character query.
+3. Select retrieval mode, Top K (`1-20`, default `5`), score threshold (`0-1`, default `0`), and weights.
+4. View matched chunks, relevance scores, and source documents.
+5. After saving a preset, you can **Apply to Production**.
+
+## Statistics and Monitoring
+
+### Knowledge Base Statistics
+
+`GET /api/v1/knowledge-bases/{kb_id}/stats` returns per-KB statistics:
+
+- Total documents
+- Total chunks
+- Total embeddings
+- Processing status counts
+- Embedding configuration and vector dimensions
+
+View via: Select knowledge base → **Statistics** tab.
+
+<Callout type="info">
+  Not implemented / Roadmap: Search query analytics (queries, response times, cache hit rate, top queries), storage usage trends, and statistics export are not available.
+</Callout>
+
+## Troubleshooting
+
+### Document Processing Failed
+
+- **Symptoms**: Document status is "Failed", error message in logs.
+- **Solutions**:
+  1. Check if the file format is supported, the file is corrupted, or the file size exceeds the limit.
+  2. View processing logs: Knowledge Base → Documents → Select document → View processing logs.
+  3. Common errors:
+     - **Text extraction failed**: File corrupted or unsupported format.
+     - **Chunking failed**: Invalid chunk settings.
+     - **Embedding failed**: API key invalid or quota exceeded.
+     - **Indexing failed**: Qdrant connection issue.
+  4. Retry processing: Select failed document → **Retry** → Optionally adjust settings → Confirm.
+
+### Search Not Working
+
+- **Symptoms**: Search returns no results, relevant documents not found, search errors.
+- **Solutions**:
+  1. Check if documents are indexed, check for indexing errors.
+  2. Use **Hit Test** to verify search results and scores.
+  3. Check search settings: score threshold not too high, Top K value, try different search modes.
+  4. Check if the Qdrant service is healthy and reachable.
+  5. Reindex if needed.
+
+### High Embedding Costs
+
+- **Symptoms**: Unexpected high costs, cost alerts triggered.
+- **Solutions**:
+  1. Review embedding usage in KB statistics, identify high-usage KBs.
+  2. Optimize chunking: increase chunk size, reduce overlap, filter unnecessary content.
+  3. Use cheaper models (e.g., `text-embedding-3-small`).
+  4. Remove or reprocess unnecessary documents.
+
+<Callout type="info">
+  Not implemented / Roadmap: Per-KB document limits, daily embedding quotas, and cost alerts are not available.
+</Callout>
+
+### Slow Search Performance
+
+- **Symptoms**: Search takes too long, timeouts.
+- **Solutions**:
+  1. Review search performance in statistics, identify slow queries.
+  2. Optimize search: reduce Top K, disable reranking for simple queries, use filters.
+  3. Check Qdrant resource usage (CPU/memory) and indexes.
+  4. Increase resources or add replicas at the infrastructure level.
+
+## Best Practices
+
+### Document Management
+
+- ✅ Use descriptive document names, organize documents with categories and tags.
+- ✅ Add metadata for better search, remove outdated documents regularly.
+- ✅ Monitor processing status after upload, test search results.
+- ❌ Do not upload duplicate documents, do not use unclear file names.
+- ❌ Do not ignore processing errors, do not forget to test search.
+
+### Chunking Strategy
+
+- ✅ Choose appropriate chunk size for content type: use semantic chunking for narrative content, fixed chunking for structured data.
+- ✅ Test different strategies, monitor chunk quality, adjust based on search performance.
+- ❌ Do not use the same strategy for all content, chunks should not be too large or too small.
+- ❌ Do not ignore chunk overlap, do not skip testing.
+
+### Search Optimization
+
+- ✅ Use hybrid search for best results, enable reranking for accuracy.
+- ✅ Set appropriate score thresholds, monitor search performance, collect user feedback.
+- ❌ Do not rely only on vector search, do not set thresholds too high.
+- ❌ Do not ignore performance metrics and user feedback.
+
+## Bulk Operations
+
+The Documents table supports selection-based actions:
+
+- **Quick Process**: Process selected pending documents.
+- **Retry Failed Chunks**: Retry selected error documents.
+- **Delete**: Delete selected documents.
+
+ZIP/multi-file bulk upload and bulk metadata updates are not supported. Upload files individually, then use the preview/editor or the selection toolbar to process them.
+
+<Callout type="info">
+  Not implemented / Roadmap: Knowledge base import/export (JSON/CSV, with or without embeddings) is not available.
+</Callout>
+
+## API Access
+
+Manage knowledge bases via API. See [Knowledge Bases API](/en/api-reference/endpoints/knowledge-bases) for details.
+
+**Common Operations:**
+
+```python
+# List KBs — filters: team_id, search, status, own_only
+kbs = api.get("/api/v1/knowledge-bases", params={"team_id": "team-123"})
+
+# Create KB for team
+kb = api.post("/api/v1/knowledge-bases", json={
+    "name": "Product Docs",
+    "team_id": "team-123",
+    "embedding_model_id": "model-456",
+    "settings": {"chunk_size": 1000, "chunk_overlap": 100, "search_mode": "hybrid"}
+})
+
+# Upload document
+with open("document.pdf", "rb") as f:
+    doc = api.post(
+        f"/api/v1/knowledge-bases/{kb_id}/documents/upload",
+        files={"file": f}
+    )
+
+# Search KB
+results = api.post(f"/api/v1/knowledge-bases/{kb_id}/search", json={
+    "query": "How to reset password?",
+    "top_k": 5
+})
+```
+
+**Document Processing API:**
+
+| Endpoint | Description |
+| --- | --- |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process a pending document |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | Process with specified chunk settings |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | Reprocess a document |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | Re-chunk a document |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | Retry failed chunks |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | Retry single chunk embedding |

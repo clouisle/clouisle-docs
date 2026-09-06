@@ -8,6 +8,9 @@
     "quick-start",
     "concepts",
     "guides",
-    "tutorials"
+    "best-practices",
+    "tutorials",
+    "testing",
+    "changelog"
   ]
 }

@@ -1,35 +1,415 @@
 ---
 title: 自定义 HTTP 与代码工具
-description: 创建外部 API 工具或受限代码工具
+description: 创建外部 API 工具或受限代码工具，配置参数、测试执行、共享团队
 icon: CodeXml
 ---
 
-自定义工具属于当前团队。创建工具名称只能包含字母、数字和下划线，且必须以字母开头，例如 `lookup_order`。
+Clouisle 提供两类工具：**内置工具**（平台注册，无需创建）和**自定义工具**（团队创建）。内置工具涵盖时间、计算、网页、文件和媒体等能力，详见 [内置工具](/usage/guides/tools/built-in)。自定义工具属于当前团队，支持 HTTP API 与代码两种类型，可配置参数、测试执行并共享给其他团队。
 
-## HTTP API 工具
+## 工具类型
+
+自定义工具分为两种类型：
+
+| 类型 | 说明 | 适用场景 |
+| --- | --- | --- |
+| **HTTP API** | 调用外部 HTTP 接口，支持 GET/POST 等方法 | 查询 CRM、创建工单、调用第三方 API |
+| **代码工具** | 在受限沙箱中执行 Python 或 JavaScript 代码 | 数据转换、文本处理、自定义计算 |
+
+## 命名规则
+
+创建工具名称只能包含字母、数字和下划线，且必须以字母开头，例如 `lookup_order`。名称在团队内唯一。
+
+## 创建 HTTP API 工具
 
 1. 在**能力** > **工具**中选择**创建工具** > **HTTP API**。
-2. 设置工具名称、显示名称、描述和参数定义。
+2. 设置工具名称、显示名称、描述和分类。
 3. 配置 HTTP 方法（默认 `GET`）、URL、请求头、查询参数、JSON 请求体和响应路径。
 4. 在 URL、请求头、查询参数和正文中使用 `{参数名}` 占位符。
 5. 超时默认 `30` 秒，范围 `1-300` 秒。
 6. 保存后选择**运行测试**，确认结果路径和错误行为。
 
-## 代码工具
+<Callout type="warn">
+  自定义 HTTP 工具不支持在 URL 路径或 URL 字符串中使用 `{{variable}}` 替换。请保持端点 URL 静态，通过**查询参数**、**请求头**或**正文模板**传递变量。
+</Callout>
 
-代码工具支持 Python 与 JavaScript。Python 包必须使用精确 `package==version`；JavaScript 包必须使用 `package@version`。可配置命令 argv、包源地址、产物和资源限制。
+### HTTP 工具配置示例：查询客户信息
 
-默认资源限制：超时 `30` 秒、磁盘 `1024MB`、标准输出 `256KB`、标准错误 `256KB`。产物路径必须位于 `/workspace`，可标记为可选。
+```yaml title="CRM Lookup 工具配置"
+Name: CRM Lookup
+Description: 在 CRM 系统中查询客户信息
+Category: Data
+Type: Custom
+
+Endpoint Configuration:
+  URL: https://api.crm.example.com/customers
+  Method: GET
+  Authentication: API Key
+  API Key Header: X-API-Key
+  API Key: crm_...
+  Query Parameters:
+    customer_id: "{customer_id}"
+  Timeout: 30 seconds
+
+Input Parameters:
+  - name: customer_id
+    type: string
+    required: true
+    description: 要查询的客户 ID
+
+Response Format:
+  type: json
+  schema:
+    customer_id: string
+    name: string
+    email: string
+    phone: string
+    status: string
+```
+
+### HTTP 工具配置示例：创建工单（POST）
+
+```yaml title="Create Support Ticket 工具配置"
+Name: Create Support Ticket
+Description: 在工单系统中创建支持工单
+Category: Communication
+Type: Custom
+
+Endpoint Configuration:
+  URL: https://api.tickets.example.com/tickets
+  Method: POST
+  Authentication: Bearer Token
+  Token: Bearer tk_...
+  Content-Type: application/json
+  Timeout: 30 seconds
+
+Input Parameters:
+  - name: title
+    type: string
+    required: true
+    description: 工单标题
+
+  - name: description
+    type: string
+    required: true
+    description: 工单描述
+
+  - name: priority
+    type: enum
+    required: false
+    default: medium
+    options: [low, medium, high, urgent]
+    description: 工单优先级
+
+  - name: assignee
+    type: string
+    required: false
+    description: 处理人邮箱
+
+Response Format:
+  type: json
+  schema:
+    ticket_id: string
+    status: string
+    created_at: string
+```
+
+## 创建代码工具
+
+代码工具支持 Python 与 JavaScript，在受限沙箱中执行。Python 包必须使用精确 `package==version`；JavaScript 包必须使用 `package@version`。可配置命令 argv、包源地址、产物和资源限制。
+
+默认资源限制：
+
+| 资源 | 默认值 | 说明 |
+| --- | --- | --- |
+| 超时 | 30 秒 | 最大执行时间 |
+| 磁盘 | 1024MB | 可用磁盘空间 |
+| 标准输出 | 256KB | stdout 上限 |
+| 标准错误 | 256KB | stderr 上限 |
+
+产物路径必须位于 `/workspace`，可标记为可选。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/custom-tool-http-dialog.png" alt="创建 HTTP 工具" />
   <figcaption>创建 HTTP 工具</figcaption>
 </figure>
 
+## 编辑与删除工具
+
+### 编辑自定义工具
+
+1. 选择自定义工具
+2. 选择**编辑**
+3. 修改工具详情、端点配置、参数或响应格式
+4. 测试工具
+5. 保存更改
+
+### 删除自定义工具
+
+1. 选择自定义工具
+2. 选择**删除**
+3. 检查影响：正在使用该工具的 Agent 和工作流
+4. 确认删除
+
+<Callout type="error" title="删除影响">
+  删除自定义工具后，引用该工具的 Agent 和工作流将无法执行该工具。请在删除前确认无依赖。
+</Callout>
+
+## 测试工具
+
+### 运行测试
+
+1. 选择工具
+2. 选择**测试**按钮
+3. 输入测试参数
+4. 选择**运行测试**
+
+### 测试结果示例
+
+```yaml title="Web Search 测试结果"
+Tool: Web Search
+Test Parameters:
+  query: "artificial intelligence"
+  max_results: 5
+
+Status: Success
+Response Time: 1.2 seconds
+Results:
+  - title: "Artificial Intelligence - Wikipedia"
+    url: "https://en.wikipedia.org/wiki/Artificial_intelligence"
+    snippet: "Artificial intelligence (AI) is intelligence..."
+
+  - title: "What is AI? | IBM"
+    url: "https://www.ibm.com/topics/artificial-intelligence"
+    snippet: "Artificial intelligence leverages computers..."
+
+Metadata:
+  total_results: 5
+  search_time: 0.8s
+  api_calls: 1
+```
+
+```yaml title="CRM Lookup 测试结果"
+Tool: CRM Lookup
+Test Parameters:
+  customer_id: "12345"
+
+Status: Success
+Response Time: 0.5 seconds
+Response:
+  {
+    "customer_id": "12345",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+1-555-0123",
+    "status": "active"
+  }
+
+Validation: Passed
+  ✓ Response format matches schema
+  ✓ All required fields present
+  ✓ Data types correct
+```
+
 ## 凭据与共享
 
-凭据由服务端保存，调用时注入。自定义工具可以共享给其他团队，权限为**只读**或**读取并执行**。内置工具不能删除或共享；共享工具不能由接收团队修改所有者配置。工具接口响应中的 `share_permission`（`null` 表示未共享）与 `shared_with_count` 反映共享状态与接收团队数量。
+凭据由服务端保存，调用时注入。自定义工具可以共享给其他团队，权限为**只读**或**读取并执行**。
+
+| 权限 | 说明 |
+| --- | --- |
+| **只读** | 接收团队可查看工具配置，但不能执行 |
+| **读取并执行** | 接收团队可查看并执行工具 |
+
+<Callout type="warn" title="共享限制">
+  - 内置工具不能删除或共享
+  - 共享工具不能由接收团队修改所有者配置
+</Callout>
+
+工具接口响应中的 `share_permission`（`null` 表示未共享）与 `shared_with_count` 反映共享状态与接收团队数量。
+
+## 工具状态管理
+
+工具有启用/禁用两种状态：
+
+| 状态 | 说明 |
+| --- | --- |
+| **启用** | 工具可正常使用，显示在工具选择中 |
+| **禁用** | 工具不可使用，对用户隐藏 |
+
+<Callout type="info">
+  工具仅有启用/禁用状态，无 `testing` 或 `deprecated` 状态。自定义工具可通过 `POST /api/v1/admin/tools/{tool_id}/toggle` 切换状态。
+</Callout>
 
 ## 失败处理
 
-HTTP 工具测试失败时检查 URL、TLS、认证、请求体 JSON 和响应路径。代码工具失败时检查固定版本、标准输出上限、磁盘上限、超时和产物路径。
+### HTTP 工具测试失败
+
+检查以下方面：
+- URL 是否正确
+- TLS 证书是否有效
+- 认证凭据是否过期
+- 请求体 JSON 格式是否正确
+- 响应路径是否匹配实际响应结构
+
+### 代码工具测试失败
+
+检查以下方面：
+- 包是否使用固定版本（`package==version`）
+- 标准输出是否超过 256KB 上限
+- 磁盘使用是否超过 1024MB 上限
+- 执行是否超时（默认 30 秒）
+- 产物路径是否位于 `/workspace`
+
+## 最佳实践
+
+### 工具配置
+
+**✅ 推荐做法：**
+- 启用前先测试工具
+- 定期轮换凭据
+- 记录工具用途
+- 保持工具更新
+- 使用错误处理
+
+**❌ 避免做法：**
+- 启用未经测试的工具
+- 长期使用静态凭据
+- 跳过文档记录
+- 忽略错误
+
+### 安全
+
+**✅ 推荐做法：**
+- 使用安全认证方式
+- 定期轮换 API 密钥
+- 限制工具访问范围
+- 启用审计日志
+- 监控异常使用
+- 仅使用 HTTPS
+- 验证响应数据
+
+**❌ 避免做法：**
+- 使用弱认证方式
+- 长期使用静态 API 密钥
+- 允许无限制访问
+- 禁用审计日志
+- 忽略可疑活动
+- 允许 HTTP 连接
+- 盲目信任响应
+
+### 性能
+
+**✅ 推荐做法：**
+- 设置合理的超时时间
+- 尽可能使用缓存
+- 监控响应时间
+- 优化工具调用
+- 优雅处理错误
+
+**❌ 避免做法：**
+- 使用过长超时
+- 跳过缓存
+- 忽略性能指标
+- 进行不必要的调用
+- 忽略错误
+
+## API 端点
+
+工具 API 支持完整的 CRUD 操作，主要用于用户侧工具管理。详见 [工具 API](/api/tools)。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/tools` | 列出所有工具（支持分页、搜索、筛选） |
+| GET | `/api/v1/tools/id/{tool_id}` | 通过 ID 获取工具详情 |
+| GET | `/api/v1/tools/name/{tool_name}?team_id={team_id}` | 通过名称获取工具详情 |
+| POST | `/api/v1/tools/test` | 单次测试工具 |
+| POST | `/api/v1/tools/execute-code` | 在沙箱中直接运行代码 |
+| POST | `/api/v1/tools?team_id={team_id}` | 创建自定义工具 |
+| PUT | `/api/v1/tools/{tool_id}` | 更新工具配置 |
+| DELETE | `/api/v1/tools/{tool_id}` | 删除自定义工具 |
+
+### 管理端点
+
+管理端点位于 `/api/v1/admin/tools`，需要 `admin:capability:*` 权限：
+
+```python
+# 列出工具（管理员）
+tools = api.get("/api/v1/admin/tools", params={"page": 1, "page_size": 20})
+
+# 获取筛选选项
+filters = api.get("/api/v1/admin/tools/filters")
+
+# 测试工具（内置、自定义或 MCP）
+result = api.post("/api/v1/admin/tools/test", json={
+    "tool_name": "web_search",
+    "arguments": {"query": "artificial intelligence", "max_results": 5}
+})
+
+# 直接执行代码
+code_result = api.post("/api/v1/admin/tools/execute-code", json={
+    "language": "python",
+    "code": "return params['a'] + params['b']",
+    "params": {"a": 1, "b": 2}
+})
+```
+
+<Callout type="info">
+  管理端点 `POST /api/v1/tools/web_search/call` 和 `GET /api/v1/tools/web_search/usage` 不存在。工具配置（如 `TAVILY_API_KEY`）通过 `GET/POST/PUT/DELETE /api/v1/admin/tools/config[/{tool_name}]` 管理。
+</Callout>
+
+### 权限
+
+所有端点需要经过认证的 JWT 用户会话：
+
+| 权限 | 说明 |
+| --- | --- |
+| `tool:read` | 查看工具 |
+| `tool:create` | 创建工具 |
+| `tool:update` | 更新工具 |
+| `tool:delete` | 删除工具 |
+| `tool:execute` | 执行/测试工具 |
+
+## 工具命名规范与思考状态展示
+
+Agent 在对话过程中调用工具时，顶部的**思考折叠栏无需展开**即可自动识别并展示当前工具的操作意图。为了让前台展示最自然、直观，建议遵循以下工具命名规范：
+
+### 1. 命名规范与推荐动词前缀
+
+| 操作类型 | 推荐命名动词/词根示例 | 折叠栏外层直观感知效果 |
+| :--- | :--- | :--- |
+| **数据/信息查询** | `query_`、`fetch_`、`get_`、`search_`、`find_`、`check_`、`查_`、`获取_` | `正在查询：{工具名称}...` |
+| **发送与通知** | `send_`、`post_`、`push_`、`notify_`、`mail_`、`发_`、`推送_` | `正在发送：{工具名称}...` |
+| **创建与新增** | `create_`、`add_`、`insert_`、`new_`、`build_`、`建_`、`新增_` | `正在创建：{工具名称}...` |
+| **外部接口请求** | `api_`、`http_`、`rest_`、`request_`、`接口_`，或参数含 `url`/`endpoint` | `正在请求接口：{工具名称}...` |
+| **计算与分析** | `calc_`、`math_`、`count_`、`analyze_`、`计算_`、`统计_` | `正在计算与分析...` |
+| **产物收集与导出** | `artifact`、`artifacts`、包含 `生成下载链接` | `正在收集产物...` |
+| **文件与文档操作** | `read_`、`write_`、`open_file`、`save_file` | `正在读取/编辑文件...` |
+
+### 2. 展示名称建议
+
+- **优先设置中文展示名称**：创建工具时，若填写了友好的展示名称（如 `查询股票行情`、`发送飞书通知`），前端外层状态栏将直接优先展示该名称（如 `正在查询：查询股票行情...`）。
+- **英文标识符自动美化**：若工具仅有标识符（如 `fetch_user_orders` 或 `syncCrmAccount`），系统会自动转换为自然单词组并应用到状态中（如 `正在查询：Fetch User Orders...`）。
+- **并发调用智能聚合**：当 Agent 在一轮思考中同时并发执行多个工具时，外层折叠栏会自动聚合为 `正在并行调用 {N} 个工具...`，保持界面整洁。
+## 故障排除
+
+### 工具调用失败
+
+1. **检查工具配置：** 验证凭据、端点 URL，测试连通性
+2. **检查审计日志：** 查看工具所属团队的审计日志条目
+3. **常见错误：**
+   - **认证失败：** 凭据无效
+   - **超时：** 增加超时时间或检查端点
+   - **参数无效：** 检查参数格式
+4. **测试工具：** 使用测试面板查看结果
+
+### 响应缓慢
+
+1. 使用工具测试面板测量响应时间
+2. 优化：增加超时、减少数据传输、优化端点
+3. 检查外部服务状态，确认无中断
+
+## 相关内容
+
+- [内置工具](/usage/guides/tools/built-in) — 启用时间、计算、网页、文件和媒体等系统能力
+- [MCP 服务](/usage/guides/tools/mcp) — 通过 stdio、SSE 或 HTTP 连接 MCP Server
+- [Skills 与包](/usage/guides/tools/skills) — 导入可复用 Skill 包并管理资源
+- [工具 API](/api/tools) — 完整的 API 端点参考

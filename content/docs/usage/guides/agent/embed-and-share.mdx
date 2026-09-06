@@ -1,0 +1,114 @@
+---
+title: 独立运行与网页嵌入
+description: 使用独立 Run 页面分享 Agent，或通过浮层气泡与 Iframe 嵌入第三方网站
+icon: Share2
+---
+
+Agent 配置并发布后，Clouisle 提供了两种分发与使用方式：
+
+1. **独立运行页（`/run/{agent_id}`）**：专为团队成员与登录用户设计的全屏无干扰对话界面。
+2. **嵌入式网页挂件（`/embed/agent/{agent_id}/...`）**：使用团队 API 密钥（`clou_...`）将 Agent 安全嵌入 SaaS 应用、文档站点或公司官网。
+
+---
+
+## 1. 独立运行页（`/run/{agent_id}`）
+
+独立 Run 视图去除了 Studio 编辑器侧边栏和抽屉等构建期元素，专注于高效完成任务与深度分析：
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ 🤖 财务分析 Agent                                    [团队: Finance]   │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  🤖 财务分析 Agent                                                     │
+│  上传季度财报或提出财务建模问题                                        │
+│                                                                        │
+│  [分析 Q3 营收]  [现金流建模]  [对比竞品数据]                          │
+│                                                                        │
+│  👤 用户: 请分析上传的 Q3 财报。                                       │
+│                                                                        │
+│  🤖 财务分析 Agent:                                                    │
+│  💭 思考耗时 2.4s (读取文件: Q3_Financials.pdf)...                     │
+│  以下是 Q3 核心财务指标与同比分析...                                   │
+│                                                                        │
+├────────────────────────────────────────────────────────────────────────┤
+│  [📎] 输入问题或拖放电子表格...                                 [发送] │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### 进入运行页
+- 在**应用**列表（`/app/apps`）中，悬浮在任意已发布的 Agent 卡片上并点击**运行**。
+- 或直接访问 URL：`https://<your-domain>/run/{agent_id}`。
+
+### 功能特性
+- **无干扰画布**：专为复杂交互、大文档分析和多轮迭代推理优化。
+- **动态变量输入**：若 Agent 配置了必填变量（如 `client_id`、`locale`），运行页会在启动会话前弹出结构化输入栏。
+- **完整能力支持**：支持文件附件上传、图片查看器、文档预览、`ask_user` 人机交互表单以及消息版本分支切换。
+
+---
+
+## 2. 嵌入式聊天挂件
+
+Clouisle 支持通过**悬浮气泡**或**内联 Iframe**将已发布的 Agent 嵌入外部网页。
+
+### 开启网页嵌入
+
+1. 在 **Agent Studio**（`/app/apps/{agent_id}`）中打开目标 Agent。
+2. 确认 Agent 处于**已发布（Published）**状态。
+3. 点击顶部工具栏的 **嵌入（Embed）** 按钮，打开嵌入配置抽屉。
+4. 开启**启用嵌入**开关。
+5. 选择或生成具备 Agent 对话权限的团队 API 密钥（`clou_...`）。
+
+### 配置参数
+
+| 参数 | 说明 | 示例 |
+|---|---|---|
+| **允许的域名** | 限制挂件加载的浏览器来源域名（基于 `Origin` / `Referer` 校验） | `https://example.com, https://app.example.com` |
+| **挂件模式** | 选择悬浮启动气泡或内联 Iframe | `Floating Bubble` 或 `Inline Iframe` |
+| **主题与强调色** | 自定义挂件主题色，适配品牌视觉 | `#2563eb` 或跟随系统亮暗模式 |
+| **气泡位置** | 悬浮气泡在屏幕上的放置位置 | `右下角 (Bottom Right)` 或 `左下角 (Bottom Left)` |
+| **默认展开** | 页面加载后是否自动展开对话窗口 | `true` / `false` |
+
+---
+
+## 3. 集成代码示例
+
+### 方式 A：悬浮挂件脚本（推荐）
+
+在网站 HTML 的 `</body>` 闭合标签前插入以下脚本：
+
+```html
+<!-- Clouisle Agent 嵌入挂件 -->
+<script
+  src="https://<your-domain>/embed/clouisle-chat.js"
+  data-agent-id="550e8400-e29b-41d4-a716-446655440000"
+  data-api-key="clou_a1b2c3d4e5f6..."
+  data-theme="auto"
+  data-position="bottom-right"
+  async
+></script>
+```
+
+### 方式 B：内联 Iframe 嵌入
+
+直接在页面指定容器中嵌入对话视图：
+
+```html
+<iframe
+  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&theme=light"
+  width="100%"
+  height="700px"
+  frameborder="0"
+  allow="microphone; camera; clipboard-write"
+  style="border-radius: 12px; border: 1px solid #e5e7eb;"
+></iframe>
+```
+
+---
+
+## 4. 安全与访问控制
+
+- **API 密钥鉴权**：嵌入挂件通过查询参数 `token` 或 `Authorization: Bearer <key>` 传递的团队 API 密钥认证。
+- **来源域名校验**：配置 `allowed_domains` 时，后端会校验浏览器请求头的 `Origin` 与 `Referer`。
+- **速率限制**：嵌入对话同样继承平台的全局速率限制与模型配额保护。
+- **权限隔离**：嵌入会话无法访问内部团队模型管理、站点配置或管理员专属端点。

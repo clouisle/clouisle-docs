@@ -14,34 +14,73 @@ Clouisle uses a layered architecture separating frontend, backend, and infrastru
 | Backend | FastAPI (Python 3.13), Tortoise ORM + asyncpg, Celery + Redis | LangChain adapters (chat/embeddings/text splitting); self-built `WorkflowOrchestrator` for workflow execution; LangGraph is declared but not used at runtime; MarkItDown for document conversion |
 | Infrastructure | PostgreSQL 17 (`pg_search` full-text), Redis 7 (cache/Celery broker/rate-limit counters), Qdrant (vectors) | Vectors are stored in a dedicated collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model |
 
-### Request Flows
+### Request Flows & Execution Lifecycle
 
-**User request**:
-
-```text
-Browser → (optional external reverse proxy / Ingress) → Next.js SSR → API → FastAPI → PostgreSQL → response
-```
-
-**Chat (RAG)**:
+#### 1. Basic Request Flow
 
 ```text
-User message → FastAPI → Agent engine → Knowledge Base retrieval → Qdrant
-                                         ↓
-                                   LLM adapter → model provider → SSE stream → frontend
+Browser → (optional external reverse proxy / Ingress) → Next.js SSR (node server.js) → FastAPI API → PostgreSQL → Response
 ```
 
-**Document processing**:
+#### 2. Chat Request Flow & Asynchronous AgentRun Lifecycle
+
+Clouisle implements a durable, decoupled `AgentRun` execution architecture for conversational agents:
 
 ```text
-Upload → FastAPI → Celery task → MarkItDown text extraction → chunking → embedding → Qdrant storage → status update (PostgreSQL)
+User Message ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis Queue (Celery default)
+                       │ (202 Accepted, run_id)                           │
+                       ▼                                                  ▼
+                  SSE Stream                                  Celery Worker (run_agent_task)
+     (GET /api/v1/agents/{agent_id}/chat/runs/{id}/stream)                │
+                       ▲                                         Acquires Conversation Lock
+                       │                                                  │
+              Redis Event Buffer ◄──────────────────────────── AgentLoop ReAct Cycle
+              (SSE Event Pub/Sub)                                         │
+                                                               ┌──────────┴──────────┐
+                                                               ▼                     ▼
+                                                        Tool Calling /        Context Compaction
+                                                        RAG Retrieval         (Micro & Macro)
+                                                               │                     │
+                                                               ▼                     ▼
+                                                        [ask_user pause]      Watermarked Summary
+                                                        (Status: WAITING)     (Tokens kept in budget)
 ```
 
-**Workflow execution**:
+1. **Durable AgentRun**: Starting a run dispatches a Celery task and immediately returns `202 Accepted` with a `run_id`. The client establishes an SSE stream (`/chat/runs/{run_id}/stream`) and can disconnect or reconnect (`from_sequence`) without interrupting background tool execution.
+2. **AgentLoop ReAct Engine**: Manages iterative reasoning and tool-calling cycles (`max_iterations`, timeouts, and credential injection).
+3. **Three-Level Context Compaction**:
+   - **Micro Compaction**: Automatically truncates and summarizes oversized tool output payloads and raw base64 data to preserve token budgets.
+   - **Macro Compaction**: When conversation tokens cross the configured trigger budget, the engine computes turn boundaries, runs an LLM summarization over older messages, inserts a `context_summary` message with watermark tracking, and retains recent turns in verbatim form.
+   - **Preflight & Recovery Guards**: Token headroom reservations and automatic retries on context-length provider errors.
+4. **Human-in-the-Loop (`ask_user`) Suspension & Resumption**: When `ask_user` is called, `AgentLoop` enters `AgentRunStatus.WAITING` with pending question metadata. Submitting answers via `POST /chat/runs/{run_id}/answers` takes an ORM row lock, validates payloads, and resumes the active run seamlessly.
+
+#### 3. Workflow Engine Execution Flow
 
 ```text
-Trigger → FastAPI → Celery task → WorkflowOrchestrator → node execution (LLM/tools/code, etc.) → result storage → SSE (real-time scenarios)
+Trigger Event / User Input ──► FastAPI (POST /workflows/{id}/runs) ──► Celery Queue (workflow)
+                                                                              │
+                                                                              ▼
+                                                                   WorkflowOrchestrator
+                                                                              │
+                                                                   Parse DAG Graph Definition
+                                                                   (ExecutionPlan, filter comments)
+                                                                              │
+                                                                   Execute Node Pipeline
+                                                                   (LLM, Code, Condition,
+                                                                    Iteration, Pause...)
+                                                                              │
+                                                      ┌───────────────────────┴───────────────────────┐
+                                                      ▼                                               ▼
+                                               Node Execution                                  Pause Request
+                                            (ExecutionContext Flow)                          (Status: WAITING)
+                                                      │                                               │
+                                                      ▼                                               ▼
+                                               Completed Result                              Resume with Feedback
 ```
 
+1. **Graph Topological Planner (`ExecutionPlan`)**: Validates DAG dependencies, resolves parallel executable batches, and strips non-executable canvas documentation nodes (`NON_EXECUTABLE_NODE_TYPES = {"comment"}`).
+2. **Modular Node Executors**: Handlers for `llm`, `condition`, `code` (Sandbox), `iteration`/`loop`, `template`, `variable_aggregator`, `knowledge_retrieval`, `tool`, `agent`, and `sub_workflow`.
+3. **Pause & Resume Handlers**: Nodes requiring human review (`pause`) persist a `WorkflowPauseRequest` and suspend execution until approved or filled via `/runs/{id}/pause-requests/{req_id}/submit`.
 ### Scalability
 
 The frontend and API are stateless and scale horizontally; Celery Workers scale independently by queue (`default`, `knowledge`, `workflow`). **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. See [Deployment Architecture](../self-host/architecture.mdx) for the service topology and volumes.

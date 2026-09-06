@@ -1,0 +1,117 @@
+---
+title: Agent UI Automation Guide
+description: Design verifiable browser test journeys for Clouisle's Agent, Workflow, Knowledge Base, and permission system
+icon: FlaskConical
+---
+
+This document provides evidence-based browser test journey design for the Clouisle frontend UI. Routes and interface text are derived from source code and existing unit/API tests; it does not prescribe CSS/XPath selectors.
+
+## Validation status and operating rules
+
+- **Browser-environment validation is unavailable.** The repository has no Playwright/Cypress configuration, E2E test directory, browser auth-state fixture, or `test:e2e` script
+- The landmarks below are source-visible UI text. Confirm their rendered role, accessible name, locale, responsive visibility, focus behavior, and timing in the target browser before relying on them
+
+## Automated test commands (non-browser evidence)
+
+```bash
+# Frontend unit/component tests
+bun run --cwd frontend test
+b run --cwd frontend test:coverage
+bun run --cwd frontend coverage:check
+
+# Backend tests
+uv run --project backend pytest
+```
+
+These commands do not prove browser rendering, accessibility-tree names, real navigation, downloads, clipboard behavior, or streaming timing.
+
+## Test data baseline
+
+Prepare authorized, disposable accounts and data:
+
+- unauthenticated browser state
+- standard user; user with TOTP and a non-secret test backup code
+- team owner, admin, member, viewer, and a user outside the team
+- an administrator with access to the requested dashboard route
+- a disposable agent, workflow, knowledge base, uploadable non-sensitive document, and notification payload
+- an embedding model for knowledge-base creation and any model authorization required by the test environment
+- API key/webhook test configuration only when explicitly approved
+
+## Journey matrix
+
+### 1. Authentication and access
+
+- **Purpose:** establish session, redirect, verification, recovery, MFA, and permission-boundary behavior
+- **Routes:** `/login`, `/register`, `/verify`, `/forgot-password`, `/reset-password`, `/change-password`, `/totp-setup`, `/sso-callback`; protected platform routes under `/app/**`; dashboard routes such as `/dashboard`
+- **Landmarks:** `Welcome back`, `Username or email`, `Password`, `Login`, `Forgot password?`, `Human verification`, `Verify your email`, `Verification Code`, `Reset Password`, `Two-Factor Authentication Required`, `6-digit code`, `Use backup code instead`, `Scan QR Code`, `Save Backup Codes`, `Your password will expire in {days} days`, `Change Password Now`
+- **Happy scenarios:** log in with a valid authorized account; verify protected-route return after login; complete email verification or token-based password reset; update profile, set local password, disconnect SSO, disable TOTP, regenerate backup codes in account settings
+- **Error/access scenarios:** submit blank/invalid credentials; submit mismatched new/confirmation passwords; submit invalid or expired reset token; submit invalid TOTP or backup code; open protected route without token
+
+### 2. Chat
+
+- **Purpose:** exercise agent chat, conversation lifecycle, attachments, runtime variables, and generated-link confirmation
+- **Routes:** `/chat/[id]`, `/chat/[id]?conversation=[conversationId]`, `/run/[id]?type=agent`, `/run/[id]?type=workflow`, `/run/[id]?type=workflow&debug=true`, `/embed/agent/[id]`, `/app/apps/[id]/api`, `/app/apps/[id]/monitor`
+- **Landmarks:** `New Chat`, `No conversations`, `Rename Conversation`, `Delete Conversation`, `How can I help you today?`, `Type a message...`, `Send`, `Stop`, `Attach file`, `Fill in Variables`, `Start Chat`, `Open link?`, `This link was generated in the chat. Please confirm before opening it.`
+- **Happy scenarios:** open a known agent; start a new chat; complete typed text/paragraph/number/checkbox/select/boolean/array/object variables; send a harmless prompt; rename a test conversation; regenerate an assistant response; edit a user message; switch between response versions
+- **Error/access scenarios:** open a chat logged out; omit the embedded-agent token; use an unknown agent/resource ID; send with required variables omitted
+
+### 3. Workflow
+
+- **Purpose:** validate workflow creation/editing, draft versus published execution, publication validation, and operational views
+- **Routes:** `/app/apps`, `/app/apps/workflow/[id]`, `/app/apps/workflow/[id]/monitor`, `/app/apps/workflow/[id]/logs`, `/app/apps/workflow/[id]/api`, `/run/[id]?type=workflow`, `/embed/workflow/[id]`
+- **Landmarks:** `Workflow Editor`, `Nodes`, `Start`, `End`, `Run`, `Publish`, `Published`, `Unpublished`, `Checklist`, `Resolve all issues before publishing`, `All checks passed`, `Test Run`, `Debug (use draft)`, `API Documentation`, `Webhook URL`, `API Key Required`, `Workflow Monitor`, `No workflow runs yet`
+- **Happy scenarios:** create a named workflow for a selected test team; add/configure a minimal valid graph; configure its LLM node (load models, search/group/select, edit prompt, switch memory modes, set advanced parameters and response schema, add output variables); configure an Agent node; configure a Sub-workflow node
+- **Error/access scenarios:** attempt to publish an incomplete graph; attempt a non-debug published run before publishing; visit with a user without app access; confirm unconfigured Answer node shows `Click to configure`
+
+### 4. Knowledge bases
+
+- **Purpose:** validate team-scoped knowledge-base management, document processing, search, and destructive-data safeguards
+- **Routes:** `/app/kb`, `/app/kb/[id]`, `/app/kb/[id]/search`, `/app/kb/[id]/documents/[docId]`, `/knowledge-bases`, `/knowledge-bases/[id]`, `/knowledge-bases/[id]/search`
+- **Landmarks:** `Knowledge Bases`, `Create Knowledge Base`, `Enter knowledge base name`, `Select a team`, `Embedding Model`, `No embedding models available`, `Documents`, `Upload Document`, `Import URL`, `Drag and drop files here, or click to select`, `Reprocess`, `Edit Chunks`, `Apply Re-chunking`, `Search Test`, `Enter your search query...`, `Hybrid`, `Vector`, `Fulltext`, `No results found`
+- **Happy scenarios:** create a KB for a test team with an available embedding model; upload a harmless test document; run a search using each available search mode; inspect a document/chunk view
+- **Error/access scenarios:** create with missing name/team/model; test search with no matching text; access a team KB as an outsider; access admin KB routes with only low-level `kb:read` permission
+
+### 5. Team permissions
+
+- **Purpose:** verify membership role boundaries, ownership transfer, model authorization, and quota administration
+- **Route:** `/teams`
+- **Landmarks:** `Team Management`, `Create Team`, `Team Name`, `Members`, `Add Member`, `Role`, `Change Role`, `Remove Member`, `Transfer Ownership`, `Leave Team`, `Model Authorization`, `Authorize Model`, `Quota Settings`, `Revoke Authorization`
+- **Happy scenarios:** create a disposable team; add a test member; assign each supported role (`owner`, `admin`, `member`, `viewer`); authorize a test model; configure a non-production quota; transfer ownership between two test users
+- **Error/access scenarios:** verify restricted controls are absent or action fails for lower roles; transfer ownership to the current owner; attempt actions as a nonmember
+
+### 6. Notifications
+
+- **Purpose:** validate user inbox actions, important-notification presentation, admin notification lifecycle, and delivery-state visibility
+- **Routes:** `/app/notifications`, `/notifications`, `/site-settings/notifications`
+- **Landmarks:** `Notifications`, `Search notifications...`, `Unread only`, `Mark all read`, `No notifications`, `Important notifications`, `Notification Management`, `Create Notification`, `Delivery Status`, `Delete`, `External Notification Channels`, `Pending`, `Sending`, `Sent`, `Failed`
+- **Happy scenarios:** create a disposable admin notification with scoped audience; verify it appears to the intended user; filter/search it; mark it read; inspect detail and delivery status; delete it from administration
+- **Error/access scenarios:** open admin notification management without dashboard access; create with missing required fields; confirm a notification scoped to another user/team is not visible
+
+### 7. Administration
+
+- **Purpose:** verify dashboard routing, navigation, role/permission controls, and representative admin authorization boundaries
+- **Routes:** `/dashboard`, `/dashboard/observability`, `/users`, `/roles`, `/permissions`, `/models`, `/apps`, `/capabilities`, `/capabilities/code`, `/app/capabilities`, `/app/capabilities/code`, `/api-keys`, `/memories`, `/audit-logs`, `/site-settings` and its subroutes
+- **Landmarks:** sidebar items `Dashboard`, `Teams`, `Knowledge Bases`, `Activity Log`, `Users`, `Roles`, `Permissions`, `API Keys`, `Models`, `Apps`, `Capabilities`, `Notifications`, `Site Settings`, `Audit Logs`, `Observability`, `Memories`, `Log out`; dashboard time ranges `Last 7 Days`, `Last 30 Days`, `Last 90 Days`, `All Time`
+- **Happy scenarios:** with an authorized disposable admin, navigate to a representative dashboard page; verify platform memory graph loading, empty, and populated states; verify user list, search/filter, pagination, create/edit/status change/bulk delete; exercise registration/approval/email verification/account deletion/password policy/TOTP/session/CORS with disposable values
+- **Error/access scenarios:** access each relevant route with a user missing its mapped permission; force memory-graph loading to fail and confirm sanitized recovery; force a list or status-update request failure and confirm retry/recovery does not show stale success
+
+## Reusable secure Agent browser-testing prompt
+
+Follow these principles when testing:
+
+1. Before acting, confirm the current account, team, route, and test-data prefix
+2. Use only the documented route and visible landmark for this journey; inspect the rendered accessibility tree before choosing a selector
+3. Treat automated unit/API evidence as implementation evidence only, not browser proof
+4. Use only authorized test accounts and disposable test data
+5. Never reveal credentials, tokens, cookies, API keys, TOTP/backup codes, notification-channel secrets, or uploaded sensitive content in output, screenshots, logs, or reports
+6. Do not bypass authentication, authorization, CAPTCHA, MFA, or confirmation steps
+7. Do not follow generated external links or trigger webhooks/external delivery unless the test explicitly authorizes a non-production endpoint
+8. Run the stated happy path, then the stated error/access path using the least-privileged test account
+9. Record only browser-observable outcomes and created test-record identifiers; cite unit/API tests separately as supporting evidence
+10. Avoid destructive actions unless explicitly required. For any mutation, create uniquely prefixed data and clean up only records created by this run
+
+## Existing automated evidence and next step
+
+Frontend `bun test` evidence covers LLM node enabled-model loading and failure recovery, model search/grouping/selection, prompt and memory updates, advanced parameters, response schemas, output variables, and vision-variable/image-position callbacks; change-password mismatch/request/redirect behavior, token-reset labels, mismatch prevention, API payload, success/login action, invalid-token and backend validation states, forgot-password email/code validation and redirect helpers, TOTP QR/manual-entry/clipboard state, standard and forced TOTP setup loading/success/error cleanup, password-expiration warning visibility/link/dismissal and hidden failure/exemption paths, dashboard time-range options/change filtering, workflow Answer and Condition states/labels.
+
+When an E2E harness is introduced, convert one journey per section into executable browser tests and validate selector/accessibility claims against the rendered application.

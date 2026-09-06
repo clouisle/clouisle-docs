@@ -1,0 +1,117 @@
+---
+title: Agent UI 自动化测试指南
+description: 为 Clouisle 的 Agent、工作流、知识库与权限体系设计可验证的浏览器测试旅程
+icon: FlaskConical
+---
+
+本文档为 Clouisle 前端 UI 提供基于证据的浏览器测试旅程设计。路线与界面文本均源自源码与现有单元/API 测试，不规定 CSS/XPath 选择器。
+
+## 验证状态与运行规则
+
+- **浏览器环境验证不可用**：仓库当前无 Playwright/Cypress 配置、E2E 测试目录、浏览器认证状态固件或 `test:e2e` 脚本
+- 下列地标均为源码可见的 UI 文本。在依赖前需确认其在目标浏览器中的角色、可访问名称、语言环境、响应式可见性、焦点行为与时序
+
+## 自动化测试命令（非浏览器证据）
+
+```bash
+# 前端单元/组件测试
+bun run --cwd frontend test
+bun run --cwd frontend test:coverage
+bun run --cwd frontend coverage:check
+
+# 后端测试
+uv run --project backend pytest
+```
+
+这些命令不证明浏览器渲染、无障碍树名称、真实导航、下载、剪贴板行为或流式时序。
+
+## 测试数据基线
+
+准备授权、可销毁的账户与数据：
+
+- 未认证浏览器状态
+- 普通用户；带 TOTP 与非机密测试备份码的用户
+- 团队所有者、管理员、成员、查看者、团队外用户
+- 可访问目标仪表盘路由的管理员
+- 可销毁的 Agent、工作流、知识库、可上传非敏感文档、通知载荷
+- 用于知识库创建的嵌入模型与测试环境所需的模型授权
+- API Key/Webhook 测试配置（仅在明确批准时）
+
+## 旅程矩阵
+
+### 1. 认证与访问
+
+- **目的**：建立会话、重定向、验证、恢复、多因素认证与权限边界行为
+- **路由**：`/login`、`/register`、`/verify`、`/forgot-password`、`/reset-password`、`/change-password`、`/totp-setup`、`/sso-callback`；`/app/**` 受保护平台路由；`/dashboard` 等仪表盘路由
+- **地标**：`Welcome back`、`Username or email`、`Password`、`Login`、`Forgot password?`、`Human verification`、`Verify your email`、`Verification Code`、`Reset Password`、`Two-Factor Authentication Required`、`6-digit code`、`Use backup code instead`、`Scan QR Code`、`Save Backup Codes`、`Your password will expire in {days} days`、`Change Password Now`
+- **正常场景**：使用有效授权账户登录；验证受保护路由登录后返回目标路由；完成邮箱验证或基于 Token 的密码重置；在账户设置中更新资料、设置本地密码、断开 SSO 连接、禁用 TOTP、重新生成备份码
+- **错误/访问场景**：提交空白/无效凭证；提交不匹配的新/确认密码；提交无效或过期的重置 Token；提交无效的 TOTP 或备份码；未携带 Token 访问受保护路由
+
+### 2. 聊天
+
+- **目的**：练习 Agent 聊天、会话生命周期、附件、运行时变量与生成链接确认
+- **路由**：`/chat/[id]`、`/chat/[id]?conversation=[conversationId]`、`/run/[id]?type=agent`、`/run/[id]?type=workflow`、`/run/[id]?type=workflow&debug=true`、`/embed/agent/[id]`、`/app/apps/[id]/api`、`/app/apps/[id]/monitor`
+- **地标**：`New Chat`、`No conversations`、`Rename Conversation`、`Delete Conversation`、`How can I help you today?`、`Type a message...`、`Send`、`Stop`、`Attach file`、`Fill in Variables`、`Start Chat`、`Open link?`、`This link was generated in the chat. Please confirm before opening it.`
+- **正常场景**：打开已知 Agent；开始新聊天；完成各类变量输入；发送无害提示；重命名测试会话；重新生成助手回复；编辑用户消息创建下游回复；切换响应版本
+- **错误/访问场景**：未登录打开聊天；省略嵌入 Agent Token；使用未知 Agent/资源 ID；省略必填变量发送
+
+### 3. 工作流
+
+- **目的**：验证工作流创建/编辑、草稿与已发布执行、发布验证与运营视图
+- **路由**：`/app/apps`、`/app/apps/workflow/[id]`、`/app/apps/workflow/[id]/monitor`、`/app/apps/workflow/[id]/logs`、`/app/apps/workflow/[id]/api`、`/run/[id]?type=workflow`、`/embed/workflow/[id]`
+- **地标**：`Workflow Editor`、`Nodes`、`Start`、`End`、`Run`、`Publish`、`Published`、`Unpublished`、`Checklist`、`Resolve all issues before publishing`、`All checks passed`、`Test Run`、`Debug (use draft)`、`API Documentation`、`Webhook URL`、`API Key Required`、`Workflow Monitor`、`No workflow runs yet`
+- **正常场景**：为测试团队创建命名工作流；添加/配置最小有效图；配置 LLM 节点（加载模型、选择模型、编辑提示词、切换记忆模式、设置高级参数与响应模式、添加输出变量）；配置 Agent 节点；配置子工作流节点
+- **错误/访问场景**：尝试发布不完整的图；发布前尝试非调试运行；无应用访问权限访问；未配置的 Answer/Condition 节点显示 `Click to configure`
+
+### 4. 知识库
+
+- **目的**：验证团队作用域知识库管理、文档处理、搜索与破坏性数据保护
+- **路由**：`/app/kb`、`/app/kb/[id]`、`/app/kb/[id]/search`、`/app/kb/[id]/documents/[docId]`、`/knowledge-bases`、`/knowledge-bases/[id]`、`/knowledge-bases/[id]/search`
+- **地标**：`Knowledge Bases`、`Create Knowledge Base`、`Enter knowledge base name`、`Select a team`、`Embedding Model`、`No embedding models available`、`Documents`、`Upload Document`、`Import URL`、`Drag and drop files here, or click to select`、`Reprocess`、`Edit Chunks`、`Apply Re-chunking`、`Search Test`、`Enter your search query...`、`Hybrid`、`Vector`、`Fulltext`、`No results found`
+- **正常场景**：为测试团队创建知识库；上传无害测试文档；使用每种搜索模式运行搜索；检查文档/分块视图
+- **错误/访问场景**：缺少名称/团队/模型创建；无匹配文本搜索；团队外访问；仅有低级 `kb:read` 权限访问管理员路由
+
+### 5. 团队权限
+
+- **目的**：验证成员角色边界、所有权转移、模型授权与配额管理
+- **路由**：`/teams`
+- **地标**：`Team Management`、`Create Team`、`Team Name`、`Members`、`Add Member`、`Role`、`Change Role`、`Remove Member`、`Transfer Ownership`、`Leave Team`、`Model Authorization`、`Authorize Model`、`Quota Settings`、`Revoke Authorization`
+- **正常场景**：创建可销毁团队；添加测试成员；分配每个支持的角色（`owner`、`admin`、`member`、`viewer`）；授权测试模型；配置非生产配额；在两个测试用户间转移所有权
+- **错误/访问场景**：低角色缺少受限控制；转移给当前所有者；非成员尝试操作
+
+### 6. 通知
+
+- **目的**：验证用户收件箱操作、重要通知展示、管理员通知生命周期与投递状态可见性
+- **路由**：`/app/notifications`、`/notifications`、`/site-settings/notifications`
+- **地标**：`Notifications`、`Search notifications...`、`Unread only`、`Mark all read`、`No notifications`、`Important notifications`、`Notification Management`、`Create Notification`、`Delivery Status`、`Delete`、`External Notification Channels`、`Pending`、`Sending`、`Sent`、`Failed`
+- **正常场景**：创建可销毁管理员通知；验证其出现在目标用户；筛选/搜索；标记已读；检查详情与投递状态；从管理后台删除
+- **错误/访问场景**：无仪表盘访问权限打开管理；缺少必填字段创建；验证其他用户/团队作用域的通知不可见
+
+### 7. 管理后台
+
+- **目的**：验证仪表盘路由、导航、角色/权限控制与代表性管理员授权边界
+- **路由**：`/dashboard`、`/dashboard/observability`、`/users`、`/roles`、`/permissions`、`/models`、`/apps`、`/capabilities`、`/capabilities/code`、`/app/capabilities`、`/app/capabilities/code`、`/api-keys`、`/memories`、`/audit-logs`、`/site-settings` 及其子路由
+- **地标**：侧边栏项 `Dashboard`、`Teams`、`Knowledge Bases`、`Activity Log`、`Users`、`Roles`、`Permissions`、`API Keys`、`Models`、`Apps`、`Capabilities`、`Notifications`、`Site Settings`、`Audit Logs`、`Observability`、`Memories`、`Log out`；仪表盘时间范围 `Last 7 Days`、`Last 30 Days`、`Last 90 Days`、`All Time`
+- **正常场景**：授权管理员导航到代表性仪表盘页面；验证平台记忆图的加载、空与填充状态；在 `/users` 验证用户列表、搜索/筛选、分页、创建/编辑/状态变更/批量删除；在 `/site-settings/security` 使用可销毁值练习注册/审批/邮箱验证/账户删除/密码策略/TOTP/会话/CORS
+- **错误/访问场景**：缺少映射权限访问每个相关路由；强制记忆图加载失败并验证恢复；强制列表或状态更新请求失败并验证重试/恢复不显示过期成功
+
+## 可复用的安全 Agent 浏览器测试提示词
+
+测试时遵循以下原则：
+
+1. 操作前确认当前账户、团队、路由与测试数据前缀
+2. 仅使用本文档记录的路线与可见地标；选择选择器前先检查渲染的无障碍树
+3. 将自动化单元/API 测试证据仅视为实现证据，而非浏览器证明
+4. 仅使用授权测试账户与可销毁测试数据
+5. 不在输出、截图、日志或报告中泄露凭证、Token、Cookie、API Key、TOTP/备份码、通知通道机密或上传的敏感内容
+6. 不绕过认证、授权、CAPTCHA、MFA 或确认步骤
+7. 不跟随生成的外部链接或触发 Webhook/外部投递，除非测试明确授权非生产端点
+8. 运行声明的正常路径，然后使用最小权限测试账户运行声明的错误/访问路径
+9. 记录仅浏览器可观察的结果与创建的测试记录标识符；将单元/API 测试单独引用为支持证据
+10. 避免破坏性操作，除非明确要求。对任何变更创建唯一前缀的数据，并仅清理本运行创建的记录
+
+## 现有自动化证据与下一步
+
+前端 `bun test` 证据涵盖 LLM 节点启用模型加载与故障恢复、模型搜索/分组/选择、提示词与记忆更新、高级参数、响应模式、输出变量与视觉变量回调；更改密码不匹配/请求/重定向行为、Token 重置标签、不匹配预防、API 载荷、成功/登录动作、无效 Token 与后端验证状态、忘记密码邮箱/代码验证与重定向助手、TOTP QR/手动输入/剪贴板状态、标准与强制 TOTP 设置加载/成功/清理、密码过期警告可见性/链接/.dismiss 与隐藏失败/豁免路径、仪表盘时间范围选项/变更过滤、工作流 Answer 与 Condition 状态/标签。
+
+引入 E2E 工具后，将每个部分的一个旅程转换为可执行的浏览器测试，并针对渲染的应用验证选择器/无障碍声明。

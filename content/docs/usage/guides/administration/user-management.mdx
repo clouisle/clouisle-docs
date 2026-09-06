@@ -4,15 +4,78 @@ description: 管理用户账户、密码策略、激活状态与 TOTP
 icon: Users
 ---
 
-用户管理在**管理后台** > **用户**中操作，需要 `admin:user:*` 权限。用户列表支持搜索、按状态筛选，并展示系统角色与团队角色。
+用户管理在**管理后台** > **用户**中操作，需要 `admin:user:*` 权限。管理员可创建用户、管理账户、控制访问、分配角色、执行策略和发送邮件。
+
+## 访问用户管理
+
+从管理后台进入：
+
+1. 以管理员身份登录
+2. 进入**管理后台**
+3. 在侧边栏点击**用户**
+4. 查看用户管理界面
+
+或直接导航到 `/users`。用户列表支持搜索、按状态筛选，并展示系统角色与团队角色。
 
 ## 创建用户
 
-逐个创建（`POST /api/v1/admin/users`），填写用户名、邮箱、密码与角色。无 CSV 批量导入（Roadmap）；启用 `sso_auto_create_users` 时，SSO 首次登录可自动创建用户。
+### 手动创建
 
-## 编辑与密码策略
+1. 点击**创建用户**按钮
+2. 填写用户信息：
+   - **用户名**：唯一用户名
+   - **邮箱**：用户邮箱地址
+   - **密码**：初始密码
+   - **激活**：账户是否激活（`is_active`）
+3. 点击**创建用户**
+4. 用户创建完成
 
-编辑基本信息与角色。管理员可执行密码策略操作：
+> **Note:** 全局角色和团队角色在创建后通过编辑或团队管理流程分配，创建用户表单不分配角色或团队。
+
+### 批量导入
+
+> **Note:** 未实现 / Roadmap。无 CSV 用户导入功能。用户逐个创建（`POST /api/v1/admin/users`），或在启用 `sso_auto_create_users` 时通过 SSO 自动创建。
+
+### SSO 自动创建
+
+通过 SSO 自动创建用户：
+
+1. 配置 SSO 提供商
+2. 在 SSO 设置中启用 `sso_auto_create_users`
+3. 用户通过 SSO 登录
+4. 账户自动创建
+5. 分配到默认角色和默认团队（如已配置）
+
+SSO 自动创建设置（站点设置 → 安全/SSO）：
+
+| 设置 | 说明 |
+| --- | --- |
+| 启用自动创建 | `sso_auto_create_users` |
+| 默认角色 | `default_role_id` — 默认 Viewer |
+| 默认团队 | `default_team_id` + `default_team_role` |
+| 按邮箱匹配 | `sso_match_by_email` |
+| 需要审批 | `sso_require_approval` |
+
+> **Note:** 未实现 / Roadmap：SSO 创建的邮箱域限制不可用。
+
+## 查看用户详情
+
+点击用户可打开详情面板，查看完整用户信息，包括：`last_login`、`force_password_change`、`password_expiration_exempt`、用户的 `roles` 和 SSO 连接信息。不暴露登录次数、失败登录次数或最后密码修改时间。
+
+> **Note:** 未实现 / Roadmap：用户管理内无单用户活动视图。可通过**审计日志**按用户筛选查看用户操作。
+
+## 编辑用户
+
+### 更新用户信息
+
+1. 打开用户详情
+2. 点击**编辑**按钮
+3. 更新字段：邮箱、用户名、全局角色、激活状态
+4. 点击**保存更改**
+
+### 密码策略操作
+
+无"重置密码为临时密码"流程。管理员按用户管理密码策略：
 
 | 操作 | 端点 |
 | --- | --- |
@@ -23,13 +86,88 @@ icon: Users
 | 密码过期概览 | `GET /api/v1/admin/users/password-expiration-stats` |
 | 即将过期用户 | `GET /api/v1/admin/users/expiring-passwords` |
 
+> **Note:** 未实现 / Roadmap：从管理面板生成临时密码或发送重置邮件不可用。
+
+### 管理团队归属
+
+在用户详情中查看用户的团队和角色。添加/移除用户和更改团队角色从**团队**页面（添加成员、更改角色、移除成员、转让所有权）完成，不从用户详情视图操作。
+
 ## 状态管理
 
-停用后用户不能登录，可重新激活，也可删除。批量操作仅支持批量强制改密与发送邮件（`POST /api/v1/admin/users/send-email`）；批量启用/停用、批量加入/移出团队、批量导出与批量删除未实现（Roadmap）。
+### 激活用户
 
-## TOTP 管理
+1. 找到未激活用户
+2. 点击 **...** 菜单
+3. 选择**激活**
+4. 确认激活
+5. 用户可重新登录
 
-管理员可查看和禁用用户的 TOTP（仅超级管理员）：
+激活后：用户可登录、资源访问恢复、团队归属激活、API 密钥启用。
+
+### 停用用户
+
+1. 打开用户详情
+2. 点击**停用**按钮
+3. 提供原因（可选）
+4. 确认停用
+5. 用户被停用
+
+停用后：用户不能登录、API 密钥禁用、资源保留、团队归属保留、可重新激活。
+
+### 删除用户
+
+1. 打开用户详情
+2. 点击**删除**按钮
+3. 查看删除内容
+4. 输入用户名确认
+5. 点击**永久删除**
+
+删除后：用户账户和个人资料、个人对话、API 密钥、个人资源（如无团队）被删除。团队资源（转让给团队）、审计日志（合规）、团队归属（移除）保留。
+
+## 批量操作
+
+可用批量操作：
+
+| 操作 | 端点 |
+| --- | --- |
+| 批量强制修改密码 | `POST /api/v1/admin/users/bulk-force-password-change` |
+| 发送邮件 | `POST /api/v1/admin/users/send-email` |
+
+> **Note:** 未实现 / Roadmap：批量启用/停用、批量加入/移出团队、批量导出、批量删除不可用。无用户导出（CSV/JSON/Excel）和用户导入功能。
+
+## 用户权限
+
+### 系统角色
+
+| 角色 | 权限 |
+| --- | --- |
+| Super Admin | 所有权限（`*`） |
+| Admin | 仪表板访问、系统读取可见性、团队范围资源管理 |
+| Member | 日常资源创建和编辑，无仪表板访问 |
+| Viewer | 默认只读角色，含聊天/运行/执行权限 |
+
+更改用户角色：打开用户详情 → 编辑 → 更改全局角色 → 保存。
+
+### 团队角色
+
+用户在不同团队可拥有不同角色：
+
+- Owner：完全团队控制
+- Admin：管理团队成员和资源
+- Member：创建和使用资源
+- Viewer：只读访问
+
+## 安全功能
+
+### 账户安全
+
+每用户安全设置：
+
+1. **密码策略**：全局强制执行（站点设置 → 安全）
+2. **2FA（TOTP）**：查看状态和按用户禁用（管理员端点）
+3. **密码过期**：按用户强制修改、重置过期或免除
+
+管理员 TOTP 端点：
 
 ```bash
 curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
@@ -37,6 +175,75 @@ curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
 curl -X POST "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/disable" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
+
+> **Note:** 未实现 / Roadmap：用户管理内无单用户会话管理（活动会话列表、撤销会话）和登录历史视图。账户锁定由全局登录策略（`max_login_attempts`、`lockout_duration_minutes`）强制执行。
+
+### 审计日志
+
+1. 所有用户操作被记录
+2. 通过审计日志按用户筛选查看
+3. 导出日志用于合规（CSV/JSON）
+
+## 最佳实践
+
+### 用户管理
+
+- 定期审查用户账户
+- 停用不活跃用户
+- 执行强密码策略
+- 特权账户启用 2FA
+- 监控失败登录尝试
+- 记录用户变更
+
+### 安全
+
+- 要求管理员使用 2FA
+- 监控审计日志
+- 设置密码过期
+- 失败尝试后锁定账户
+- 定期安全审计
+
+## 故障排除
+
+### 无法创建用户
+
+1. 检查邮箱是否唯一
+2. 验证用户名是否唯一
+3. 检查邮箱格式
+4. 验证密码满足要求
+5. 查看错误消息
+
+### 用户无法登录
+
+1. 检查账户是否激活
+2. 验证密码是否正确
+3. 检查账户是否锁定
+4. 查看失败登录尝试
+5. 重置密码
+6. 检查 2FA 设置
+7. 查看审计日志
+
+### 无法删除用户
+
+1. 检查用户是否是团队所有者
+2. 先转让团队所有权
+3. 检查用户是否有活跃资源
+4. 改为停用用户
+
+## API 端点参考
+
+| 端点 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/v1/admin/users` | POST | 创建用户 |
+| `/api/v1/admin/users/{user_id}/force-password-change` | POST | 强制修改密码 |
+| `/api/v1/admin/users/{user_id}/reset-password-expiration` | POST | 重置密码过期计时 |
+| `/api/v1/admin/users/{user_id}/exempt-password-expiration` | POST | 免除密码过期 |
+| `/api/v1/admin/users/bulk-force-password-change` | POST | 批量强制修改密码 |
+| `/api/v1/admin/users/password-expiration-stats` | GET | 密码过期概览 |
+| `/api/v1/admin/users/expiring-passwords` | GET | 即将过期用户 |
+| `/api/v1/admin/users/send-email` | POST | 发送邮件 |
+| `/api/v1/admin/totp/users/{user_id}/status` | GET | 查看 TOTP 状态 |
+| `/api/v1/admin/totp/users/{user_id}/disable` | POST | 禁用 TOTP |
 
 ---
 

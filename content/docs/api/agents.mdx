@@ -1,0 +1,880 @@
+---
+title: Agent API
+description: 管理 AI Agent、发布控制、聊天交互与统计查询
+icon: Bot
+---
+
+## 端点总览
+
+Agent API 提供 Agent 生命周期管理、聊天交互与统计查询能力。基础路径为 `/api/v1/agents`。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/agents` | 列出当前用户可访问的 Agent |
+| POST | `/api/v1/agents` | 创建新 Agent |
+| GET | `/api/v1/agents/{agent_id}` | 获取 Agent 详情（含完整配置） |
+| PUT | `/api/v1/agents/{agent_id}` | 更新 Agent 配置 |
+| DELETE | `/api/v1/agents/{agent_id}` | 永久删除 Agent |
+| POST | `/api/v1/agents/{agent_id}/publish` | 发布 Agent |
+| POST | `/api/v1/agents/{agent_id}/unpublish` | 取消发布 |
+| GET | `/api/v1/agents/{agent_id}/public` | 获取公开 Agent 基础信息，可选认证 |
+| POST | `/api/v1/agents/{agent_id}/chat` | 非流式聊天 |
+| POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE 流式聊天 |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/regenerate` | 重新生成 |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | 编辑用户消息并生成分支 |
+| GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | 查询消息版本 |
+| POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | 切换版本 |
+| GET | `/api/v1/agents/{agent_id}/stats` | 查询 Agent 统计概览 |
+| GET | `/api/v1/agents/{agent_id}/stats/trends` | 查询趋势数据 |
+| GET | `/api/v1/agents/{agent_id}/stats/tool-usage` | 查询工具使用统计 |
+| GET | `/api/v1/agents/{agent_id}/stats/recent-conversations` | 查询最近会话 |
+
+## 认证
+
+所有端点需要已认证的 JWT 用户会话。聊天端点额外支持 API Key（需绑定 Agent 权限）。
+
+**所需权限范围：**
+
+| 范围 | 用途 |
+| --- | --- |
+| `agent:read` | 列出和查看 Agent |
+| `agent:create` | 创建 Agent |
+| `agent:update` | 更新 Agent |
+| `agent:delete` | 删除 Agent |
+| `agent:publish` | 发布或取消发布 Agent |
+| `agent:chat` | 与 Agent 聊天 |
+
+---
+
+## 列出 Agent
+
+```
+GET /api/v1/agents
+```
+
+获取当前用户可访问的全部 Agent，支持分页、团队筛选、状态筛选与关键词搜索。
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页数量 |
+| `team_id` | string | 否 | - | 按团队 UUID 筛选 |
+| `status` | string | 否 | - | 按状态筛选：`draft`、`published` |
+| `visibility` | string | 否 | - | 按可见性筛选：`private`、`team`、`public`（向后兼容值） |
+| `keyword` | string | 否 | - | 按名称或描述搜索 |
+| `own_only` | boolean | 否 | false | 仅显示当前用户创建的 Agent |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/agents?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | Agent UUID |
+| `name` | string | 名称 |
+| `description` | string | 描述 |
+| `icon` | string | 图标 emoji 或 URL |
+| `avatar_url` | string | 头像 URL |
+| `team` | object | 团队信息（`id`、`name`、`avatar_url`） |
+| `model` | object | 模型信息（`id`、`name`、`provider`、`model_id`），未设置时为 `null` |
+| `status` | string | `draft` 或 `published` |
+| `visibility` | string | `private` 或 `team` |
+| `conversation_count` | integer | 会话数量 |
+| `message_count` | integer | 消息数量 |
+| `created_by` | object | 创建者信息（`id`、`username`、`avatar_url`） |
+| `created_at` | string | ISO 8601 时间戳 |
+| `updated_at` | string | ISO 8601 时间戳 |
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "Customer Support Agent",
+        "description": "Helps customers with common questions",
+        "icon": "🤖",
+        "avatar_url": "https://example.com/avatar.png",
+        "team": {
+          "id": "team-123",
+          "name": "Support Team",
+          "avatar_url": "https://example.com/team.png"
+        },
+        "model": {
+          "id": "model-456",
+          "name": "GPT-4",
+          "provider": "openai",
+          "provider_display_name": "OpenAI",
+          "model_id": "gpt-4"
+        },
+        "status": "published",
+        "visibility": "team",
+        "conversation_count": 156,
+        "message_count": 1234,
+        "created_by": {
+          "id": "user-001",
+          "username": "alice",
+          "avatar_url": "https://example.com/avatars/alice.jpg"
+        },
+        "created_at": "2026-02-11T10:00:00Z",
+        "updated_at": "2026-02-11T15:30:00Z"
+      }
+    ],
+    "total": 42,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 获取 Agent 详情
+
+```
+GET /api/v1/agents/{agent_id}
+```
+
+获取指定 Agent 的完整配置，包括系统提示词、工具配置、知识库关联与 RAG 参数。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 响应字段
+
+在[列出 Agent](#响应字段)的列表字段基础上，详情接口额外返回完整配置：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `model_id` | string | 团队模型 UUID |
+| `system_prompt` | string | 系统提示词 |
+| `max_iterations` | integer | 最大工具调用迭代次数（1–200，默认 5） |
+| `hide_tool_calls` | boolean | 聊天界面隐藏工具调用详情 |
+| `hide_message_actions` | boolean | 隐藏 Token 用量/速度统计 |
+| `hide_reasoning` | boolean | 隐藏推理过程 |
+| `tools_config` | array | 工具配置列表（`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`） |
+| `enable_attachments` | boolean | 启用文件和图片附件 |
+| `enable_user_input_request` | boolean | 启用模型可调用 `ask_user` 工具 |
+| `enable_memory` | boolean | 启用跨会话记忆 |
+| `rag_mode` | string | RAG 模式：`off`、`auto`、`agentic`（默认） |
+| `variables` | array | 聊天输入变量定义 |
+| `knowledge_bases` | array | 关联的知识库配置（含 `retrieval_top_k`、`score_threshold`、`search_mode`） |
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Customer Support Agent",
+    "description": "Helps customers with common questions",
+    "system_prompt": "You are a helpful customer support agent...",
+    "max_iterations": 5,
+    "hide_tool_calls": false,
+    "tools_config": [
+      {
+        "type": "builtin",
+        "name": "web_search"
+      }
+    ],
+    "enable_memory": false,
+    "rag_mode": "agentic",
+    "knowledge_bases": [
+      {
+        "id": "kb-assoc-001",
+        "knowledge_base": {
+          "id": "kb-789",
+          "name": "Product Documentation",
+          "description": "Product docs and FAQs",
+          "icon": "📚",
+          "document_count": 156
+        },
+        "retrieval_top_k": 5,
+        "score_threshold": 0.3,
+        "search_mode": "hybrid"
+      }
+    ],
+    "status": "published",
+    "visibility": "team",
+    "created_at": "2026-02-11T10:00:00Z",
+    "updated_at": "2026-02-11T15:30:00Z"
+  },
+  "msg": "success"
+}
+```
+
+### 错误响应（404 Not Found）
+
+```json
+{
+  "code": 6200,
+  "data": {
+    "agent_id": "550e8400-e29b-41d4-a716-446655440000"
+  },
+  "msg": "Agent not found"
+}
+```
+
+---
+
+## 创建 Agent
+
+```
+POST /api/v1/agents
+```
+
+创建新的 AI Agent，创建后默认为 `draft` 状态，需调用[发布端点](#发布-agent)使其可用。
+
+### 请求体
+
+```json
+{
+  "name": "Customer Support Agent",
+  "description": "Helps customers with common questions",
+  "avatar_url": "https://example.com/avatar.png",
+  "team_id": "team-123",
+  "model_id": "model-456",
+  "system_prompt": "You are a helpful customer support agent...",
+  "max_iterations": 5,
+  "hide_tool_calls": false,
+  "tools_config": [
+    {
+      "type": "builtin",
+      "name": "web_search"
+    }
+  ],
+  "enable_memory": false,
+  "rag_mode": "agentic",
+  "knowledge_base_configs": [
+    {
+      "knowledge_base_id": "kb-789",
+      "retrieval_top_k": 5,
+      "score_threshold": 0.3,
+      "search_mode": "hybrid"
+    }
+  ],
+  "visibility": "team"
+}
+```
+
+### 请求字段
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 名称（最多 100 字符） |
+| `description` | string | 否 | 描述（最多 500 字符） |
+| `icon` | string | 否 | 图标 emoji 或 URL（最多 500 字符） |
+| `avatar_url` | string | 否 | 头像 URL |
+| `team_id` | string | 是 | 团队 UUID |
+| `model_id` | string | 否 | 团队模型 UUID；未设置时使用团队默认模型 |
+| `system_prompt` | string | 否 | 系统提示词/指令 |
+| `max_iterations` | integer | 否 | 最大工具调用迭代次数（1–200，默认 5） |
+| `hide_tool_calls` | boolean | 否 | 聊天界面隐藏工具调用详情（默认 false） |
+| `hide_message_actions` | boolean | 否 | 隐藏 Token 用量/速度统计（默认 false） |
+| `hide_reasoning` | boolean | 否 | 隐藏推理/思维链（默认 false） |
+| `tools_config` | array | 否 | 工具配置（`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`） |
+| `tools_credentials` | object | 否 | 工具凭证（API 密钥、Token 等） |
+| `enable_attachments` | boolean | 否 | 启用文件和图片附件（默认 false） |
+| `attachment_config` | object | 否 | 附件限制配置 |
+| `enable_user_input_request` | boolean | 否 | 启用 `ask_user` 工具（默认 false） |
+| `enable_memory` | boolean | 否 | 启用跨会话记忆（默认 false） |
+| `memory_config` | object | 否 | 记忆配置 |
+| `context_compression_config` | object | 否 | 上下文压缩配置 |
+| `enable_image_generation` | boolean | 否 | 启用图片生成工具（默认 false） |
+| `image_generation_config` | object | 否 | 图片生成配置 |
+| `enable_video_generation` | boolean | 否 | 启用视频生成工具（默认 false） |
+| `video_generation_config` | object | 否 | 视频生成配置 |
+| `rag_mode` | string | 否 | RAG 模式：`off`、`auto`、`agentic`（默认 `agentic`） |
+| `knowledge_base_configs` | array | 否 | 知识库配置（`knowledge_base_id`、`retrieval_top_k`、`score_threshold`、`search_mode`） |
+| `variables` | array | 否 | 聊天输入变量定义 |
+| `opening_message` | string | 否 | 聊天开场消息 |
+| `suggested_questions` | array | 否 | 推荐问题列表 |
+| `visibility` | string | 否 | `private` 或 `team`（默认 `team`） |
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Customer Support Agent",
+    "description": "Helps customers with common questions",
+    "team_id": "team-123",
+    "model_id": "model-456",
+    "system_prompt": "You are a helpful customer support agent...",
+    "tools_config": [{"type": "builtin", "name": "web_search"}],
+    "knowledge_base_configs": [
+      {
+        "knowledge_base_id": "kb-789",
+        "retrieval_top_k": 5,
+        "score_threshold": 0.3,
+        "search_mode": "hybrid"
+      }
+    ],
+    "rag_mode": "agentic"
+  }'
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Customer Support Agent",
+    "description": "Helps customers with common questions",
+    "status": "draft",
+    "visibility": "team",
+    "team": {
+      "id": "team-123",
+      "name": "Support Team",
+      "avatar_url": null
+    },
+    "model_id": "model-456",
+    "model": {
+      "id": "model-456",
+      "name": "GPT-4",
+      "provider": "openai",
+      "provider_display_name": "OpenAI",
+      "model_id": "gpt-4"
+    },
+    "created_at": "2026-02-11T10:00:00Z",
+    "created_by": {
+      "id": "user-001",
+      "username": "alice",
+      "avatar_url": null
+    }
+  },
+  "msg": "Agent created successfully"
+}
+```
+
+### 错误响应（1001 Validation Error）
+
+```json
+{
+  "code": 1001,
+  "data": {
+    "errors": [
+      {
+        "field": "name",
+        "message": "Name is required"
+      },
+      {
+        "field": "model_id",
+        "message": "Invalid model ID"
+      }
+    ]
+  },
+  "msg": "Validation failed"
+}
+```
+
+<Callout type="info">
+  创建后 Agent 为 `draft` 状态，需调用[发布端点](#发布-agent)才能用于聊天。
+</Callout>
+
+---
+
+## 更新 Agent
+
+```
+PUT /api/v1/agents/{agent_id}
+```
+
+更新已有 Agent 的配置。所有字段均为可选，仅需包含要更新的字段。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求体
+
+```json
+{
+  "name": "Updated Agent Name",
+  "description": "Updated description",
+  "system_prompt": "Updated system prompt...",
+  "max_iterations": 8,
+  "tools_config": [
+    {"type": "builtin", "name": "web_search"},
+    {"type": "builtin", "name": "code_interpreter"}
+  ],
+  "rag_mode": "auto"
+}
+```
+
+### 请求示例
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Agent Name",
+    "max_iterations": 8
+  }'
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Updated Agent Name",
+    "max_iterations": 8,
+    "updated_at": "2026-02-11T16:00:00Z"
+  },
+  "msg": "Agent updated successfully"
+}
+```
+
+---
+
+## 删除 Agent
+
+```
+DELETE /api/v1/agents/{agent_id}
+```
+
+永久删除指定 Agent，操作不可恢复。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求示例
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Agent deleted successfully"
+}
+```
+
+### 错误响应（6200 Not Found）
+
+```json
+{
+  "code": 6200,
+  "data": {
+    "agent_id": "550e8400-e29b-41d4-a716-446655440000"
+  },
+  "msg": "Agent not found"
+}
+```
+
+---
+
+## 发布 Agent
+
+```
+POST /api/v1/agents/{agent_id}/publish
+```
+
+将 Agent 状态设置为 `published`，使其可用于聊天。发布操作不校验模型是否配置（模型校验在后续聊天/访问路径中以错误码 `6202` 提示）。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000/publish" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "published"
+  },
+  "msg": "Agent published successfully"
+}
+```
+
+<Callout type="warn">
+  发布端点仅设置状态，不校验模型。后续聊天时若 Agent 处于 `draft` 状态，会返回 `6202 Agent not published`。
+</Callout>
+
+---
+
+## 取消发布 Agent
+
+```
+POST /api/v1/agents/{agent_id}/unpublish
+```
+
+将 Agent 状态设置为 `draft`，使其不可用于聊天。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000/unpublish" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "status": "draft"
+  },
+  "msg": "Agent unpublished successfully"
+}
+```
+
+---
+
+## 聊天（非流式）
+
+```
+POST /api/v1/agents/{agent_id}/chat
+```
+
+向 Agent 发送消息并同步接收完整响应。适合短响应场景；长任务推荐使用 [SSE 流式端点](#聊天流式)。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 请求体
+
+```json
+{
+  "message": "What are your business hours?",
+  "conversation_id": "conv-123",
+  "files": [
+    {
+      "name": "document.pdf",
+      "url": "https://example.com/document.pdf",
+      "type": "application/pdf"
+    }
+  ],
+  "file_urls": [
+    {
+      "asset_id": "asset-456",
+      "url": "https://your-domain.com/api/v1/upload/files/asset-456",
+      "filename": "report.pdf"
+    }
+  ],
+  "variables": {
+    "customer_tier": "premium"
+  }
+}
+```
+
+### 请求字段
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `message` | string | 是 | 用户消息（最多 32000 字符） |
+| `images` | array | 否 | 视觉图片（`name`、`url`、`type`） |
+| `files` | array | 否 | 已解析文件（已弃用，使用 `file_urls`） |
+| `file_urls` | array | 否 | 已上传资源的元数据（`asset_id`、`url`、`filename`） |
+| `conversation_id` | string | 否 | 会话 UUID；未提供时自动创建新会话 |
+| `variables` | object | 否 | 聊天输入表单的变量值 |
+| `history_override` | array | 否 | 覆盖会话历史（用于版本切换/重新生成） |
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000/chat" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are your business hours?",
+    "conversation_id": "conv-123"
+  }'
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "conversation_id": "conv-123",
+    "message": {
+      "id": "msg-456",
+      "conversation_id": "conv-123",
+      "role": "assistant",
+      "content": "Our business hours are Monday-Friday, 9 AM to 5 PM EST.",
+      "tool_calls": [],
+      "tool_name": null,
+      "model_used": "gpt-4",
+      "token_usage": {
+        "prompt": 150,
+        "completion": 25,
+        "total": 175
+      },
+      "duration_ms": 2300,
+      "rag_context": [
+        {
+          "document_id": "doc-789",
+          "document_name": "Business Hours Policy",
+          "chunk_id": "chunk-012",
+          "content": "Business hours: Monday-Friday, 9 AM to 5 PM EST",
+          "score": 0.95
+        }
+      ],
+      "created_at": "2026-02-11T16:00:00Z",
+      "version_number": 1,
+      "version_count": 1
+    },
+    "usage": {
+      "prompt": 150,
+      "completion": 25,
+      "total": 175
+    }
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 聊天（流式）
+
+```
+POST /api/v1/agents/{agent_id}/chat/stream
+```
+
+以 SSE（Server-Sent Events）流式返回响应。请求体与非流式端点相同，无 `stream` 开关参数。
+
+### 请求示例
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000/chat/stream" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are your business hours?",
+    "conversation_id": "conv-123"
+  }'
+```
+
+### SSE 事件格式
+
+```
+event: message_start
+data: {"conversation_id": "conv-123", "message_id": "msg-456"}
+
+event: content_delta
+data: {"delta": "Our"}
+
+event: content_delta
+data: {"delta": " business"}
+
+event: content_delta
+data: {"delta": " hours"}
+
+event: rag_context
+data: {"contexts": [{"document_name": "FAQ", "content": "...", "score": 0.95}]}
+
+event: message_end
+data: {"usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 175}, "timing": {"first_token_ms": 320, "duration_ms": 2300, "tokens_per_second": 10.9}}
+```
+
+| 事件 | 说明 |
+| --- | --- |
+| `message_start` | 消息开始，返回 `conversation_id` 和 `message_id` |
+| `content_delta` | 增量文本片段 |
+| `rag_context` | RAG 检索上下文（文档名、内容、相关度评分） |
+| `message_end` | 消息结束，返回 Token 用量与耗时指标 |
+
+<Callout type="info">
+  SSE 客户端需按 `text/event-stream` 解析事件流。详见 [SSE 流式事件](../streaming)。
+</Callout>
+
+---
+
+## 重新生成
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/regenerate
+```
+
+重新生成指定消息的响应。请求体结构同聊天端点，可使用 `history_override` 调整历史上下文。
+
+## 编辑消息并生成分支
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/edit/stream
+```
+
+编辑用户消息并生成分支响应，以 SSE 流式返回。
+
+## 查询消息版本
+
+```
+GET /api/v1/agents/{agent_id}/messages/{message_id}/versions
+```
+
+查询指定消息的所有版本（含重新生成与编辑产生的历史分支）。
+
+## 切换版本
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/switch-version
+```
+
+切换到指定版本作为当前活跃消息。
+
+---
+
+## Agent 统计
+
+```
+GET /api/v1/agents/{agent_id}/stats
+```
+
+查询 Agent 在指定时间范围内的使用统计概览。
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `agent_id` | string | 是 | Agent UUID |
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `period` | string | 否 | `7d` | 时间范围：`24h`、`7d`、`30d`、`all` |
+
+### 请求示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000/stats?period=30d" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "30d",
+    "overview": {
+      "total_conversations": 156,
+      "total_messages": 1234,
+      "user_messages": 620,
+      "assistant_messages": 610,
+      "tool_messages": 4,
+      "active_users": 23
+    },
+    "tokens": {
+      "prompt_tokens": 250000,
+      "completion_tokens": 206789,
+      "total_tokens": 456789
+    },
+    "performance": {
+      "avg_response_time_ms": 2300
+    },
+    "tools": {
+      "tool_call_count": 512
+    }
+  },
+  "msg": "success"
+}
+```
+
+### 其他统计端点
+
+| 端点 | 说明 | 参数 |
+| --- | --- | --- |
+| `GET /agents/{agent_id}/stats/trends` | 趋势数据 | `period`: `24h`/`7d`/`30d` |
+| `GET /agents/{agent_id}/stats/tool-usage` | 工具使用统计 | `period`: `24h`/`7d`/`30d`/`all` |
+| `GET /agents/{agent_id}/stats/recent-conversations` | 最近会话 | `limit`: 默认 10 |
+
+---
+
+## 访问边界
+
+- Agent 必须处于 `published` 状态才能用于聊天。
+- API Key 需具备对应权限；若 API Key 绑定了特定 Agent，只能访问白名单内的 Agent ID。
+- Agent 的附件限制、工具迭代上限与模型配额在 API 调用时仍然生效。
+
+---
+
+## 错误码
+
+| 错误码 | 消息 | 说明 |
+| --- | --- | --- |
+| `6200` | Agent not found | Agent 不存在 |
+| `6201` | Access denied | 当前用户无权访问该 Agent |
+| `6202` | Agent not published | Agent 处于 `draft` 状态 |
+| `3000` | Permission denied | 权限不足 |
+| `1001` | Validation failed | 请求数据无效 |
+| `5104` | Duplicate name | Agent 名称已占用 |
+
+<Callout type="info">
+  当前端点未实现单独限流，无速率限制中间件。
+</Callout>
+
+---
+
+## 相关文档
+
+- [API 开始使用](../get-started) — 创建 API Key、配置基础 URL 与发送首个请求
+- [Agent 聊天](../chat) — 发送消息、附件、变量与消费流式响应
+- [SSE 流式事件](../streaming) — 解析 Agent 与工作流的 SSE 事件
+- [错误处理](../errors) — 按 HTTP 状态与业务错误码恢复

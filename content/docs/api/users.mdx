@@ -1,0 +1,611 @@
+---
+title: Users API
+description: 管理当前用户资料、密码，以及管理员的用户 CRUD 与密码生命周期端点
+icon: Users
+---
+
+## 概述
+
+Users API 提供当前用户资料/密码管理，以及管理员的用户 CRUD 与密码生命周期操作。
+
+- **当前用户**：`GET/PUT /api/v1/users/me`、`POST /api/v1/users/me/change-password`
+- **管理员**：`/api/v1/admin/users` 下的列表、详情、创建、更新、删除、激活/停用、密码生命周期
+
+管理端点需要对应 `admin:user:*` 权限；当前用户端点需要已认证的 JWT 会话。
+
+## 认证
+
+所有端点需要 `Authorization: Bearer <token>`。
+
+管理员端点额外需要以下权限：
+
+| 权限 | 用途 |
+| --- | --- |
+| `admin:user:read` | 查看用户信息、统计、密码过期统计 |
+| `admin:user:create` | 创建用户 |
+| `admin:user:update` | 更新用户、激活/停用、密码生命周期 |
+| `admin:user:delete` | 删除用户 |
+
+## 当前用户端点
+
+### 获取当前用户
+
+```
+GET /api/v1/users/me
+```
+
+返回当前认证用户的完整资料。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/users/me" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "user-123",
+    "username": "johndoe",
+    "email": "john.doe@example.com",
+    "is_active": true,
+    "approval_status": "approved",
+    "is_superuser": false,
+    "avatar_url": "https://example.com/avatars/johndoe.jpg",
+    "locale": "en",
+    "created_at": "2026-01-15T10:00:00Z",
+    "last_login": "2026-02-11T14:30:00Z",
+    "auth_source": "local",
+    "external_id": null,
+    "email_verified": true,
+    "force_password_change": false,
+    "password_expiration_exempt": false,
+    "status": "active",
+    "roles": [],
+    "sso_connections": []
+  },
+  "msg": "success"
+}
+```
+
+### 更新当前用户
+
+```
+PUT /api/v1/users/me
+```
+
+更新当前认证用户的资料。所有字段可选，只需包含要更新的字段。
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/users/me" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "johnsmith",
+    "avatar_url": "https://example.com/avatars/new-avatar.jpg"
+  }'
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `username` | string | 否 | 新用户名（必须唯一） |
+| `email` | string | 否 | 新邮箱（必须唯一；若启用邮箱验证需提供验证码） |
+| `email_verification_code` | string | 否 | 修改邮箱时需要的验证码 |
+| `avatar_url` | string | 否 | 头像 URL |
+| `locale` | string | 否 | 界面语言（如 `en`、`zh`） |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "user-123",
+    "username": "johnsmith",
+    "email": "john.doe@example.com",
+    "is_active": true,
+    "approval_status": "approved",
+    "is_superuser": false,
+    "avatar_url": "https://example.com/avatars/new-avatar.jpg",
+    "locale": "en",
+    "created_at": "2026-01-15T10:00:00Z",
+    "last_login": "2026-02-11T14:30:00Z",
+    "auth_source": "local",
+    "external_id": null,
+    "email_verified": true,
+    "force_password_change": false,
+    "password_expiration_exempt": false,
+    "status": "active",
+    "roles": [],
+    "sso_connections": []
+  },
+  "msg": "Profile updated successfully"
+}
+```
+
+### 修改密码
+
+```
+POST /api/v1/users/me/change-password
+```
+
+修改当前认证用户的密码。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/users/me/change-password" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "current_password": "old_password",
+    "new_password": "new_secure_password"
+  }'
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `current_password` | string | 是 | 当前密码 |
+| `new_password` | string | 是 | 新密码（按密码策略校验） |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Password changed successfully"
+}
+```
+
+**错误响应（400 Bad Request）：** 当前密码错误时返回业务错误码 `2003`（`INVALID_CREDENTIALS`）。
+
+```json
+{
+  "code": 2003,
+  "data": null,
+  "msg": "Current password is incorrect"
+}
+```
+
+## 管理员端点
+
+### 列出用户
+
+```
+GET /api/v1/admin/users
+```
+
+获取全部用户列表（管理员），支持分页、状态过滤、搜索和角色过滤。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/users?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+| 查询参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页条数 |
+| `status` | array | 否 | - | 按状态过滤：`active`、`inactive`、`pending`（可重复） |
+| `search` | string | 否 | - | 按用户名或邮箱搜索 |
+| `role` | array | 否 | - | 按角色名过滤（可重复） |
+| `exclude_user_id` | array | 否 | - | 排除的用户 ID（可重复） |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "user-123",
+        "username": "johndoe",
+        "email": "john.doe@example.com",
+        "is_active": true,
+        "approval_status": "approved",
+        "is_superuser": false,
+        "avatar_url": "https://example.com/avatars/johndoe.jpg",
+        "locale": "en",
+        "created_at": "2026-01-15T10:00:00Z",
+        "last_login": "2026-02-11T14:30:00Z",
+        "auth_source": "local",
+        "external_id": null,
+        "email_verified": true,
+        "force_password_change": false,
+        "password_expiration_exempt": false,
+        "status": "active",
+        "roles": [],
+        "sso_connections": []
+      }
+    ],
+    "total": 156,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+### 获取用户详情
+
+```
+GET /api/v1/admin/users/{user_id}
+```
+
+获取指定用户的详细信息（管理员）。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/users/user-123" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | string | 是 | 用户 UUID |
+
+**成功响应（200 OK）：** 返回单个 `UserSchema`，结构同列表项。
+
+### 创建用户
+
+```
+POST /api/v1/admin/users
+```
+
+创建新用户（管理员）。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/users" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "alice",
+    "email": "alice@example.com",
+    "password": "secure_password"
+  }'
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `username` | string | 是 | 用户名（唯一） |
+| `email` | string | 是 | 邮箱（唯一） |
+| `password` | string | 是 | 初始密码 |
+| `is_active` | boolean | 否 | 是否激活（默认 `true`） |
+| `approval_status` | string | 否 | 审批状态（默认 `approved`） |
+| `is_superuser` | boolean | 否 | 超级管理员标志（默认 `false`） |
+| `avatar_url` | string | 否 | 头像 URL |
+| `locale` | string | 否 | 界面语言（默认 `en`） |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "user-789",
+    "username": "alice",
+    "email": "alice@example.com",
+    "is_active": true,
+    "approval_status": "approved",
+    "is_superuser": false,
+    "avatar_url": null,
+    "locale": "en",
+    "created_at": "2026-02-11T16:00:00Z",
+    "last_login": null,
+    "auth_source": "local",
+    "external_id": null,
+    "email_verified": false,
+    "force_password_change": false,
+    "password_expiration_exempt": false,
+    "status": "active",
+    "roles": [],
+    "sso_connections": []
+  },
+  "msg": "User created successfully"
+}
+```
+
+**错误响应（409 Conflict）：**
+
+```json
+{ "code": 5002, "data": null, "msg": "Username already exists" }
+{ "code": 5003, "data": null, "msg": "Email already exists" }
+```
+
+### 更新用户
+
+```
+PUT /api/v1/admin/users/{user_id}
+```
+
+更新指定用户的信息（管理员）。所有字段可选，只需包含要更新的字段。
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/admin/users/user-789" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "is_active": true,
+    "roles": ["admin"]
+  }'
+```
+
+| 路径参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `user_id` | string | 是 | 用户 UUID |
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `email` | string | 否 | 新邮箱 |
+| `password` | string | 否 | 新密码 |
+| `is_active` | boolean | 否 | 激活状态 |
+| `avatar_url` | string | 否 | 头像 URL |
+| `locale` | string | 否 | 界面语言 |
+| `roles` | array | 否 | 要分配的角色名列表 |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "user-789",
+    "username": "alice",
+    "email": "alice@example.com",
+    "is_active": true,
+    "approval_status": "approved",
+    "is_superuser": false,
+    "avatar_url": null,
+    "locale": "en",
+    "created_at": "2026-02-11T16:00:00Z",
+    "last_login": null,
+    "auth_source": "local",
+    "external_id": null,
+    "email_verified": false,
+    "force_password_change": false,
+    "password_expiration_exempt": false,
+    "status": "active",
+    "roles": [
+      {
+        "id": "role-admin",
+        "name": "admin",
+        "description": null,
+        "is_system_role": true,
+        "permissions": []
+      }
+    ],
+    "sso_connections": []
+  },
+  "msg": "User updated successfully"
+}
+```
+
+### 删除用户
+
+```
+DELETE /api/v1/admin/users/{user_id}
+```
+
+永久删除指定用户（管理员）。
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/admin/users/user-789" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "User deleted successfully"
+}
+```
+
+### 激活 / 停用用户
+
+```
+POST /api/v1/admin/users/{user_id}/activate
+POST /api/v1/admin/users/{user_id}/deactivate
+```
+
+切换用户的激活状态。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/users/user-789/deactivate" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+**成功响应（200 OK）：** 返回更新后的 `UserSchema`，`is_active` 字段已切换。
+
+## 密码生命周期管理（管理员）
+
+<Callout type="info">
+没有直接的「管理员重置密码」端点。管理员通过以下 JWT 认证端点管理密码过期状态；除特别标注外，均需 `admin:user:update` 权限。
+</Callout>
+
+### 强制修改密码
+
+```
+POST /api/v1/admin/users/{user_id}/force-password-change
+```
+
+设置 `force_password_change`，用户下次登录时必须修改密码。响应 `200 OK`，`data: null`。
+
+### 重置密码过期时间
+
+```
+POST /api/v1/admin/users/{user_id}/reset-password-expiration
+```
+
+重置密码修改时间戳并重新计算过期时间。响应 `200 OK`，`data: null`。
+
+### 设置过期豁免
+
+```
+POST /api/v1/admin/users/{user_id}/exempt-password-expiration
+```
+
+```json
+{"exempt": true}
+```
+
+设置用户是否豁免密码过期。响应 `200 OK`，`data: null`。
+
+### 批量强制修改密码
+
+```
+POST /api/v1/admin/users/bulk-force-password-change
+```
+
+```json
+{"user_ids": ["user-123", "user-456"]}
+```
+
+响应 `200 OK`，`data: {"count": 2}`（实际更新的用户数）。
+
+### 密码过期统计
+
+```
+GET /api/v1/admin/users/password-expiration-stats
+```
+
+需要 `admin:user:read`。响应包含 `total_users`、`expired_count`、`expiring_soon_count`、`force_change_count`、`exempt_count`。
+
+### 列出密码过期用户
+
+```
+GET /api/v1/admin/users/expiring-passwords?page=1&page_size=20&filter=expiring
+```
+
+需要 `admin:user:read`。`filter` 取值：`all`、`expired`、`expiring`、`force_change`；`page_size` 限制 1–100。分页响应仅含 `items`、`total`、`page`、`page_size`。
+
+## 用户统计
+
+```
+GET /api/v1/admin/users/stats
+```
+
+需要 `admin:user:read`。响应 `200 OK`，包含 `total`、`active`、`inactive`、`pending` 计数。
+
+## 错误码
+
+| 错误码 | 消息 | 说明 |
+| --- | --- | --- |
+| `4001` | User not found | 用户不存在 |
+| `2003` | Invalid credentials | 密码错误 |
+| `3000` | Permission denied | 权限不足 |
+| `1001` | Validation failed | 请求数据无效 |
+| `5002` | Username already exists | 用户名已存在 |
+| `5003` | Email already exists | 邮箱已存在 |
+
+<Callout type="info">
+这些端点没有单独的速率限制，当前未实现限流中间件。
+</Callout>
+
+## 最佳实践
+
+### 资料更新
+
+- 校验邮箱格式
+- 使用强密码
+- 定期更新偏好设置
+- 保持资料信息最新
+
+<Callout type="error">
+不要共享账户凭据、使用弱密码、跳过邮箱验证或忽略安全设置。
+</Callout>
+
+### 管理员操作
+
+- 创建前核实用户信息
+- 使用强初始密码
+- 发送欢迎邮件
+- 记录用户变更
+- 定期审查用户活动
+
+<Callout type="error">
+不要未经核实就创建用户、使用默认密码、跳过欢迎邮件、忘记审计变更，或未备份就删除用户。
+</Callout>
+
+## 代码示例
+
+### Python
+
+```python
+import requests
+
+def get_current_user(token):
+    """获取当前用户信息。"""
+    url = "https://your-domain.com/api/v1/users/me"
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(url, headers=headers)
+    result = response.json()
+    if result['code'] == 0:
+        return result['data']
+    raise Exception(f"Error: {result['msg']}")
+
+def update_profile(token, username, avatar_url=None, locale=None):
+    """更新用户资料。"""
+    url = "https://your-domain.com/api/v1/users/me"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    data = {"username": username, "avatar_url": avatar_url, "locale": locale}
+    response = requests.put(url, headers=headers, json=data)
+    result = response.json()
+    if result['code'] == 0:
+        return result['data']
+    raise Exception(f"Error: {result['msg']}")
+
+# 使用
+user = get_current_user("YOUR_TOKEN")
+print(f"User: {user['username']}")
+updated = update_profile("YOUR_TOKEN", "johnsmith", locale="en")
+print(f"Updated: {updated['username']}")
+```
+
+### JavaScript
+
+```javascript
+async function getCurrentUser(token) {
+  const response = await fetch(
+    'https://your-domain.com/api/v1/users/me',
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  );
+  const result = await response.json();
+  if (result.code === 0) return result.data;
+  throw new Error(result.msg);
+}
+
+async function updateProfile(token, username, avatarUrl = null, locale = null) {
+  const response = await fetch(
+    'https://your-domain.com/api/v1/users/me',
+    {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username, avatar_url: avatarUrl, locale }),
+    }
+  );
+  const result = await response.json();
+  if (result.code === 0) return result.data;
+  throw new Error(result.msg);
+}
+
+// 使用
+const user = await getCurrentUser('YOUR_TOKEN');
+console.log('User:', user.username);
+const updated = await updateProfile('YOUR_TOKEN', 'johnsmith', null, 'en');
+console.log('Updated:', updated.username);
+```
+
+## 相关文档
+
+- [认证](./authentication) - 认证方式
+- [管理 API 边界](./admin) - 管理后台端点权限边界

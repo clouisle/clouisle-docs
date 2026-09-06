@@ -57,3 +57,13 @@ npm run lint       # eslint
 - **目录结构**：新栏目用文件夹 + `meta.json`（`pages` 控制顺序与分组，`---Label---` 分隔符）；同一页面 URL 不得重复。
 - **Tab 集合**：`root: true` 的文件夹自动成为 sidebar 顶部 tabs dropdown 的选项（`getLayoutTabs` 生成，`title`/`icon`/`description` 取自 meta.json，`icon` 必填且为 lucide 规范名）。当前集合（按读者分组）：使用（usage，Compass，平台用户）、参考（reference，BookText）、API（api，CodeXml，开发者）、部署（self-host，Server，开发部署者）；首页 `/` 为文档总览页，不属于任何集合。新增集合 = 建 `root: true` 文件夹，无需改代码。
 - **站点身份**：`lib/shared.ts` 的 `appName`（Clouisle）与 `gitConfig`（clouisle/Clouisle, main）为文档站真实身份，改动前先确认。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

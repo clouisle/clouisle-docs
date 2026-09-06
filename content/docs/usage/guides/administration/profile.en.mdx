@@ -1,6 +1,6 @@
 ---
 title: Profile Settings
-description: Manage personal profile, password, 2FA, and connected accounts
+description: Manage personal profile, password, 2FA, connected accounts, and notification preferences
 icon: UserRound
 ---
 
@@ -8,21 +8,142 @@ Profile settings open from the avatar menu in the top-right corner as a dialog w
 
 ## Profile Tab
 
+The Profile tab manages your avatar, username, and email.
+
 | Field | Description |
 | --- | --- |
 | Avatar | Profile picture URL (upload via the avatar picker) |
 | Username | Unique username, max `50` characters |
 | Email | Email address; changing it may require email verification |
 
+**Changing email**: If email verification is enabled, click **Send Email Verification** first, then enter the 6-digit code sent to the new address before saving.
+
 ## Account Tab
 
-- **Password**: change the password (current password verification required).
-- **2FA (TOTP)**: bind or unbind a TOTP authenticator.
-- **Connected accounts**: view and manage SSO connections.
-- **Delete account**: delete the current account (rejected if site-level constraints apply).
+The Account tab manages password, TOTP two-factor authentication, and connected accounts.
 
----
+### Changing Password
 
-See also:
-- [Sign-in & Accounts](./authentication.mdx) — password policies, TOTP, and account recovery
-- [Configure Single Sign-On](./sso.mdx) — SSO connection management
+1. Open **Profile Settings** → **Account** tab.
+2. Find the **Change Password** section.
+3. Enter your current password, new password, and confirm the new password.
+4. Click **Change Password**.
+
+Passwords must be at least `8` characters; administrators can require a longer minimum length and mandate uppercase, digits, or special characters. See [Login & Account Security](./authentication.mdx) for details.
+
+### TOTP Two-Factor Authentication
+
+**Enabling TOTP**:
+
+1. Open **Profile Settings** → **Account** tab.
+2. Find the **Two-Factor Authentication** section and click **Enable**.
+3. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.), or enter the secret manually.
+4. Enter the 6-digit verification code to confirm.
+5. Download or copy the one-time backup codes; each backup code can only be used once.
+6. Click **Enable**.
+
+**Backup codes**: Store them safely. Use a backup code to log in when you lose access to your authenticator. Regenerate them if needed.
+
+**Disabling TOTP**: Click **Disable** and confirm with your password or TOTP code.
+
+### Connected Accounts
+
+View connected SSO providers and their last login time. Click **Disconnect** to unlink a provider.
+
+<Callout type="note">
+  There is no user-side "Connect" action — SSO connections are linked automatically during login when the provider email matches your account (see [SSO Configuration](./sso.mdx)).
+</Callout>
+
+### Deleting Your Account
+
+<Callout type="error" title="Permanent Deletion">
+  Deleting your account cannot be undone. Back up important data before proceeding.
+</Callout>
+
+1. Open **Profile Settings** → **Account** tab.
+2. Find the **Delete Account** section and click **Delete Account**.
+3. Read the warning carefully.
+4. Enter your password to confirm.
+5. Click **Permanently Delete**.
+
+**What gets deleted**: Your profile and personal information, conversations and messages, API keys, team memberships (if not owner), and uploaded files.
+
+<Callout type="warn">
+  There is no temporary deactivation or reactivation flow — deleting the account is permanent. If you are a team owner, transfer ownership before deleting your account.
+</Callout>
+
+## Preferences
+
+### Language
+
+Switch the interface language (e.g., English / 中文) via the **language switcher** in the navigation bar. The change takes effect immediately.
+
+### Theme
+
+Switch the theme via the **theme toggle** in the navigation bar:
+
+- **Light**
+- **Dark**
+- **System** (follow the system preference)
+
+## API Keys
+
+API keys are managed on a dedicated page, not in profile settings:
+
+1. Open the user menu (profile icon).
+2. Select **API Keys**.
+3. Or navigate directly to `/app/api-keys`.
+
+See [Managing API Keys](./api-keys.mdx) for details.
+
+## Notifications
+
+The notification center aggregates site-wide, team, and personal notifications, with search, unread filtering, and mark-as-read. Document processing, workflow runs, Agent publishing, API Key expiration, and security events can trigger automatic notifications.
+
+Notification preferences (email digests, per-type toggles, quiet hours, push notifications) are global and managed by administrators. See [Notifications & External Channels](./notifications.mdx) for details.
+
+## Troubleshooting
+
+### Cannot Save Profile
+
+1. Check your internet connection.
+2. Verify all required fields are filled.
+3. Check field validation error messages.
+4. Refresh the page and try again.
+
+### Email Verification Not Received
+
+1. Click **Send Email Verification** to get a code.
+2. Check your inbox (including spam/junk folder).
+3. Enter the 6-digit code.
+4. If not received, wait a minute and resend.
+
+### TOTP Cannot Be Enabled or Lost Access
+
+1. Use a backup code to log in.
+2. Contact your administrator to disable TOTP.
+3. Ensure your authenticator app's time is synced.
+4. Try a different authenticator app.
+
+## Best Practices
+
+**Do**:
+
+- Use a strong, unique password and enable TOTP.
+- Keep your email address up to date.
+- Review connected SSO accounts regularly.
+- Mark notifications as read promptly; address security alerts immediately.
+
+**Don't**:
+
+- Share your password.
+- Disable 2FA on shared devices.
+- Ignore security alerts.
+- Let notifications accumulate.
+
+## See Also
+
+- [Login & Account Security](./authentication.mdx) — password policies, TOTP, and account recovery
+- [SSO Configuration](./sso.mdx) — SSO connection management
+- [Managing API Keys](./api-keys.mdx) — API key lifecycle
+- [Notifications & External Channels](./notifications.mdx) — notification center and automatic notifications

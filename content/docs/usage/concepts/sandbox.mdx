@@ -6,7 +6,7 @@ icon: CodeXml
 
 代码沙箱是 Clouisle 的安全隔离执行环境，用于在工作流、Agent 和工具中运行用户提供的 Python 与 JavaScript 代码。沙箱任务进入专用 Celery Worker，由 rootless Bubblewrap 提供文件系统隔离，并通过超时、输出限制和磁盘检查约束失控任务。
 
-### 隔离架构
+### 隔离架构与 Bubblewrap 挂载布局
 
 ```text
 Agent/工作流 → API → Celery 队列 (sandbox) → 沙箱 Worker
@@ -16,13 +16,30 @@ Agent/工作流 → API → Celery 队列 (sandbox) → 沙箱 Worker
                               /workspace → 当前任务/会话目录
 ```
 
-- **真实 `/workspace` 路径**：当前任务或会话目录以读写方式 bind mount 到 `/workspace`，Python、Node.js、原生库和子进程看到相同路径。
-- **文件系统隔离**：任务命名空间不挂载其他会话、`/app` 或 `/app/uploads`；系统运行时目录和依赖缓存只读挂载。
-- **进程生命周期隔离**：每次执行使用独立进程组，超时终止整个进程组。
-- **路径防护**：输入暂存、文件工具和产物收集拒绝逃逸工作空间及符号链接穿越。
-- **根目录扫描收敛**：Agent 直接执行的 `find /` 会转换为 `find /workspace`；脚本自行启动的命令也只能看到 Bubblewrap 暴露的最小文件系统。
-- **自动清理**：一次性任务执行完毕立即清理；会话按 TTL 过期清理。
+当开启文件系统隔离（`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`）时，沙箱启动器将命令包裹在 `bwrap` 进程中执行：
 
+```text
+bwrap \
+  --unshare-user --unshare-pid --unshare-ipc --unshare-uts \
+  --die-with-parent --hostname clouisle-sandbox \
+  --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /etc /etc \
+  --dir /proc --dev /dev \
+  --bind <host_job_dir> /workspace \
+  --bind <host_job_dir>/tmp /tmp \
+  --chdir /workspace \
+  -- <command> <args...>
+```
+
+1. **命名空间与生命周期隔离**：
+   - **多重隔离**：`--unshare-user`、`--unshare-pid`、`--unshare-ipc`、`--unshare-uts` 创建独立的用户、进程树（映射为 PID 1）、IPC 通信域与主机名（`clouisle-sandbox`）。
+   - **进程级联回收**：`--die-with-parent` 保证 Worker 主管进程退出或超时后，沙箱内所有衍生子进程被内核立即回收。
+2. **只读系统根与工作目录映射 (`RUNTIME_READONLY_ROOTS`)**：
+   - **系统目录只读**：`/usr`、`/bin`、`/sbin`、`/lib`、`/lib64`、`/etc` 通过 `--ro-bind` 只读挂载，防止修改系统二进制、Python site-packages 或 OS 配置。
+   - **独立工作空间**：宿主任务目录映射为标准的 `/workspace`，内部配备独立的 `/tmp` 子挂载（`--bind <workspace>/tmp /tmp`），隔离临时文件。
+   - **逻辑路径自动重写**：`_logical_workspace_path` 与 `_map_workspace_value` 自动将任务参数和环境变量中的物理路径重写为 `/workspace/...`。
+3. **运行时与中日韩（CJK）字体支持**：
+   - **预置运行时**：预装 Python 3.13（基于 `uv` 管理）与 Node.js 22。
+   - **CJK 字体支持**：`clouisle-sandbox-worker` 镜像预装 `fontconfig`、`fonts-wqy-zenhei` 与 `fonts-wqy-microhei` 并刷新字体缓存；`/usr/share/fonts` 通过只读挂载暴露给沙箱，使用 `matplotlib`、`seaborn`、`Pillow` 生成图表时可正常渲染中日韩字符，杜绝方块乱码（豆腐块）。
 ### 支持的运行时
 
 | 运行时 | 基础环境 |

@@ -1,0 +1,35 @@
+---
+title: Performance Tuning
+description: Reduce latency and cost through model selection, caching strategy, database optimization, and workflow runtime tuning
+icon: Gauge
+---
+
+Reduce latency and operating costs without sacrificing response quality through systematic tuning.
+
+## Model Selection
+
+Choose from models authorized for your team based on actual needs — don't assume fixed speed or quality rankings. Measure latency, answer quality, context capacity, and cost on representative prompts before deciding on production configuration.
+
+## Caching Strategy
+
+- Only cache data with a clear invalidation policy
+- JWT is the primary session mechanism; Redis supports token blacklist, optional single-session state, plus Celery brokering, rate limits, and temporary caches
+- Do not add a global LLM response cache unless prompt, model, team permissions, tools, and freshness requirements make reuse safe
+
+## Database Optimization
+
+- Add indexes on fields used by frequent filters and joins
+- Configure connection pooling appropriate to the deployment
+- Measure query plans and retrieval latency before changing schema or cache settings
+
+## Workflow Runtime
+
+- Bound every loop. The editor defaults to 10 iterations and the executor caps loops at 1000
+- Use an Iteration node for array/batch processing with explicit, verifiable termination conditions
+
+## Key Limits
+
+| Parameter | Value | Description |
+| --- | --- | --- |
+| Editor default loop count | 10 | Default iteration limit in the visual editor |
+| Executor max loop count | 1000 | Runtime hard cap — exceeded loops are force-terminated |

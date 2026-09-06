@@ -6,11 +6,16 @@
   "pages": [
     "index",
     "get-started",
+    "api-keys",
+    "agents",
     "chat",
     "workflow",
     "conversations",
     "knowledge",
+    "teams",
     "streaming",
+    "tools",
+    "users",
     "errors",
     "admin"
   ]

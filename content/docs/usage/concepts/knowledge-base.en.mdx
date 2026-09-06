@@ -6,24 +6,66 @@ icon: Database
 
 A Knowledge Base converts documents into chunks that Agents and Workflows can retrieve. The resource belongs to a team; you select an embedding model when creating it, and optionally a rerank model.
 
-### Processing pipeline
+### Deep-Dive Retrieval & Ingestion Pipeline
 
-After upload or URL import, a document starts in **Pending**. Processing performs text extraction, cleaning, chunking, embedding, and indexing, ending in **Completed** or **Failed**. The document-level states are `pending`, `processing`, `completed`, `error`. Chunking uses deterministic character-level splitting (RecursiveCharacterTextSplitter); semantic/ML chunking is not supported. Vectors are stored in a dedicated Qdrant collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model.
+```text
+┌───────────────────────────┐     ┌────────────────────────────────────────────────────────┐
+│ Uploaded Documents        │ ──► │ MarkItDown Multi-Format Parser                         │
+│ (PDF, DOCX, XLSX, HTML...)│     │ • Base64 Embedded Media Extraction -> Asset Storage    │
+└───────────────────────────┘     │ • Structure Flattening & XSS Sanitization (Bleach)     │
+                                  └────────────────────────────────────────────────────────┘
+                                                              │
+                                                              ▼
+                                  ┌────────────────────────────────────────────────────────┐
+                                  │ Two-Stage CJK-Aware Chunking Engine                    │
+                                  │ • Hard Boundary Split on Decoded Escapes (\n\n, \n)    │
+                                  │ • Zero-Overlap Recursive Splitting + Trailing Overlap  │
+                                  └────────────────────────────────────────────────────────┘
+                                                              │
+                                         ┌────────────────────┴────────────────────┐
+                                         ▼                                         ▼
+                          ┌──────────────────────────────┐          ┌──────────────────────────────┐
+                          │ PostgreSQL 17 + pg_search    │          │ Qdrant Vector Engine         │
+                          │ • BM25 Tantivy Lexical Index │          │ • Dense Embeddings ({prefix})│
+                          └──────────────────────────────┘          └──────────────────────────────┘
+                                         │                                         │
+                                         └────────────────────┬────────────────────┘
+                                                              ▼
+                                  ┌────────────────────────────────────────────────────────┐
+                                  │ Weighted Reciprocal Rank Fusion (RRF, k=60)            │
+                                  │ • Channel Fault-Tolerance & Shared Vector Cache        │
+                                  └────────────────────────────────────────────────────────┘
+                                                              │
+                                                              ▼
+                                  ┌────────────────────────────────────────────────────────┐
+                                  │ Optional Neural Reranker (Cross-Encoder Scoring)       │
+                                  └────────────────────────────────────────────────────────┘
+                                                              │
+                                                              ▼
+                                  ┌────────────────────────────────────────────────────────┐
+                                  │ Context Assembly & Token Budget Guard                  │
+                                  │ • Adjacent Chunk Window Expansion (expand_adjacent)    │
+                                  │ • Per-Document Chunk Throttling & Token Truncation     │
+                                  └────────────────────────────────────────────────────────┘
+```
 
-Chunks of a processed document can be viewed, edited, added, and deleted. Re-chunking replaces all existing chunks and vectors, and manual edits are lost.
+1. **Document Ingestion & Media Deconstruction**:
+   - **Universal Format Support**: Uses `MarkItDown` to parse PDF, DOCX, PPTX, XLSX, HTML, CSV, TXT, MD, and JSON.
+   - **Embedded Media Extraction (`replace_embedded_media_data_uris`)**: Automatically scans for base64 inline images, extracts payloads to dedicated asset storage (`/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}`), and replaces them with clean URLs.
+   - **Flattening & Sanitization**: CSV tables become Markdown pipes; JSON trees are flattened using dot notation; all text is sanitized via `bleach` to strip unsafe markup.
+2. **CJK-Aware Chunking Implementation**:
+   - User-defined separators are decoded into real control bytes (`\n\n`, `\n`) via `_decode_separator_escapes`.
+   - Chunks are split with zero internal overlap using a punctuation hierarchy (`\n\n`, `\n`, `。`, `！`, `？`, `；`, `，`, ` `), then prepended with exact character-level trailing slices from preceding chunks for deterministic token boundaries.
+3. **Dual-Engine Hybrid Retrieval & Weighted RRF**:
+   - **Lexical**: PostgreSQL `pg_search` (BM25 Tantivy index).
+   - **Dense Vector**: Qdrant vector collections partitioned as `{prefix}_{dimension}`.
+- **Weighted RRF Formula**: Multi-channel Reciprocal Rank Fusion scoring (default `k = 60`, `dense_weight = 1.0`, `lexical_weight = 1.0`). Automatic single-channel fallback on transient engine failures.
+4. **Cross-Encoder Neural Reranking**: Candidate chunks from RRF are rescored with deep semantic cross-encoders and filtered by `rerank_score_threshold`.
+5. **Context Assembly & Window Expansion**:
+   - **Adjacent Chunk Expansion (`expand_adjacent`)**: Fetches adjacent sibling chunks (`chunk_index - 1`, `chunk_index + 1`) to reconstruct coherent paragraphs.
+   - **Token Budget Guard**: Strictly constrained by `context_token_budget` and `max_chunks_per_document`.
 
-### Three retrieval methods
+### Retrieval Lab
 
-| Method | When to use |
-| --- | --- |
-| Vector retrieval | Recalls by semantic similarity |
-| Full-text retrieval | Matches exactly by lexical/BM25 |
-| Hybrid retrieval (default) | Fuses vector and full-text rankings with weighted RRF |
-
-Hybrid retrieval defaults both the dense weight and the lexical weight to `1.0`, with `rrf_k` at `60`. The two weights cannot both be `0`. Rerank can re-score candidate chunks after fusion.
-
-### Retrieval lab
-
-**Hit testing / retrieval lab** runs single-configuration tests or A/B comparisons, showing each result's rank and score at the vector, full-text, fusion, and rerank stages, and can apply local presets to production Knowledge Base settings.
-
+**Hit testing / Retrieval Lab** runs single-configuration tests or A/B comparisons, showing each result's rank and score at the vector, full-text, fusion, and rerank stages, and can apply local presets to production Knowledge Base settings.
 Related content: [Import documents](../guides/knowledge/import-documents.mdx), [Chunking](../guides/knowledge/chunking.mdx), [Knowledge Base settings reference](/reference/knowledge-settings).

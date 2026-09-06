@@ -1,35 +1,415 @@
 ---
 title: Custom HTTP and Code Tools
-description: Create external API tools or restricted code tools
+description: Create external API tools or restricted code tools, configure parameters, test execution, and share with teams
 icon: CodeXml
 ---
 
-Custom tools belong to the current team. Tool names can only contain letters, digits, and underscores, and must start with a letter, for example `lookup_order`.
+Clouisle provides two types of tools: **Built-in tools** (registered by the platform, no creation needed) and **Custom tools** (created by teams). Built-in tools cover time, math, web, file, and media capabilities — see [Built-in Tools](/en/usage/guides/tools/built-in). Custom tools belong to the current team, support HTTP API and Code types, and can be configured, tested, and shared with other teams.
 
-## HTTP API Tools
+## Tool Types
+
+Custom tools come in two types:
+
+| Type | Description | Use Cases |
+| --- | --- | --- |
+| **HTTP API** | Call external HTTP endpoints, supports GET/POST and other methods | Query CRM, create tickets, call third-party APIs |
+| **Code Tool** | Execute Python or JavaScript in a restricted sandbox | Data transformation, text processing, custom calculations |
+
+## Naming Rules
+
+Tool names can only contain letters, digits, and underscores, and must start with a letter, for example `lookup_order`. Names must be unique within the team.
+
+## Creating HTTP API Tools
 
 1. In **Capabilities** > **Tools**, select **Create Tool** > **HTTP API**.
-2. Set the tool name, display name, description, and parameter definitions.
+2. Set the tool name, display name, description, and category.
 3. Configure the HTTP method (default `GET`), URL, headers, query parameters, JSON request body, and response path.
 4. Use `{parameter_name}` placeholders in the URL, headers, query parameters, and body.
 5. The timeout defaults to `30` seconds, range `1-300` seconds.
 6. After saving, select **Run Test** and confirm the result path and error behavior.
 
-## Code Tools
+<Callout type="warn">
+  Custom HTTP tools do not support `{{variable}}` substitution in the URL path or URL string. Keep the endpoint URL static and pass variables through **Query Parameters**, **Request Headers**, or **Body Template** fields.
+</Callout>
 
-Code tools support Python and JavaScript. Python packages must use exact `package==version`; JavaScript packages must use `package@version`. You can configure the command argv, package source address, artifacts, and resource limits.
+### HTTP Tool Configuration Example: Customer Lookup
 
-Default resource limits: `30` second timeout, `1024MB` disk, `256KB` standard output, `256KB` standard error. Artifact paths must be under `/workspace` and can be marked optional.
+```yaml title="CRM Lookup Tool Configuration"
+Name: CRM Lookup
+Description: Look up customer information in CRM system
+Category: Data
+Type: Custom
+
+Endpoint Configuration:
+  URL: https://api.crm.example.com/customers
+  Method: GET
+  Authentication: API Key
+  API Key Header: X-API-Key
+  API Key: crm_...
+  Query Parameters:
+    customer_id: "{customer_id}"
+  Timeout: 30 seconds
+
+Input Parameters:
+  - name: customer_id
+    type: string
+    required: true
+    description: Customer ID to lookup
+
+Response Format:
+  type: json
+  schema:
+    customer_id: string
+    name: string
+    email: string
+    phone: string
+    status: string
+```
+
+### HTTP Tool Configuration Example: Create Ticket (POST)
+
+```yaml title="Create Support Ticket Tool Configuration"
+Name: Create Support Ticket
+Description: Create a support ticket in the ticketing system
+Category: Communication
+Type: Custom
+
+Endpoint Configuration:
+  URL: https://api.tickets.example.com/tickets
+  Method: POST
+  Authentication: Bearer Token
+  Token: Bearer tk_...
+  Content-Type: application/json
+  Timeout: 30 seconds
+
+Input Parameters:
+  - name: title
+    type: string
+    required: true
+    description: Ticket title
+
+  - name: description
+    type: string
+    required: true
+    description: Ticket description
+
+  - name: priority
+    type: enum
+    required: false
+    default: medium
+    options: [low, medium, high, urgent]
+    description: Ticket priority
+
+  - name: assignee
+    type: string
+    required: false
+    description: Assignee email
+
+Response Format:
+  type: json
+  schema:
+    ticket_id: string
+    status: string
+    created_at: string
+```
+
+## Creating Code Tools
+
+Code tools support Python and JavaScript, executed in a restricted sandbox. Python packages must use exact `package==version`; JavaScript packages must use `package@version`. You can configure the command argv, package source address, artifacts, and resource limits.
+
+Default resource limits:
+
+| Resource | Default | Description |
+| --- | --- | --- |
+| Timeout | 30 seconds | Maximum execution time |
+| Disk | 1024MB | Available disk space |
+| Standard Output | 256KB | stdout cap |
+| Standard Error | 256KB | stderr cap |
+
+Artifact paths must be under `/workspace` and can be marked optional.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/custom-tool-http-dialog.png" alt="Create an HTTP tool" />
   <figcaption>Create an HTTP tool</figcaption>
 </figure>
 
+## Editing and Deleting Tools
+
+### Editing Custom Tools
+
+1. Select the custom tool
+2. Select **Edit**
+3. Modify tool details, endpoint configuration, parameters, or response format
+4. Test the tool
+5. Save changes
+
+### Deleting Custom Tools
+
+1. Select the custom tool
+2. Select **Delete**
+3. Review impact: Agents and workflows using this tool
+4. Confirm deletion
+
+<Callout type="error" title="Deletion Impact">
+  After deleting a custom tool, Agents and workflows referencing this tool will be unable to execute it. Please confirm no dependencies exist before deleting.
+</Callout>
+
+## Testing Tools
+
+### Running Tests
+
+1. Select the tool
+2. Select the **Test** button
+3. Enter test parameters
+4. Select **Run Test**
+
+### Test Result Examples
+
+```yaml title="Web Search Test Result"
+Tool: Web Search
+Test Parameters:
+  query: "artificial intelligence"
+  max_results: 5
+
+Status: Success
+Response Time: 1.2 seconds
+Results:
+  - title: "Artificial Intelligence - Wikipedia"
+    url: "https://en.wikipedia.org/wiki/Artificial_intelligence"
+    snippet: "Artificial intelligence (AI) is intelligence..."
+
+  - title: "What is AI? | IBM"
+    url: "https://www.ibm.com/topics/artificial-intelligence"
+    snippet: "Artificial intelligence leverages computers..."
+
+Metadata:
+  total_results: 5
+  search_time: 0.8s
+  api_calls: 1
+```
+
+```yaml title="CRM Lookup Test Result"
+Tool: CRM Lookup
+Test Parameters:
+  customer_id: "12345"
+
+Status: Success
+Response Time: 0.5 seconds
+Response:
+  {
+    "customer_id": "12345",
+    "name": "John Doe",
+    "email": "john@example.com",
+    "phone": "+1-555-0123",
+    "status": "active"
+  }
+
+Validation: Passed
+  ✓ Response format matches schema
+  ✓ All required fields present
+  ✓ Data types correct
+```
+
 ## Credentials and Sharing
 
-Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with **Read-only** or **Read & Execute** permission. Built-in tools cannot be deleted or shared; shared tools cannot have their owner's configuration modified by the receiving team. The tool API response's `share_permission` (`null` when not shared) and `shared_with_count` fields reflect the sharing state and the number of receiving teams.
+Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with **Read-only** or **Read & Execute** permission.
+
+| Permission | Description |
+| --- | --- |
+| **Read-only** | Receiving team can view tool configuration but cannot execute |
+| **Read & Execute** | Receiving team can view and execute the tool |
+
+<Callout type="warn" title="Sharing Restrictions">
+  - Built-in tools cannot be deleted or shared
+  - Shared tools cannot have their owner's configuration modified by the receiving team
+</Callout>
+
+The tool API response's `share_permission` (`null` when not shared) and `shared_with_count` fields reflect the sharing state and the number of receiving teams.
+
+## Tool Status Management
+
+Tools have two statuses: enabled and disabled:
+
+| Status | Description |
+| --- | --- |
+| **Enabled** | Tool is operational and appears in tool selection |
+| **Disabled** | Tool is disabled and hidden from users |
+
+<Callout type="info">
+  Tools have a single enabled/disabled state. There are no `testing` or `deprecated` statuses. Custom tools can be toggled via `POST /api/v1/admin/tools/{tool_id}/toggle`.
+</Callout>
 
 ## Failure Handling
 
-When an HTTP tool test fails, check the URL, TLS, authentication, request body JSON, and response path. When a code tool fails, check the pinned version, standard output cap, disk cap, timeout, and artifact paths.
+### HTTP Tool Test Failures
+
+Check the following:
+- URL is correct
+- TLS certificate is valid
+- Authentication credentials are not expired
+- Request body JSON format is correct
+- Response path matches the actual response structure
+
+### Code Tool Test Failures
+
+Check the following:
+- Packages use pinned versions (`package==version`)
+- Standard output does not exceed 256KB cap
+- Disk usage does not exceed 1024MB cap
+- Execution does not exceed timeout (default 30 seconds)
+- Artifact paths are under `/workspace`
+
+## Best Practices
+
+### Tool Configuration
+
+**✅ Do:**
+- Test tools before enabling
+- Rotate credentials regularly
+- Document tool purposes
+- Keep tools updated
+- Use error handling
+
+**❌ Don't:**
+- Enable untested tools
+- Use static credentials forever
+- Skip documentation
+- Ignore errors
+
+### Security
+
+**✅ Do:**
+- Use secure authentication
+- Rotate API keys regularly
+- Restrict tool access
+- Enable audit logging
+- Monitor for abuse
+- Use HTTPS only
+- Validate responses
+
+**❌ Don't:**
+- Use weak authentication
+- Use static API keys forever
+- Allow unrestricted access
+- Disable audit logs
+- Ignore suspicious activity
+- Allow HTTP connections
+- Trust responses blindly
+
+### Performance
+
+**✅ Do:**
+- Set appropriate timeouts
+- Use caching where possible
+- Monitor response times
+- Optimize tool calls
+- Handle errors gracefully
+
+**❌ Don't:**
+- Use very long timeouts
+- Skip caching
+- Ignore performance metrics
+- Make unnecessary calls
+- Ignore errors
+
+## API Endpoints
+
+The Tools API supports full CRUD operations, primarily for user-side tool management. See [Tools API](/en/api/tools) for details.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/tools` | List all tools (supports pagination, search, filters) |
+| GET | `/api/v1/tools/id/{tool_id}` | Get tool details by ID |
+| GET | `/api/v1/tools/name/{tool_name}?team_id={team_id}` | Get tool details by name |
+| POST | `/api/v1/tools/test` | Single test execution |
+| POST | `/api/v1/tools/execute-code` | Run code directly in sandbox |
+| POST | `/api/v1/tools?team_id={team_id}` | Create custom tool |
+| PUT | `/api/v1/tools/{tool_id}` | Update tool configuration |
+| DELETE | `/api/v1/tools/{tool_id}` | Delete custom tool |
+
+### Admin Endpoints
+
+Admin endpoints live under `/api/v1/admin/tools` and require `admin:capability:*` permissions:
+
+```python
+# List tools (admin)
+tools = api.get("/api/v1/admin/tools", params={"page": 1, "page_size": 20})
+
+# Get filter options
+filters = api.get("/api/v1/admin/tools/filters")
+
+# Test a tool (builtin, custom, or MCP)
+result = api.post("/api/v1/admin/tools/test", json={
+    "tool_name": "web_search",
+    "arguments": {"query": "artificial intelligence", "max_results": 5}
+})
+
+# Execute code directly
+code_result = api.post("/api/v1/admin/tools/execute-code", json={
+    "language": "python",
+    "code": "return params['a'] + params['b']",
+    "params": {"a": 1, "b": 2}
+})
+```
+
+<Callout type="info">
+  Admin endpoints `POST /api/v1/tools/web_search/call` and `GET /api/v1/tools/web_search/usage` do not exist. Tool configuration (e.g. `TAVILY_API_KEY`) is managed via `GET/POST/PUT/DELETE /api/v1/admin/tools/config[/{tool_name}]`.
+</Callout>
+
+### Permissions
+
+All endpoints require an authenticated JWT user session:
+
+| Permission | Description |
+| --- | --- |
+| `tool:read` | View tools |
+| `tool:create` | Create tools |
+| `tool:update` | Update tools |
+| `tool:delete` | Delete tools |
+| `tool:execute` | Execute/test tools |
+
+## Custom Tool Naming Conventions & Chat Status Visibility
+
+When an Agent calls tools during reasoning, the top **Chain of Thought header** automatically surfaces the action without requiring users to expand the collapsible panel. Follow these naming conventions to ensure intuitive status display:
+
+### 1. Recommended Verb Prefixes
+
+| Action Type | Recommended Prefix / Keywords | CoT Header Display |
+| :--- | :--- | :--- |
+| **Query / Retrieval** | `query_`, `fetch_`, `get_`, `search_`, `find_`, `check_` | `Querying {tool}...` |
+| **Sending / Notifications** | `send_`, `post_`, `push_`, `notify_`, `mail_` | `Sending {tool}...` |
+| **Creation** | `create_`, `add_`, `insert_`, `new_`, `build_` | `Creating {tool}...` |
+| **External API / Requests** | `api_`, `http_`, `rest_`, `request_`, or input has `url`/`endpoint` | `Requesting {tool}...` |
+| **Computation / Analysis** | `calc_`, `math_`, `count_`, `analyze_`, `stat_` | `Calculating...` |
+| **Artifacts & Downloads** | `artifact`, `artifacts`, contains `Create Download Link` | `Collecting artifacts...` |
+| **Files / Documents** | `read_`, `write_`, `open_file`, `save_file` | `Reading / Editing file...` |
+
+### 2. Display Name Tips
+
+- **Provide a friendly Display Name**: If configured (e.g. `Fetch Stock Quotes` or `Send Slack Notification`), the CoT header directly uses this name for status rendering.
+- **Automatic Identifier Beautification**: Raw identifiers like `fetch_user_orders` or `syncCrmAccount` are automatically converted to clean phrases (e.g. `Querying Fetch User Orders...`).
+- **Parallel Call Aggregation**: When multiple tools execute simultaneously, the header aggregates them into `Calling {N} tools in parallel...` to preserve clean UI presentation.
+## Troubleshooting
+
+### Tool Call Failed
+
+1. **Check tool configuration:** Verify credentials, endpoint URL, test connectivity
+2. **Check audit logs:** Review audit log entries for the tool's team
+3. **Common errors:**
+   - **Authentication failed:** Invalid credentials
+   - **Timeout:** Increase timeout or check endpoint
+   - **Invalid parameters:** Check parameter format
+4. **Test tool:** Use the test panel to review results
+
+### Slow Response
+
+1. Use the tool test panel to measure response time
+2. Optimize: increase timeout, reduce data transfer, optimize endpoint
+3. Check external service status for outages
+
+## Related Documentation
+
+- [Built-in Tools](/en/usage/guides/tools/built-in) — Enable time, math, web, file, and media system capabilities
+- [MCP Services](/en/usage/guides/tools/mcp) — Connect MCP Servers via stdio, SSE, or HTTP
+- [Skills & Packages](/en/usage/guides/tools/skills) — Import reusable Skill packages and manage resources
+- [Tools API](/en/api/tools) — Complete API endpoint reference

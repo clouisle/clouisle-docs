@@ -4,21 +4,75 @@ description: Build a runnable, typed flow from the start node to the output node
 icon: Workflow
 ---
 
-The workflow editor uses a React Flow canvas. The node panel on the left adds nodes, the central canvas connects the flow, and the drawer on the right configures the selected node.
+The workflow editor uses a React Flow canvas. The node panel on the left adds nodes, the central canvas connects the flow, and the drawer on the right configures the selected node. Workflows support manual triggers, webhook triggers, and cron scheduling (requires additional deployment of a scheduler task).
+
+## Workflow Builder Interface
+
+### Layout
+
+The workflow editor consists of the following parts:
+
+- **Nodes Panel (Left)**: Available node types, organized by category
+  - **Model**: LLM, Media Generation
+  - **Logic**: Condition, Question Classifier, Iteration, Loop, Pause
+  - **Transform**: Code, Template, File to URL, Variable Aggregator, Variable Assignment, Parameter Extractor
+  - **Extension**: Sub-workflow, Agent, Tool, Knowledge Retrieval, Answer
+- **Canvas (Center)**: Workflow design area; add, connect, and arrange nodes
+- **Properties Panel (Right)**: Node configuration, settings, and variables
+- **Toolbar (Top)**: Save workflow, test (debug) workflow, zoom controls
+
+### Building a Workflow — Step by Step
+
+1. **Add a Start Node**: Every workflow begins with a start node (user input or trigger), which defines the input parameters
+2. **Add Processing Nodes**: Add nodes to process data; see Node Types below
+3. **Connect Nodes**: Click the output port of the source node, drag to the input port of the target node
+4. **Configure Nodes**: Configure each node's settings in the properties panel
+5. **Add an End Node**: Every workflow ends with an end node that collects the final outputs
+6. **Test the Workflow**: Click the **Test** (debug) button, enter test inputs, run, and review results
+7. **Save and Publish**: Click **Save** to store as a draft; click **Publish** to activate the workflow
+
+### Variables and Data Flow
+
+**Variable Scope:**
+- **Input Variables**: Defined at the start node, collected from the user or trigger
+- **Node Variables**: Outputs from nodes, referenced in subsequent nodes
+- **System Variables**:
+  - `{{workflow.id}}` — Workflow ID
+  - `{{workflow.name}}` — Workflow name
+  - `{{run.id}}` — Current run ID
+
+**Variable Usage:**
+- In prompts: `Analyze this inquiry from {{customer_email}}: {{inquiry_text}}`
+- In conditions: `{{analysis.urgency}} == "high"`
+
+### Error Handling
+
+There is no try-catch / retry UI in the builder. Failed node executions stop the run (unless the workflow continues), and the error is recorded on the run/node execution for inspection.
+
+### Workflow Templates
+
+Built-in workflow templates:
+- **Simple Q&A Bot**: A basic question-answering bot using an LLM
+- **RAG Knowledge Bot**: Knowledge-base-powered Q&A with retrieval augmentation
+- **Intent Router**: Route conversations based on detected intent
+- **Code Review Assistant**: Automated code review with multiple perspectives
+
+Templates are instantiated into new workflows (variables such as `model_id` / `knowledge_base_id` are filled in during instantiation).
+
+### Keyboard Shortcuts
+
+- `Space + Drag`: Pan canvas
+- `Ctrl/Cmd + Scroll`: Zoom
+- `Ctrl/Cmd + 0`: Reset zoom
 
 ## Creating and Saving Drafts
 
 1. Navigate to **Apps** > **Create App** > **Workflow**.
-2. In **Workflow Settings**, fill in the name, description, and visibility.
-3. Choose a start node: **User Input** suits forms; **Trigger** suits API or Webhook calls (Cron scheduling is not implemented yet).
+2. In **Workflow Settings**, fill in the name, description, visibility, and owning team.
+3. Choose a start node: **User Input** suits interactive forms; **Trigger** suits API or Webhook calls.
 4. Drag nodes from the node panel onto the canvas, or click **Add Node**.
 5. Drag from a source handle to a target handle to create a connection. The start node cannot be deleted.
 6. Select **Save**. The editor records the last saved time and unsaved state.
-
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-editor-canvas.png" alt="Workflow editor canvas" />
-  <figcaption>Workflow editor canvas</figcaption>
-</figure>
 
 ## Defining Variables
 
@@ -26,22 +80,629 @@ Start nodes use workflow-level variables. Variable types include text, paragraph
 
 Use the editor selector when referencing variables; do not hand-write names that do not exist. The current definition format `schema_version: 2` supports native object and array passing.
 
+## Node Types
+
+The editor provides the following node types, organized by category:
+
+### Flow / Logic Nodes
+
+| Node | Type Identifier | Purpose |
+| --- | --- | --- |
+| User Input | `user_input` | Entry point for manually executed workflows |
+| Trigger | `trigger` | Entry point for triggered workflows |
+| End | `end` | Terminal node of a workflow |
+| Condition | `condition` | Branch based on expression result |
+| Question Classifier | `question_classifier` | Automatically classify input questions |
+| Iteration | `iteration` | Iterate over items in a list |
+| Loop | `loop` | Repeat a branch until a condition is met |
+| Pause | `pause` | Wait for approval or variable input |
+
+### Model Nodes
+
+| Node | Type Identifier | Purpose |
+| --- | --- | --- |
+| LLM | `llm` | Call a language model for text generation and analysis |
+| Media Generation | `media_generation` | Generate media with a compatible model |
+
+### Data Nodes
+
+| Node | Type Identifier | Purpose |
+| --- | --- | --- |
+| Code | `code` | Execute Python or JavaScript custom code |
+| Template | `template` | Render a template string |
+| File to URL | `file_to_url` | Convert a file asset to an accessible URL |
+| Variable Assignment | `variable_assignment` | Assign a value to a variable |
+| Variable Aggregator | `variable_aggregator` | Combine multiple variable values |
+| Parameter Extractor | `parameter_extractor` | Extract structured parameters from text |
+
+### Knowledge Nodes
+
+| Node | Type Identifier | Purpose |
+| --- | --- | --- |
+| Knowledge Retrieval | `knowledge_retrieval` | Retrieve content from a knowledge base |
+
+### Integration Nodes
+
+| Node | Type Identifier | Purpose |
+| --- | --- | --- |
+| Sub-workflow | `sub_workflow` | Invoke another published workflow |
+| Agent | `agent` | Invoke a published Agent |
+| Tool | `tool` | Execute a configured tool |
+| HTTP Request | `http_request` | Send HTTP requests to external APIs |
+| Answer | `answer` | Define the workflow's final output |
+
+<Callout type="info">
+  Node type identifiers are used for API interactions. Use the exact values from the table above when configuring. `document_extractor` and `http_request` are executor/API-level capabilities, not shown in the builder palette. `iteration_exit` and `loop_exit` are internal container nodes used by the workflow engine; do not add them as standalone nodes.
+</Callout>
+
+<Callout type="warn">
+  Not implemented: Transform, Parallel, Wait, Switch, Database, Email, Webhook (as a node), Log, Delay, Merge, Input, and Output node types. Variable handling is done via `variable_assignment` and `variable_aggregator`.
+</Callout>
+
 ## Configuring Nodes
 
-Configure by task:
+Configure node parameters by task:
 
-- **LLM**: select the model, prompt, temperature (default `0.7`, range `0-2`), `max_tokens`, and `top_p`.
-- **Agent**: call a published Agent and pass a message template.
-- **Knowledge Base Retrieval**: select the knowledge base, query template, Top K (default `5`, range `1-100`), and score threshold (default `0.3`).
-- **Conditional Branch**: configure the expression and true/false outputs.
-- **Code Execution**: select Python/JavaScript; default timeout `30` seconds, range `1-300` seconds.
-- **HTTP Request**: configure GET/POST/PUT/PATCH/DELETE; default timeout `30` seconds, range `1-300` seconds.
-- **Tools**: select a tool and map parameters.
-- **Variable Assignment/Aggregation/Template**: organize upstream values into structures used by downstream nodes.
+### LLM Node
+
+- **Model**: Select a configured model (e.g., GPT-4 Turbo, Claude, etc.)
+- **Prompt**: Use `{{variable}}` syntax to reference upstream variables
+- **Temperature**: Default `0.7`, range `0-2`. Controls output randomness
+- **Max Tokens**: Limit the length of model output
+- **Top P**: Default `1.0`, range `0-1`. Nucleus sampling parameter
+- **Output Variable**: Define the variable name to store model output
+
+**Output variables:** `response`, `reasoning`, `usage` (plus the configured output variable).
+
+### Media Generation Node
+
+- **Provider**: image | video
+- **Prompt**: `{{prompt}}`
+- **Width/Height**: (image)
+- **Duration/Aspect Ratio**: (video)
+
+### Condition Node
+
+- **Condition Expression**: Use Jinja2 syntax, e.g., `{{analysis_result.urgency}} == "high"`
+- **True Branch**: Downstream node connected when condition is true
+- **False Branch**: Downstream node connected when condition is false
+
+### Question Classifier Node
+
+Classify the user's input into one of several intents/categories and route accordingly.
+
+### Iteration / Loop Node
+
+- **Collection**: `{{items}}`
+- **Item Variable**: item
+- **Output Variable**: results
+
+### Pause Node
+
+Pause execution until a team member supplies requested variables or submits an approval decision. A pause can be configured in **Variables** mode or **Approval** mode; a waiting run resumes after the request is handled.
+
+- **Mode**: variables | approval
+- **Title**: Review request
+- **Input Variables**: List of variables to collect or approve
+
+### Code Node
+
+- **Language**: Python or JavaScript
+- **Code**: Custom execution logic
+- **Timeout**: Default `30` seconds, range `1-300` seconds
+- **Input Variables**: Variables passed to the code
+- **Output Variables**: Variables returned by the code execution
+
+### Template Node
+
+Render a template string with variables (e.g., Jinja-like `{{variable}}` substitution).
+
+### File to URL Node
+
+Convert a file (e.g., a sandbox artifact) into a downloadable URL.
+
+### Variable Assignment Node
+
+Assign a value to a variable.
+
+### Variable Aggregator Node
+
+Aggregate values (e.g., collect loop iteration results into an array).
+
+### Parameter Extractor Node
+
+Extract structured parameters from text using LLM, regex, or JSON path.
+
+- **Extraction Method**: llm | regex | json_path
+- **Source Variable**: `{{source}}`
+- **Parameters**: [...]
+
+### HTTP Request Node
+
+- **Method**: GET / POST / PUT / PATCH / DELETE
+- **URL**: Target endpoint address
+- **Headers**: Custom HTTP headers
+- **Body**: JSON-formatted request payload
+- **Timeout**: Default `30` seconds, range `1-300` seconds
+- **Output Variable**: Store the response data
+
+<Callout type="warn">
+  The HTTP request node has no retry configuration.
+</Callout>
+
+### Tool Node
+
+- **Tool**: Select a configured tool
+- **Parameter Mapping**: Map upstream variables to tool parameters
+- **Output Variable**: Store the tool execution result
+
+**Built-in tools available:** `web_search`, `fetch_webpage`, `calculate`, `unit_convert`, `get_weather`, `get_current_time`, `format_datetime`, `markitdown`, plus sandbox tools (`bash`, `read`, `edit`, `write`, `artifact`).
+
+### Knowledge Retrieval Node
+
+- **Knowledge Base**: Select the target knowledge base
+- **Query Template**: Use `{{variable}}` to reference query content
+- **Top K**: Default `5`, range `1-100`. Maximum number of results returned
+- **Score Threshold**: Default `0.3`. Minimum similarity score
+- **Search Mode**: hybrid
+
+### Sub-workflow Node
+
+Run another workflow as a sub-step and capture its output.
+
+### Agent Node
+
+Invoke an AI agent with a message and optional context.
+
+### Answer Node
+
+Return a final answer/output from the workflow.
+
+<Callout type="warn">
+  When configuring nodes, ensure all input variables have a clear source (upstream node output or start node variable). Unconnected input variables will cause publication validation to fail.
+</Callout>
+
+## Trigger Configuration
+
+Workflows support three trigger types:
+
+### Manual Trigger
+
+No additional configuration required. Once published, users with permissions can trigger the workflow via the UI or API.
+
+### Webhook Trigger
+
+After setting the trigger type to **Webhook**, the system automatically generates a webhook token. The trigger endpoint is:
+
+```
+POST /api/v1/workflows/webhook/{webhook_token}
+```
+
+Request requirements:
+- **Authentication**: Provide a valid `clou_` API key in the `Authorization` header
+- **Body**: Workflow input variables (raw JSON or `{"inputs": {...}}` format)
+- **Webhook token**: Matched using constant-time comparison to prevent timing attacks
+
+<Callout type="warn">
+  Not implemented / Roadmap: `wh_...`/`whsec_...` credential pairs, IP allowlists, per-webhook rate limits, retry policies, and webhook request logs are currently unavailable.
+</Callout>
+
+### Cron Trigger
+
+After setting the trigger type to **Cron**, set the cron expression in `trigger_config.cron` (e.g., `0 9 * * 1-5` for weekdays at 9 AM).
+
+<Callout type="warn">
+  Cron triggers require additional deployment of a scheduler task. The `workflow.check_scheduled` task implements cron evaluation logic, but is not included in the Celery Beat schedule by default. Operators who need this feature must schedule this task periodically in their deployment (e.g., every minute). Storing `trigger_type: cron` alone will not automatically run the workflow.
+</Callout>
+
+## Draft and Publication
+
+Workflows have three statuses:
+
+### Draft
+
+- Workflow is being edited
+- **Cannot be triggered**
+- Visible only to editors
+- Can be saved at any time
+
+### Published
+
+- Workflow is operational
+- **Can be triggered via UI, API, or webhook**
+- Visible to all users with permissions
+- Must be unpublished before modification
+
+### Archived
+
+- Workflow is retired
+- Not visible in normal lists
+- Configuration preserved
+
+<Callout type="info">
+  There is no active/inactive status. Archiving is a model-level status (`archived`) applied via updates; publish/unpublish are the admin lifecycle actions.
+</Callout>
 
 ## Pre-publish Checks
 
-Select **Checklist** and resolve issues such as unselected models, input variables without a source, nodes without inputs, undefined outputs, incomplete conditional branches, missing required tool parameters, and incomplete loop containers. Only debug run and publish after validation passes.
+Select **Checklist** and resolve the following issues before debugging and publishing:
+
+| Check Item | Description |
+| --- | --- |
+| Unselected Model | LLM node has no model configured |
+| Input Variable Without Source | Node input is not connected to an upstream variable |
+| Node Without Input | Required node lacks input connection |
+| Output Undefined | Answer node has no output variable configured |
+| Incomplete Condition Branch | Condition node missing True or False branch |
+| Missing Required Tool Parameter | Tool node lacks required parameter mapping |
+| Incomplete Loop Container | Loop node not properly configured |
+
+After validation passes, use **Debug Run** to test the workflow, confirm the output matches expectations, then publish.
+
+## Running a Workflow
+
+### Accessing Workflows
+
+1. Navigate to **Apps** (`/app/apps`).
+2. Open the **Workflow** tab.
+3. Select a workflow card to open `/app/apps/workflow/{id}`.
+4. Choose **Run** to start a manual execution.
+
+### Workflow List
+
+The list shows:
+
+| Column | Description |
+| --- | --- |
+| **Name** | Workflow name |
+| **Team** | Team that owns the workflow |
+| **Status** | Draft or Published |
+| **Last Run** | Last execution time; a run may be waiting at a pause node |
+| **Actions** | Run, View, Edit |
+
+### Manual Execution
+
+**Steps:**
+
+1. Open the workflow
+2. Click the **Run** button
+3. If the workflow has input variables:
+   - Fill in required inputs
+   - Review optional inputs
+   - Click **Start**
+4. Watch the execution in real-time
+5. View the results when complete
+
+### Input Variables
+
+Workflows may require inputs:
+
+- **Text**: Free-form text input
+- **Number**: Numeric values
+- **Select**: Dropdown options
+- **Boolean**: Yes/No checkbox
+
+### Watching Execution
+
+**Real-time progress:**
+- ⏸️ **Pending**: Not started yet
+- ⏳ **Running**: Currently executing
+- ⏳ **Waiting**: Paused for an external input or approval
+- ✅ **Success**: Completed successfully
+- ❌ **Failed**: Execution failed
+- ⏭️ **Skipped**: Skipped (conditional)
+
+**Execution Details:**
+Click on a node to see details including status, duration, input, and output.
+
+**Streaming Output:**
+LLM nodes stream their output in real-time; the execution view shows partial content while running.
+
+### Execution Results
+
+**Success:** Shows execution duration, nodes executed, and status.
+
+**Failed:** Shows the failed node and error message.
+
+**Common Errors:**
+- Invalid input format
+- API call failed
+- Timeout exceeded
+- Resource not found
+- Permission denied
+
+### Stopping Execution
+
+**During execution:**
+1. Click the **Stop Execution** button
+2. Confirm the stop action
+3. The workflow stops at the current node
+
+### Workflow Variables
+
+**Input Variables:** Provided when starting the workflow.
+
+**Output Variables:** Generated during execution (from the end node / node outputs).
+
+## Viewing Execution History
+
+### Execution History
+
+1. Select a workflow
+2. Click the **Execution History** tab
+3. View the run list:
+   - Run ID
+   - Status (`running`, `success`, `failed`, etc.)
+   - Start time
+   - Duration
+   - Trigger source
+   - Input/Output
+
+Related API endpoints:
+- `GET /api/v1/workflows/runs` - Get all run records
+- `GET /api/v1/workflows/{workflow_id}/runs` - Get runs for a specific workflow
+- `GET /api/v1/workflows/{workflow_id}/runs/mine` - Get current user's runs
+
+### Execution Details
+
+Click an individual run to view detailed information:
+
+- **Run Information**: Run ID, workflow name, status, start time, completion time, duration, trigger method
+- **Node Execution Timeline**: Start time, completion time, and duration for each node
+- **Node-level Details**: `GET /runs/{run_id}/nodes` for per-node execution details
+- **Streamed Events**: `GET /runs/{run_id}/stream` for real-time node execution events
+
+### Workflow Logs
+
+Workflow execution history is available from the workflow's **Logs** view at `/app/apps/workflow/{id}/logs`. Open **Apps** → **Workflow**, select the workflow, then choose **Logs** from its workflow menu.
+
+**Run Details Fields:**
+
+| Field | Description |
+| --- | --- |
+| **Status** | The Logs UI displays Completed (API `success`), Failed, Running, Pending, Cancelled, or Timeout. Raw API `waiting` runs currently fall back to the Pending badge in both the list and run-detail drawer; Cancelled and Timeout have dedicated badges but no filter controls. |
+| **Started** | Execution start time |
+| **Duration** | Total execution time |
+| **Triggered By** | User or Webhook |
+| **Input** | Input variables provided |
+| **Output** | Execution results |
+| **Nodes Executed** | Number of nodes run |
+| **Error** | Error message (if failed) |
+
+**Status Icons:**
+
+| Badge | Logs Label | API Status | Description |
+| --- | --- | --- | --- |
+| ✅ | **Completed** | `success` | Successfully finished |
+| ❌ | **Failed** | `failed` | Execution failed |
+| ⏳ | **Running** | `running` | Currently executing |
+| ⏳ | **Pending** | `pending` | Queued before execution |
+| ⏳ | **Pending** | `waiting` | This raw status currently has no dedicated Logs badge or filter and falls back to Pending. |
+| ⏹️ | **Cancelled** | `cancelled` | Stopped or cancelled; no dedicated filter control is currently available. |
+| ⏱️ | **Timeout** | `timeout` | Exceeded the execution timeout; no dedicated filter control is currently available. |
+
+### Viewing Node Execution Details
+
+View the node-by-node execution:
+
+1. Open the run's **node executions**
+2. Each node shows its status, duration, input, output, and error (if any)
+
+### Streaming
+
+Runs stream events in real-time (`GET /api/v1/workflows/runs/{run_id}/stream`), including node status updates and LLM token output.
+
+### Filtering History
+
+| Filter | Options |
+| --- | --- |
+| **Status** | All Status, Completed, Failed, Running, Pending |
+| **Date Range** | All Time, Last 7 Days, Last 30 Days, Last 90 Days |
+| **Run ID** | Exact run UUID |
+
+### Execution Statistics
+
+**Summary metrics (per workflow or system-wide):**
+
+- Total Runs
+- Success Rate
+- Failed Runs
+- Avg Duration
+
+### Deleting History
+
+**Delete Single Execution:**
+
+1. Find the execution in the history
+2. Click the **"..."** menu
+3. Select **"Delete"**
+4. Confirm deletion
+5. The execution is removed
+
+<Callout type="warn">
+  Deleted executions cannot be recovered. Bulk deletion is not implemented, and there is no automatic retention/cleanup policy setting.
+</Callout>
+
+<Callout type="warn">
+  Not implemented / Roadmap: Real-time execution dashboard (running/queued executions, success rate, average execution time, cost) is currently unavailable. Run statistics are available via `GET /api/v1/workflows/runs/stats` (team-filterable) and `GET /api/v1/workflows/{workflow_id}/stats` (+ `/stats/trends`).
+</Callout>
+
+## Webhook Management
+
+### Creating or Regenerating a Webhook Token
+
+1. Edit the workflow
+2. Set trigger type to **Webhook**
+3. Save — a `webhook_token` is generated automatically
+4. Regenerate anytime via `POST /api/v1/workflows/{workflow_id}/regenerate-webhook-token`
+
+### Testing a Webhook
+
+Use curl to test the webhook:
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/webhook/TOKEN" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customer_email": "test@example.com",
+    "inquiry_text": "Test inquiry",
+    "priority": "low"
+  }'
+```
+
+### Webhook Logs
+
+<Callout type="warn">
+  Not implemented / Roadmap: There is no separate webhook request log view. Triggered runs appear in the workflow run history (`GET /api/v1/workflows/runs`).
+</Callout>
+
+## API Endpoints
+
+The Workflow API supports programmatic management of the workflow lifecycle:
+
+| Operation | Endpoint | Description |
+| --- | --- | --- |
+| List Workflows | `GET /api/v1/workflows` | Get workflow list |
+| Create Workflow | `POST /api/v1/workflows` | Create a new workflow |
+| Get Workflow | `GET /api/v1/workflows/{id}` | Get workflow details |
+| Update Workflow | `PUT /api/v1/workflows/{id}` | Update workflow configuration |
+| Delete Workflow | `DELETE /api/v1/workflows/{id}` | Delete a workflow |
+| Publish Workflow | `POST /api/v1/workflows/{id}/publish` | Publish a workflow |
+| Unpublish | `POST /api/v1/workflows/{id}/unpublish` | Unpublish a workflow |
+| Run Workflow | `POST /api/v1/workflows/{id}/run` | Trigger workflow execution |
+| List Runs | `GET /api/v1/workflows/runs` | Get run history |
+| Get Run Details | `GET /api/v1/workflows/runs/{run_id}` | Get single run details |
+| Node Execution Details | `GET /api/v1/workflows/runs/{run_id}/nodes` | Get per-node execution info |
+| Streamed Events | `GET /api/v1/workflows/runs/{run_id}/stream` | Real-time node event stream |
+| Run Statistics | `GET /api/v1/workflows/runs/stats` | Team-level run statistics |
+| Workflow Statistics | `GET /api/v1/workflows/{id}/stats` | Single workflow statistics |
+| Trend Statistics | `GET /api/v1/workflows/{id}/stats/trends` | Execution trend data |
+| Regenerate Token | `POST /api/v1/workflows/{id}/regenerate-webhook-token` | Regenerate webhook token |
+
+<Callout type="info">
+  Admin endpoints are under `/api/v1/admin/workflows` and require `admin:app:*` permissions. Administrators can manage all workflows across teams.
+</Callout>
+
+## Troubleshooting
+
+### Workflow Execution Failed
+
+1. Open the failed run in **Execution History**
+2. Check node execution details and error messages
+3. Common errors:
+   - **Node Timeout**: Increase timeout or optimize the node
+   - **Invalid Input**: Validate input variable format
+   - **API Error**: Check API credentials and connectivity
+   - **LLM Error**: Verify model availability and API key
+   - **Tool Error**: Check tool configuration
+4. Re-trigger using `POST /api/v1/workflows/{workflow_id}/run`
+
+### Webhook Not Triggering
+
+1. Confirm the workflow trigger type is `webhook`
+2. Confirm POST to the correct `/api/v1/workflows/webhook/{webhook_token}` endpoint
+3. Confirm the `Authorization` header contains a valid `clou_` API key
+4. Confirm the workflow is published (unpublished workflows reject webhook triggers)
+
+### Schedule Not Running
+
+1. Confirm the workflow is `published` and `trigger_type` is `cron`
+2. Confirm `trigger_config.cron` contains a valid cron expression
+3. Confirm Celery Beat or another scheduler dispatches `workflow.check_scheduled` periodically
+
+### High Execution Time
+
+1. Optimize nodes: Reduce LLM `max_tokens`, use faster models, optimize tool calls
+2. Use parallel execution: Identify independent nodes and execute concurrently
+3. Add timeouts: Set reasonable node timeouts and handle gracefully
+4. Monitor performance: Review run duration statistics in run history
+
+### Workflow Won't Start
+
+1. Check if the workflow is published
+2. Verify you have permission to run
+3. Ensure all required inputs are provided
+4. Refresh the page and try again
+
+### Execution Stuck
+
+1. Check if a node is waiting for an external response
+2. Verify API endpoints are accessible
+3. Stop and restart the execution
+4. Contact the administrator
+
+### Cannot View History
+
+1. Refresh the page
+2. Check if you have permission
+3. Verify the workflow has been executed
+4. Check the date-range filter
+5. Contact the administrator
+
+### Missing Executions
+
+1. Check filters (may be hiding results)
+2. Verify the date range
+3. Check if executions were deleted
+
+### Cannot Start a New Run
+
+1. Check that you have permission to run the workflow
+2. Verify the workflow is published
+3. Start a new execution from the workflow page
+
+## Best Practices
+
+### Workflow Design
+
+- Keep workflows simple and focused; avoid excessive complexity
+- Use descriptive node names, include an action verb, be specific
+- Add error handling logic
+- Test thoroughly before activation
+- Document workflow purpose
+- Use variables for reusability; avoid hardcoding values
+- Add logging for debugging
+- Set appropriate timeouts
+
+### Performance Optimization
+
+- Use parallel execution where possible
+- Cache repeated operations
+- Optimize LLM prompts
+- Use appropriate models for the task
+- Set reasonable timeouts
+- Monitor execution times
+- Optimize tool calls
+
+### Inputs and Monitoring
+
+**Inputs:**
+- Provide all required inputs
+- Use correct data types
+- Test with sample data first
+
+**Monitoring:**
+- Watch the execution progress
+- Check node outputs
+- Stop if behavior is unexpected
+
+**Error Handling:**
+- Read error messages carefully
+- Check input values
+- Review node configuration
+- Try again with corrected inputs
+
+### Security
+
+- Use webhook authentication (API key in Authorization header)
+- Regenerate webhook tokens when compromised
+- Enable audit logging
+- Monitor for suspicious activity
+
+<Callout type="warn">
+  Not implemented / Roadmap: Webhook IP allowlists and rate limits are currently unavailable.
+</Callout>
 
 ## Exiting and Lost Changes
 

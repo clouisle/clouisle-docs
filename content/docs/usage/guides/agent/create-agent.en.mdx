@@ -4,7 +4,12 @@ description: Configure the model, prompt, variables, Knowledge Base, and tools, 
 icon: Bot
 ---
 
-The Agent editor separates core orchestration from final presentation: the main area configures the prompt, variables, Knowledge Base, and capabilities; **Agent Settings** configures the name, model, conversation presentation, and iteration cap.
+import { TypeTable } from 'fumadocs-ui/components/type-table';
+
+Clouisle provides a dedicated **Agent Studio** workspace (`/app/apps/{agent_id}`) featuring a two-column responsive interface:
+- **Left Column (Orchestration Editor)**: Collapsible cards for model selection, system prompt editing, dynamic variables, knowledge bases, tool bindings, chat behavior flags, and advanced runtime parameters.
+- **Right Column (Live Preview Panel)**: A persistent, fully functional chat sandbox that lets you immediately interact with and test your draft agent configuration without leaving the page or publishing changes.
+- **Top Toolbar**: Quick access to agent metadata (name, icon, status), publication controls (`Draft` vs `Published`), the Embed widget drawer, and the Agent Settings drawer.
 
 <Callout type="info">
   The current team must have an enabled `chat` model authorized. Creating requires `agent:create`; publishing requires `agent:publish`.
@@ -13,9 +18,26 @@ The Agent editor separates core orchestration from final presentation: the main 
 ## Create an Agent
 
 1. Navigate to **Apps**, select **Create App** > **Agent**.
-2. Fill in the name. The name can be `1-100` characters; the description up to `500` characters.
-3. On the orchestration page, select **Agent Settings** in the top-right corner, choose the model, and configure the name, icon, opening message, suggested questions, and visibility.
-4. Set visibility to **Private** or **Team**.
+2. Fill in the name (`1-100` characters) and description (up to `500` characters).
+3. Select an owning team.
+4. On the Agent Studio orchestration page, select **Agent Settings** in the top-right corner, choose the model, and configure the name, icon, opening message, suggested questions, and visibility.
+5. Set visibility to **Private** or **Team**.
+
+<TypeTable
+  type={{
+    name: { description: 'Agent display name', type: 'string', required: true },
+    description: { description: 'Agent purpose and capabilities', type: 'string' },
+    team_id: { description: 'Owning team ID', type: 'string', required: true },
+    model_id: { description: 'LLM model (team-granted TeamModel)', type: 'string', required: true },
+    system_prompt: { description: 'System prompt that defines agent behavior', type: 'string' },
+    max_iterations: { description: 'Tool-call iteration cap', type: 'number', default: 5 },
+    visibility: { description: 'Visibility', type: "'private' | 'team'", default: 'private' },
+  }}
+/>
+
+<Callout type="info">
+  Agents do not expose per-agent sampling parameters (Temperature, Max Tokens, Top P, Frequency/Presence Penalty). LLM sampling defaults are configured on the model itself via `default_params`. Agents only configure `model_id`, `system_prompt`, `max_iterations`, tool sets, and knowledge base attachments.
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-settings-drawer.png" alt="Agent settings drawer" />
@@ -29,28 +51,192 @@ The Agent editor separates core orchestration from final presentation: the main 
 3. In **Variables**, add user input fields. Variable names can be up to `50` characters; you can configure the display name, required, hidden, default value, options, numeric range, or maximum length.
 4. Fill in the variables in the preview on the right and confirm the substitution result.
 
-## Link a Knowledge Base
+## Configure Knowledge Base and RAG
 
 1. In the **Knowledge Base** area, select **Add**.
 2. Select a Knowledge Base and a `vector`, `fulltext`, or `hybrid` retrieval mode.
 3. Set Top K (`1-100`, default `5`) and the threshold (`0-1`, default `0.3`).
-4. Set the overall RAG mode: **Agentic RAG**, **Naive RAG**, or **Off**.
+4. Optionally enable **Rerank** to improve recall precision.
+5. Set the overall RAG mode: **Off**, **Auto**, or **Agentic**.
+
+<TypeTable
+  type={{
+    rag_mode: { description: 'Overall RAG mode', type: "'off' | 'auto' | 'agentic'", default: 'auto' },
+    search_mode: { description: 'Per-KB retrieval mode', type: "'vector' | 'fulltext' | 'hybrid'", default: 'hybrid' },
+    top_k: { description: 'Per-KB result count', type: 'number', default: 5 },
+    score_threshold: { description: 'Minimum recall score', type: 'number', default: 0.3 },
+    rerank: { description: 'Enable reranking', type: 'boolean', default: false },
+  }}
+/>
+
+Knowledge base ordering is defined by the `knowledge_base_configs` list and can be adjusted when editing the agent; this order is applied when the agent retrieves context.
 
 ## Add Tools and Capabilities
 
-In the **Tools** area, select a built-in tool, custom tool, MCP, or Skill. When a tool shows "Configuration needed", go to **Capabilities** first to complete the credentials. When enabling attachments, user input requests, memory, image generation, or video generation, check the corresponding limits and default model in each case.
+In the **Tools** area, select built-in tools, custom tools, MCP, or Skills.
+
+| Tool Type | Description | Prerequisite |
+| --- | --- | --- |
+| Web Search | Internet search, powered by Tavily | `TAVILY_API_KEY` stored in tool config |
+| Calculator | Mathematical computation | None |
+| Date/Time | Date and time queries | None |
+| Unit Converter | Unit conversion | None |
+| Custom Tool | User-defined tool | Create and test in **Capabilities** first |
+| MCP | Model Context Protocol tool | Configure in **Capabilities** first |
+| Skill | Predefined skill | None |
+
+When a tool shows "Configuration needed", go to **Capabilities** first to complete the credentials. Custom tools are created and tested in **Capabilities**, then enabled per agent.
+
+<TypeTable
+  type={{
+    max_tool_call_iterations: { description: 'Maximum tool-call iterations', type: 'number', default: 5 },
+    tool_timeout: { description: 'Per-call tool timeout', type: 'string', default: '30s' },
+  }}
+/>
+
+## Configure Attachments, Media, and Memory
+
+Before enabling attachments, image generation, video generation, or cross-session memory, turn on the corresponding capabilities in the Agent **Orchestration**:
+
+| Capability | Config Path | Details |
+| --- | --- | --- |
+| Attachments | **File & Image** | Single file `10MB` (`1KB-50MB`), `5` per message (`1-10`) |
+| Image Gen | **Image Gen** | Default `1024×1024` (`256-4096`), max `4` per request (`1-10`) |
+| Video Gen | **Video Gen** | Default `5s` (`1-30s`), aspect ratio `16:9` |
+| Memory | **Memory** | Max memories `10` (`1-50`), auto-extract enabled by default |
+
+For full configuration options, see [Attachments and Media](./media) and [Memory and Context](./memory).
+
+## Set Visibility and Publish
+
+1. Choose **Private** or **Team** visibility.
+2. Select **Publish**. After publishing the status becomes `published` and the agent can receive messages.
+3. After publishing, you can open the **Public Page**, **Embed**, and **Access API**.
+
+<Callout type="info">
+  `public` visibility is retained only for legacy records; new agents should use `private` or `team`.
+</Callout>
+
+<Callout type="warn">
+  Agents have exactly two statuses: `draft` and `published`. There is no `active`/`inactive` or `archived` status, and no archive/restore workflow. To take an agent out of use, unpublish it or delete it (`DELETE /api/v1/admin/agents/{agent_id}`).
+</Callout>
+
+<figure>
+  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-published-toolbar.png" alt="Published Agent toolbar" />
+  <figcaption>Published Agent toolbar</figcaption>
+</figure>
 
 ## Save, Debug, and Publish
 
 1. Select **Save**. Validation errors list the specific fields.
 2. In **Debug & Preview**, send questions that cover both normal and failure paths.
 3. When tools are present, verify tool parameters, failure prompts, and max-iteration termination behavior.
-4. Select **Publish**. After publishing, you can open the **Public Page**, **Embed**, and **Access API**.
+4. Select **Publish**.
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-published-toolbar.png" alt="Published Agent toolbar" />
-  <figcaption>Published Agent toolbar</figcaption>
-</figure>
+## Monitoring and Statistics
+
+Use the stats endpoint `GET /api/v1/agents/{agent_id}/stats` to fetch agent metrics for a time period (`period`: `24h`, `7d`, `30d`, `all`):
+
+| Metric | Endpoint | Description |
+| --- | --- | --- |
+| Conversations & messages | `/stats` | Total conversations, total messages, active users |
+| Token usage | `/stats` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
+| Average response time | `/stats` | End-to-end average latency |
+| Tool calls | `/stats/tool-usage` | Per-tool call count breakdown |
+| Usage trends | `/stats/trends` | Time-aggregated usage changes |
+| Recent conversations | `/stats/recent-conversations` | List of recent conversations |
+
+<Callout type="info">
+  Statistics are surfaced in the agent list/detail views; there is no separate **Statistics** tab.
+</Callout>
+
+<Callout type="warn">
+  Not implemented / Roadmap: per-agent cost breakdowns, response-time percentiles (p50/p95/p99), statistics export (CSV/PDF), and scheduled usage reports are not available. The statistics API returns only the metrics listed above.
+</Callout>
+
+## API Endpoints
+
+Admin endpoints live under `/api/v1/admin/agents` and require `admin:app:*` permissions.
+
+```ts
+// List all agents (filter by status, visibility, team, creator, search)
+const agents = await api.get("/api/v1/admin/agents", { params: { status: ["published"] } });
+
+// Create agent for a team
+const agent = await api.post("/api/v1/admin/agents", {
+    name: "Support Agent",
+    team_id: "team-123",
+    model_id: "model-456",  // TeamModel ID (a team-granted model)
+    system_prompt: "You are a helpful assistant.",
+    rag_mode: "agentic"
+});
+
+// Update agent (PUT, not PATCH)
+const updated = await api.put(`/api/v1/admin/agents/${agent_id}`, {
+    name: "Support Agent v2"
+});
+
+// Publish / unpublish / duplicate
+await api.post(`/api/v1/admin/agents/${agent_id}/publish`);
+await api.post(`/api/v1/admin/agents/${agent_id}/unpublish`);
+await api.post(`/api/v1/admin/agents/${agent_id}/duplicate`);
+
+// Get agent statistics (period: 24h, 7d, 30d, all)
+const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { period: "30d" } });
+```
+
+For full API details, see [Agents API](/reference/api/endpoints/agents).
+
+## Best Practices
+
+### Agent Design
+
+- ✅ Write clear, specific system prompts
+- ✅ Test agents thoroughly before deployment
+- ✅ Use appropriate models for tasks
+- ✅ Enable RAG for factual accuracy
+- ✅ Monitor usage via the statistics endpoints
+- ✅ Collect user feedback and iterate
+
+- ❌ Use vague system prompts
+- ❌ Deploy untested agents
+- ❌ Use expensive models for simple tasks
+- ❌ Ignore error rates
+- ❌ Forget to monitor costs
+
+### Performance
+
+- ✅ Use streaming for better UX
+- ✅ Optimize knowledge base search
+- ✅ Set appropriate timeouts
+
+- ❌ Use synchronous processing for long tasks
+- ❌ Overload agents with too many knowledge bases
+- ❌ Set very high `max_tokens`
+
+## Troubleshooting
+
+### Agent Not Responding
+
+1. **Check agent status**: Verify it's published; check model availability.
+2. **Check model configuration**: Verify API key is valid; test model connectivity; check rate limits.
+3. **Check knowledge bases**: Verify they're indexed; confirm search works.
+4. **Check audit logs**: Filter by resource type `agent` and the matching resource ID.
+
+### Poor Response Quality
+
+1. **Review system prompt**: Make instructions clearer; add examples; set boundaries.
+2. **Improve knowledge base**: Add more relevant documents; update outdated content; improve chunking strategy.
+3. **Enable Agentic RAG**: Lets the agent decide when to retrieve, improving factual grounding.
+
+### High Costs
+
+1. **Review usage**: Check `GET /api/v1/agents/{agent_id}/stats` for token usage and conversation counts; identify high-usage agents.
+2. **Optimize prompts**: Shorter system prompts; reduce context length; use cheaper models for simple tasks.
+
+<Callout type="warn">
+  Not implemented / Roadmap: per-agent token limits, daily limits, and cost alerts are not available. Usage monitoring is read-only via the statistics endpoints.
+</Callout>
 
 ## FAQ
 
@@ -58,3 +244,15 @@ In the **Tools** area, select a built-in tool, custom tool, MCP, or Skill. When 
 - **Tools are not called**: Check the model's function-calling capability, whether the tool is enabled, and whether the prompt defines the calling conditions.
 - **Publish fails**: Confirm you have the publish permission, and that the model, variable references, and capability configuration are valid.
 - **Public page inaccessible**: Confirm the Agent is published; private/team visibility is still affected by sign-in and team access control.
+
+## Limitations and Roadmap
+
+| Feature | Status | Workaround |
+| --- | --- | --- |
+| Per-agent sampling params (Temperature, etc.) | Not implemented | Configure in model `default_params` |
+| Team/agent resource limits | Not implemented | No quota gating |
+| Agent template library | Not implemented | Use duplicate (`POST .../duplicate`) |
+| Bulk edit | Not implemented | Update individual agents via `PUT` |
+| Archive/restore | Not implemented | Unpublish or delete |
+| Cost breakdowns / percentiles | Not implemented | Basic stats only |
+| Import/export | Not implemented | None |

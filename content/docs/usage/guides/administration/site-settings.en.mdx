@@ -6,18 +6,460 @@ icon: MonitorCog
 
 Site settings determine the logged-out pages, authentication flow, resource limits, and runtime policies. Only users with the corresponding `admin:settings:*` permissions or super administrator status can see the matching tabs.
 
-## Settings Sections
+## Accessing System Settings
 
-- **General**: site name, description, URL, icon, default language, authentication page layout, theme mode, and branding display.
-- **Security**: registration toggle, approval, email verification, password policy, sessions, login attempts, CAPTCHA, and TOTP.
-- **Notification channels**: SMTP, DingTalk, WeCom, Feishu, Webhook, Slack.
-- **Storage**: local filesystem or object storage.
-- **SSO**: single sign-on connections.
+1. Log in as administrator.
+2. Navigate to **Admin** → **Site Settings** (Settings section in the sidebar).
+3. Choose a category from the settings sub-navigation.
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/site-settings-navigation.png" alt="Site settings navigation" />
-  <figcaption>Site settings navigation</figcaption>
-</figure>
+Settings categories:
+
+- **General** (`/site-settings`)
+- **Security** (`/site-settings/security`)
+- **Notifications** (`/site-settings/notifications`)
+- **Storage** (`/site-settings/storage`)
+- **SSO** (`/site-settings/sso`)
+
+Settings are stored as key-value site settings and exposed through `GET /api/v1/admin/site-settings` (single key: `GET/PUT /api/v1/admin/site-settings/{key}`, bulk update: `PUT /api/v1/admin/site-settings`). Viewing requires `admin:settings:read`; updating requires `admin:settings:update`.
+
+## General Settings
+
+### Site Information
+
+Configure site name, URL, description, icon, default language, and authentication page layout:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `site_name` | string | `Clouisle` | Site name |
+| `site_url` | string | empty | Site URL |
+| `site_description` | string | empty | Site description |
+| `site_icon` | string | empty | Site icon URL |
+| `default_language` | `en` or `zh` | `en` | Default language |
+| `auth_page_layout` | `centered` or `split` | `centered` | Authentication page layout |
+
+Update site information: Navigate to **Settings** → **General**, update fields, and click **Save Changes**.
+
+### Theme and Display
+
+Configure theme mode, primary color, branding display, and interface elements:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `theme_mode` | `light`, `dark`, or `system` | `light` | Theme mode |
+| `theme_primary_color` | string | `#3B82F6` | Theme primary color |
+| `theme_branding_display` | `full`, `name_only`, `icon_only`, or `hidden` | `full` | Branding display |
+
+Additional theme tokens (primary foreground, background, card, sidebar, navbar, accent, chart colors, etc.) can also be customized.
+
+Update branding: Navigate to **Settings** → **General**, adjust theme mode and color tokens, and click **Save Changes**.
+
+### Language Settings
+
+Configure site default language and multilingual support:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `default_language` | `en` or `zh` | `en` | Site default language |
+
+Users can switch the interface language in their personal settings. After switching, interface text and notification messages use the corresponding language translation.
+
+### Legal & Compliance
+
+Configure ICP record, terms of service, and privacy policy:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `icp_record_number` | string | empty | ICP record number |
+| `icp_record_url` | string | empty | ICP record URL |
+| `terms_enabled` | boolean | `false` | Enable terms of service |
+| `terms_url` | string | empty | Terms URL |
+| `terms_text` | string | empty | Terms text (Markdown, used when no URL) |
+| `privacy_enabled` | boolean | `false` | Enable privacy policy |
+| `privacy_url` | string | empty | Privacy policy URL |
+| `privacy_text` | string | empty | Privacy policy text (Markdown, used when no URL) |
+| `require_terms_acceptance_on_register` | boolean | `false` | Require terms acceptance on registration |
+
+Terms and privacy entries are shown only when enabled and a URL or text is provided. Registration acceptance is enforced only when `require_terms_acceptance_on_register` is true.
+
+## Security Settings
+
+### Registration
+
+Configure registration, approval, email verification, and account deletion policies:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `allow_registration` | boolean | `true` | Allow registration |
+| `require_approval` | boolean | `true` | Admin approval for new users |
+| `email_verification` | boolean | `true` | Email verification |
+| `allow_account_deletion` | boolean | `true` | Allow account deletion |
+| `default_role_id` | string | Viewer role | Default role (set automatically at initialization) |
+| `default_team_id` | string | empty | Default team |
+| `default_team_role` | `viewer`, `member`, or `admin` | `member` | Default team role |
+
+### Password Policy
+
+Configure password complexity requirements:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `min_password_length` | number | `8` | Minimum password length |
+| `require_uppercase` | boolean | `true` | Require uppercase letter |
+| `require_number` | boolean | `true` | Require number |
+| `require_special_char` | boolean | `false` | Require special character |
+
+<Callout type="note">There is no `require_lowercase` setting.</Callout>
+
+Password expiration configuration:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `password_expiration_enabled` | boolean | `false` | Enable password expiration |
+| `password_expiration_days` | number | `90` | Password expiration days |
+| `password_expiration_warning_days` | number | `7` | Warning days before expiration |
+| `password_history_count` | number | `5` | Password history count |
+| `password_min_age_days` | number | `0` | Minimum password age in days |
+| `force_password_change_on_first_login` | boolean | `false` | Force password change on first login |
+
+### Session Settings
+
+Configure session timeout, login attempt limits, and CAPTCHA:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `session_timeout_days` | number | `30` | Session timeout in days |
+| `single_session` | boolean | `false` | Allow only a single session per user |
+| `max_login_attempts` | number | `5` | Max login attempts before lockout |
+| `lockout_duration_minutes` | number | `15` | Lockout duration in minutes |
+| `enable_captcha` | boolean | `false` | Enable CAPTCHA |
+
+<Callout type="note">There is no "max concurrent sessions" counter. The relevant control is the `single_session` boolean, and the session lifetime is `session_timeout_days` (default 30 days).</Callout>
+
+### Two-Factor Authentication
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `require_totp` | boolean | `false` | Require all users to enable TOTP |
+
+Admin TOTP statistics and per-user status/disable endpoints are available under `/api/v1/admin/totp`.
+
+### Model Endpoint Allowlist
+
+Before saving or testing a model with a new API endpoint:
+
+1. Navigate to **Settings** → **Security**.
+2. Add the endpoint Origin to **Model Endpoint Allowlist**, one per line.
+3. Include only the scheme, hostname, and non-default port, for example `https://gateway.example.com` or `http://ollama.internal:11434`.
+4. Save the Security settings, then save or test the model again.
+
+<Callout type="warn" title="Security">
+Prefer HTTPS for remote endpoints. Use HTTP only for endpoints on a trusted private network because API keys and model traffic are otherwise sent without transport encryption.
+</Callout>
+
+Matching is exact. URL paths are ignored, but the scheme, hostname, and port must all match. Removing an Origin blocks subsequent model discovery, connection tests, and runtime requests without restarting the service.
+
+## Notification Settings
+
+### SMTP (Email)
+
+Configure email sending:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `smtp_enabled` | boolean | `true` | Enable SMTP |
+| `smtp_host` | string | `smtp.gmail.com` | SMTP host |
+| `smtp_port` | number | `587` | SMTP port |
+| `smtp_encryption` | `none`, `ssl`, or `tls` | `tls` | Encryption method |
+| `smtp_username` | string | empty | SMTP username |
+| `smtp_password` | string | empty | SMTP password |
+| `email_sender_name` | string | `Clouisle` | Sender name |
+| `email_sender_address` | string | empty | Sender address |
+
+Update SMTP settings: Navigate to **Settings** → **Notifications**, enter SMTP details, set sender name and address, click **Test** (`POST /api/v1/admin/site-settings/test-email`), then click **Save Changes**.
+
+### External Notification Channels
+
+The following channels can be enabled and configured (each with its own settings page section and a test endpoint):
+
+| Channel | Key Settings | Test Endpoint |
+| --- | --- | --- |
+| DingTalk | `dingtalk_enabled`, type (`webhook` or `app`), webhook URL/secret or app key/secret/agent ID | `/test-dingtalk` |
+| WeChat Work | `wechat_enabled`, type (`webhook` or `app`), webhook URL or corp ID/agent ID/app secret | `/test-wechat` |
+| Feishu | `feishu_enabled`, type (`webhook` or `app`), webhook URL/secret or app ID/secret | `/test-feishu` |
+| Slack | `slack_enabled`, incoming webhook URL | `/test-slack` |
+| Webhook | `webhook_enabled`, URL, method, custom headers, body template, HMAC secret | `/test-webhook` |
+
+### Auto Notifications
+
+The **Auto Notifications** tab (`GET/PUT /api/v1/admin/site-settings/auto-notifications`) controls which event types create notifications and which external channels receive them. See [Notifications & External Channels](./notifications.mdx) for details.
+
+### Email Templates
+
+<Callout type="note">Not implemented / Roadmap. There is no email template editor. Notification messages are generated from built-in i18n translations (`app/core/i18n.py`).</Callout>
+
+## Notification Preferences
+
+Notification delivery in Clouisle is configured **globally by administrators** — there is no per-user notification preference system. Individual users cannot customize which notifications they receive.
+
+> **Note:** Per-user preferences (email frequency/digests, per-type toggles, quiet hours / do-not-disturb, push notifications, notification grouping, priority levels, custom rules, and user webhook endpoints) are **not implemented**.
+
+### In-App Notifications
+
+Every user sees their notifications in the notification center and at `/app/notifications`. Notifications are scoped as:
+
+- **global**: visible to all users
+- **team**: visible to members of the target team
+- **user**: visible to a specific user
+
+### External Channels (Admin-Configured)
+
+Administrators configure external delivery channels globally for automatic notification types. Available channels:
+
+- **Email** (requires SMTP configuration)
+- **DingTalk**
+- **WeChat**
+- **Feishu**
+- **Webhook** (generic webhook)
+- **Slack**
+
+A channel only sends notifications when it is both selected in the global config and enabled/configured by the administrator. If no channels are configured, notifications stay in-app only.
+
+### What Administrators Can Configure
+
+Administrators choose which automatic event types are enabled (`enabled_types`). By default the following types are enabled:
+
+| Type | Event |
+| --- | --- |
+| `team.member_added` / `team.member_removed` | Team membership changes |
+| `team.role_changed` / `team.ownership_transferred` | Role / ownership changes |
+| `team.model_granted` / `team.model_revoked` | Team model access changes |
+| `user.activated` / `user.deactivated` | Account status changes |
+| `user.password_reset` | Administrator resets a password |
+| `user.pending_approval` | New registration awaiting approval |
+| `kb.doc_indexed` / `kb.doc_failed` | Knowledge base document processing |
+| `workflow.run_failed` | Workflow execution failures |
+| `apikey.expiring` / `apikey.expired` | API key lifecycle |
+| `security.login_anomaly` | Login from a new location/device |
+| `security.account_locked` | Account locked after failed attempts |
+| `security.password_changed` | Password changed |
+
+Additional types (e.g. `workflow.run_success`, `agent.published`, `agent.unpublished`, `password.expiring`) exist and can be enabled.
+
+Admins configure this under **Admin Dashboard → Site Settings → Notifications → Auto Notifications** (and the corresponding channel tabs: Email, DingTalk, WeChat, Feishu, Webhook, Slack).
+
+### What Users Can Do
+
+As a user you can:
+
+- View notifications in the notification center and at `/app/notifications`
+- Mark individual notifications as read
+- Mark all notifications as read
+- Filter the notification list (by type, level, scope, unread, and search)
+
+See [Notifications & External Channels](./notifications.mdx) for details.
+
+### Notification API
+
+- `GET /api/v1/notifications` — list visible notifications (filters: scope, type, level, unread, search)
+- `GET /api/v1/notifications/unread-count` — unread count
+- `POST /api/v1/notifications/read` — mark notifications read (`notification_ids` or `mark_all`)
+- Admin endpoints (`/api/v1/admin/notifications`) — create/delete notifications, manage auto-notification config
+
+> **Note:** There is no `PATCH /api/v1/notifications/{id}` or user-level `DELETE /api/v1/notifications/{id}` — reading is a bulk action and deletion is admin-only.
+
+### Best Practices
+
+**For users:**
+- Check the notification center regularly
+- Review security notifications immediately
+
+**For administrators:**
+- Enable external channels only after configuring them (SMTP, DingTalk, etc.)
+- Choose enabled types deliberately to avoid notification noise
+
+## Storage Settings
+
+### File Storage
+
+Configure storage backend and knowledge base upload size limits:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upload_storage_backend` | `local` or `object` | `local` | Upload storage backend |
+| `kb_document_max_upload_size_mb` | number (1-1024) | `50` | KB single file upload size limit (MB) |
+
+Update storage settings: Navigate to **Settings** → **Storage**, configure storage backend and max upload size, then click **Save Changes**.
+
+<Callout type="note">Azure Blob storage is not supported. There is no public object-storage URL setting and no storage cleanup feature.</Callout>
+
+### Object Storage (S3-compatible)
+
+Configure S3-compatible object storage:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upload_storage_backend` | `object` | - | Upload storage backend set to object storage |
+| `object_storage_endpoint` | string | empty | Object storage endpoint |
+| `object_storage_bucket` | string | empty | Bucket name |
+| `object_storage_region` | string | empty | Region |
+| `object_storage_access_key` | string | empty | Access Key |
+| `object_storage_secret_key` | string | empty | Secret Key |
+| `object_storage_force_path_style` | boolean | `true` | Use path-style URLs |
+| `object_storage_secure` | boolean | `true` | Use HTTPS |
+
+Configure object storage: Navigate to **Settings** → **Storage**, enter the endpoint, bucket, region, access key, and secret key, configure path-style and HTTPS options, then click **Save Changes**.
+
+### Audit Log Retention
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `audit_log_retention_days` | number (30-3650) | `365` | Audit log retention days |
+| `audit_log_archive_path` | string | empty | Audit log archive path |
+
+Logs older than the retention period are archived (manually triggered) to monthly JSON files under the archive path and then deleted. See [Audit Log Management](./audit-logs.mdx) for details.
+
+## SSO Settings
+
+### Global SSO Behavior
+
+Configured in **Settings** → **Security** (SSO section) or **Settings** → **SSO**:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `sso_enabled` | boolean | `false` | Enable SSO |
+| `sso_allow_password_login` | boolean | `true` | Allow password login |
+| `sso_auto_create_users` | boolean | `true` | Auto-create users |
+| `sso_require_approval` | boolean | `false` | Require approval |
+| `sso_match_by_email` | boolean | `true` | Match by email |
+
+### SSO Providers
+
+SSO providers are managed in **Settings** → **SSO**. Providers are created generically with a name and protocol — there is no preset picker (Google, GitHub, Azure AD, etc.); each provider's configuration and attribute mapping are entered manually. See [SSO Configuration](./sso.mdx) for the full guide.
+
+## Team Settings
+
+Team admins can manage team members, model authorization, and team information. Teams group users and resources (agents, workflows, and knowledge bases).
+
+> **Note:** Team slugs, visibility, invitation flows, join requests, member limits, per-team resource limits, per-team security/API settings, billing, data retention, custom domains, and branding are **not implemented**.
+
+### Accessing Team Management
+
+1. Open the platform **Team switcher**.
+2. Choose **Manage Teams**.
+3. The team management page opens at `/teams`.
+4. Select a team to view its **Members** tab or, for authorized managers, its **Model Authorization** tab.
+
+**Required Permission:** Team Admin or Owner (for editing and member/model management).
+
+### Team Information
+
+Only three fields can be edited:
+
+| Field | Description |
+| --- | --- |
+| **Name** | Team display name (required) |
+| **Description** | Optional description (max 500 chars) |
+| **Avatar URL** | Optional avatar image URL |
+
+> **Note:** There is no team slug — teams are identified by ID and referenced by name in the UI.
+
+### Model Authorization
+
+Team admins and owners can manage which enabled models the team may use:
+
+1. Open **Manage Teams** (`/teams`) and select a team.
+2. Open **Model Authorization**.
+3. Choose **Authorize Model** and select an enabled model, or revoke an existing authorization.
+4. Save the authorization change.
+
+Authorized models become available for the team's agents and knowledge bases when their configuration requires a model.
+
+### Member Management
+
+Members must already have Clouisle accounts; there is no email-invitation or join-request flow.
+
+#### Adding Members
+
+1. Open **Manage Teams** (`/teams`) and select a team.
+2. Open the **Members** tab.
+3. Click **Add Member**.
+4. Choose an existing user and a role (Admin, Member, or Viewer — Owner cannot be assigned here).
+5. Confirm.
+
+Only the team Owner or Admin can add members. The Owner cannot add another member as Owner.
+
+#### Changing Member Roles
+
+1. Find the member in the member list
+2. Choose **"Change Role"**
+3. Select the new role (Admin, Member, or Viewer)
+
+Only the team Owner can change member roles (except for the Owner themselves).
+
+#### Removing Members
+
+1. Find the member in the member list
+2. Click **"Remove"**
+3. Confirm
+
+The Owner cannot be removed by other members.
+
+#### Leaving a Team
+
+1. Open **Manage Teams** (`/teams`) and select the team.
+2. Open **Members**.
+3. Confirm
+
+The Owner cannot leave until ownership is transferred.
+
+#### Transferring Ownership
+
+1. Open **Manage Teams** (`/teams`) and select the team.
+2. Open **Members**.
+3. Confirm the transfer
+
+The previous owner becomes an Admin, and the new owner gains full control.
+
+### Team Roles
+
+Roles are fixed: **Owner**, **Admin**, **Member**, **Viewer**. There are no per-team custom roles. See [Teams & Members](./teams.mdx) for the full permission matrix.
+
+### What Does NOT Exist
+
+The following team-level features are **not implemented**:
+
+- Team slug / custom URL
+- Team visibility (private/internal/public) and discovery
+- Invitation expiry, require-approval, allowed email domains
+- Member limits
+- Resource limits (agents, KBs, workflows, conversations)
+- Per-team password/2FA/session/IP policies
+- Team API settings, API key policies, rate limits
+- Billing / subscriptions / payment methods
+- Data retention / export / deletion policies
+- Audit alerts, custom domain, branding
+
+See also:
+- [Teams & Members](./teams.mdx) — Detailed team management guide
+- [Roles & Permissions](./roles-permissions.mdx) — Roles and permissions
+
+## Feature Flags and Other Settings
+
+<Callout type="note">Not implemented / Roadmap. The following are **not** configurable system settings:</Callout>
+
+- Feature flags (enabling/disabling agents, workflows, KBs, etc.)
+- Email templates
+- Security headers (HSTS, CSP, X-Frame-Options)
+- CORS configuration
+- IP whitelisting
+- API rate limiting
+- Webhook configuration as a general system feature
+- Third-party integrations (Salesforce, HubSpot, Slack apps, analytics like Google Analytics/Mixpanel)
+- Maintenance mode
+- Database pool / cache settings
+- Settings export/import and reset-to-defaults workflows
+
+Model endpoints are restricted via the **Model Endpoint Allowlist** (Security) instead of a global integration registry.
 
 ## Key Defaults
 

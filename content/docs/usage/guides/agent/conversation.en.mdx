@@ -6,19 +6,104 @@ icon: MessagesSquare
 
 A published Agent provides a full chat page; the preview on the right side of the editor is for build-time debugging. A conversation is created when the first message is sent and stores variables, message count, and Token usage.
 
+<Callout type="info">
+  There is no global **Chat** page or **New Chat** picker. Each agent's chat page contains only that agent's recent conversations.
+</Callout>
+
 ## Start a Conversation
 
-1. Open the Agent from **Apps** and select **Chat** or **Public Page**.
-2. If the Agent defines required variables, complete the variable form first.
-3. Enter your message. `Enter` sends it; `Shift+Enter` starts a new line.
-4. If attachments are enabled, you can attach files and images; the count and size per message are determined by the Agent configuration.
+### From the Apps page
+
+1. Navigate to **Apps** (`/app/apps`).
+2. Select the **Agent** tab and find the agent you want to use.
+3. Open the agent card menu and choose **Chat**.
+4. The agent chat opens at `/chat/{agent_id}`. Send your first message to create a conversation.
+
+### From an existing agent chat
+
+1. Open the agent's chat page.
+2. Use the conversation controls in that page to continue a recent conversation or start a new one.
+3. Type your message and send it.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-chat-anatomy.png" alt="Agent chat interface" />
   <figcaption>Agent chat interface</figcaption>
 </figure>
 
+## Chat Interface
+
+### Layout
+
+```
+┌─────────────────────────────────────────────────┐
+│  Agent Name                    [Settings] [...]  │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  Agent: Hello! How can I help you today?        │
+│                                                  │
+│  You: What is Clouisle?                         │
+│                                                  │
+│  Agent: Clouisle is an enterprise-grade...      │
+│  [Sources: doc1.pdf, doc2.md]                   │
+│                                                  │
+├─────────────────────────────────────────────────┤
+│  [📎] Type your message...            [Send] │
+└─────────────────────────────────────────────────┘
+```
+
+### Key Elements
+
+| Element | Description |
+|---------|-------------|
+| **Agent Name** | Current agent you're chatting with |
+| **Message History** | Scrollable conversation history |
+| **Input Box** | Type your messages here |
+| **Attach Button** | Upload files (if the agent enables attachments) |
+| **Send Button** | Send your message |
+| **Stop Button** | Interrupt a streaming response |
+| **Sources** | Referenced documents (if RAG mode is enabled) |
+
+## Sending Messages
+
+### Text Messages
+
+**Basic message:**
+1. Type your message in the input box
+2. Press **Enter** or click **Send**
+3. Wait for the agent response (streaming)
+
+**Multi-line message:**
+1. Type your message
+2. Press **Shift + Enter** for a new line
+3. Press **Enter** to send
+
+### File Uploads
+
+If the agent supports file uploads (attachments enabled):
+
+1. Click the **📎 Attach** button
+2. Select file(s) from your computer
+3. Supported formats depend on the agent's attachment configuration (PDF, DOCX, TXT, MD, CSV, XLSX, PPTX, images, etc.)
+4. Wait for the file to upload/parse
+5. Add your message or question about the file
+6. Click **Send**
+
+**Upload limits:**
+- All chat uploads are limited to **10 MB per file** (server-enforced)
+- Max files per message is configurable by the agent (default 5)
+
+For detailed file support and security notes, see [Attachments and Media](./media).
+
 ## Understand a Reply
+
+### Streaming Responses
+
+Agents stream responses in real-time:
+- Text appears word-by-word as generated
+- You can read while the agent is still typing
+- Stop generation by clicking the **Stop** button
+
+### Response Components
 
 A reply may consist of the following parts:
 
@@ -29,19 +114,195 @@ A reply may consist of the following parts:
 - **Media results**: Images or videos rendered directly into the assistant's message body.
 - **Message actions**: Copy, version, Token, speed, and more; can be hidden by the Agent.
 
+### Response Quality
+
+**High-quality responses include:**
+- Direct answer to your question
+- Relevant context and details
+- Source citations (if using a knowledge base)
+- Clear structure and formatting
+
+**If response quality is poor:**
+- Rephrase your question more clearly
+- Provide more context
+- Break complex questions into simpler parts
+- Check if the agent has access to a relevant knowledge base
+
+## Attachments and Media
+
+Attachments provide user assets (documents, images) to the agent; media generation lets the agent call authorized image or video models. Both must be explicitly enabled in the Agent **Orchestration**.
+
+Default attachment limits: single file `10 MB` (`1KB-50MB`), `5` per message (`1-10`). Images only enter the model directly when the chat model supports vision.
+
+For full configuration options, see [Attachments and Media](./media).
+
+## Variables and Forms
+
+If the agent defines required variables, complete the variable form before sending messages. Variables are referenced in the prompt as `{variable_name}`; `{query}` is the current user message.
+
+1. The variable form appears at the top of the chat page
+2. Fill in the required fields
+3. Type your message and send
+
 ## Stop, Edit, and Regenerate
 
-- Select **Stop** during streaming. The message status is recorded as manually stopped.
-- Editing a historical user message creates a new branch from that message and streams a new reply.
-- Regenerating an assistant message creates a new version. Switching versions only changes the active branch; it never deletes older versions.
-- Deleting a message also handles its downstream branches; deleting a conversation permanently deletes all of its messages.
+- **Stop**: Select **Stop** during streaming. The message status is recorded as manually stopped.
+- **Edit**: Editing a historical user message creates a new branch from that message and streams a new reply.
+- **Regenerate**: Regenerating an assistant message creates a new version. Switching versions only changes the active branch; it never deletes older versions.
+- **Delete**: Deleting a message also handles its downstream branches; deleting a conversation permanently deletes all of its messages.
+
+### Message Branching
+
+Conversations can have multiple branches:
+
+```
+Main conversation:
+You: Tell me about AI
+Agent: AI is...
+
+Branch 1 (edit message):
+You: Tell me about ML
+Agent: ML is...
+
+Branch 2 (regenerate):
+Agent: AI, or Artificial Intelligence...
+```
+
+Navigate branches using the arrow buttons.
 
 ## Manage Conversations
 
-The conversation drawer lets you select, rename, and delete your own conversations. Titles are up to `200` characters. The app's **Logs** page shows conversations by time and search term, and displays variables, model, Token, response time, reasoning, and knowledge sources.
+The conversation drawer lets you select, rename, and delete your own conversations. Titles are up to `200` characters.
+
+### Renaming
+
+Open a conversation's **...** menu in the agent chat and choose rename when the rename action is available. The title is the only editable conversation setting.
+
+### Deleting
+
+Open the conversation's **...** menu, choose **Delete**, and confirm. Deletion removes the conversation and its messages and cannot be undone.
+
+### Searching
+
+Enter a term in the agent chat page's conversation controls to filter that agent's recent conversations. Search matches conversation title or ID; message content is not searched.
+
+### Logs Page
+
+The app's **Logs** page shows conversations by time and search term, and displays variables, model, Token, response time, reasoning, and knowledge sources.
 
 <Callout type="warn">
   The current implementation has no archiving, multi-user collaboration comments, or PDF export flow. Do not treat deletion as archiving; deletion cannot be undone.
 </Callout>
 
-Related: [Streaming events](/api/streaming), [Conversations API](/api/conversations).
+## Best Practices
+
+### Writing Effective Prompts
+
+**✅ Do:**
+```
+Good: "What are the steps to reset my password in the
+admin dashboard?"
+
+Good: "Summarize the key points from the Q3 report
+about revenue growth"
+
+Good: "Compare the features of Plan A and Plan B in
+a table format"
+```
+
+**❌ Don't:**
+```
+Bad: "password?"
+Bad: "tell me everything"
+Bad: "help"
+```
+
+**Tips:**
+- Be specific about what you want
+- Specify format if needed (table, list, summary)
+- Provide relevant context
+- Ask one thing at a time for complex topics
+
+### Managing Context
+
+**Start a new conversation when:**
+- Switching to an unrelated topic
+- The agent seems confused about context
+- You want a fresh start
+
+**Continue a conversation when:**
+- Asking follow-up questions
+- Building on previous answers
+- Maintaining context is important
+
+### Using Knowledge Bases Effectively
+
+**✅ Do:**
+- Ask specific questions about documents
+- Request sources: "According to the manual..."
+- Mention document names if known
+- Follow up for clarification
+
+**❌ Don't:**
+- Ask about information not in the knowledge base
+- Expect the agent to know real-time information
+- Assume all documents are indexed
+
+For detailed context management, see [Memory and Context](./memory).
+
+## Troubleshooting
+
+### Agent Not Responding
+
+**Problem**: No response after sending a message
+
+**Solutions:**
+1. Check your internet connection
+2. Refresh the page
+3. Check if the agent is published
+4. Try a different agent
+5. Contact the administrator
+
+### Slow Responses
+
+**Problem**: Agent takes a long time to respond
+
+**Solutions:**
+1. Check your internet speed
+2. Simplify your question
+3. Try during off-peak hours
+4. Contact the administrator about server load
+
+### Irrelevant Responses
+
+**Problem**: Agent gives unrelated answers
+
+**Solutions:**
+1. Rephrase your question more clearly
+2. Provide more context
+3. Start a new conversation (clear context)
+4. Check if the agent has a relevant knowledge base
+5. Try a different agent specialized for your topic
+
+### Sources Not Showing
+
+**Problem**: No source citations in RAG mode
+
+**Solutions:**
+1. Verify the agent has a knowledge base connected
+2. Check the agent's RAG mode is not "off"
+3. Ask more specific questions
+4. Verify documents are indexed (status: completed)
+
+### File Upload Fails
+
+**Problem**: Cannot upload files
+
+**Solutions:**
+1. Check file size (must be under 10 MB)
+2. Verify the file format is supported
+3. Check if the agent allows file uploads
+4. Try a different file
+5. Contact the administrator
+
+Related: [Streaming events](/api/streaming), [Conversations API](/api/conversations), [Attachments and Media](./media), [Memory and Context](./memory).

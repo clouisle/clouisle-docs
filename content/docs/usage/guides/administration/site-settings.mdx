@@ -6,18 +6,460 @@ icon: MonitorCog
 
 站点设置决定未登录页面、认证流程、资源限制和运行时策略。只有具备相应 `admin:settings:*` 权限或超级管理员身份的用户才能看到对应标签。
 
-## 设置分区
+## 访问系统设置
 
-- **常规**：站点名称、描述、URL、图标、默认语言、认证页布局、主题模式和品牌展示。
-- **安全**：注册开关、审批、邮箱验证、密码策略、会话、登录尝试、验证码和 TOTP。
-- **通知渠道**：SMTP、钉钉、企业微信、飞书、Webhook、Slack。
-- **存储**：本地文件系统或对象存储。
-- **SSO**：单点登录连接。
+1. 以管理员身份登录。
+2. 前往**管理后台** > **站点设置**（侧边栏「设置」分区）。
+3. 从设置子导航选择分类。
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/site-settings-navigation.png" alt="站点设置导航" />
-  <figcaption>站点设置导航</figcaption>
-</figure>
+设置分类：
+
+- **常规**（`/site-settings`）
+- **安全**（`/site-settings/security`）
+- **通知渠道**（`/site-settings/notifications`）
+- **存储**（`/site-settings/storage`）
+- **SSO**（`/site-settings/sso`）
+
+设置以键值形式存储，通过 `GET /api/v1/admin/site-settings` 暴露（单键：`GET/PUT /api/v1/admin/site-settings/{key}`，批量更新：`PUT /api/v1/admin/site-settings`）。查看需要 `admin:settings:read`；更新需要 `admin:settings:update`。
+
+## 常规设置
+
+### 站点信息
+
+配置站点名称、URL、描述、图标、默认语言和认证页布局：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `site_name` | string | `Clouisle` | 站点名称 |
+| `site_url` | string | 空 | 站点 URL |
+| `site_description` | string | 空 | 站点描述 |
+| `site_icon` | string | 空 | 站点图标 URL |
+| `default_language` | `en` 或 `zh` | `en` | 默认语言 |
+| `auth_page_layout` | `centered` 或 `split` | `centered` | 认证页布局 |
+
+更新站点信息：前往**设置** > **常规**，修改字段后点击**保存更改**。
+
+### 主题与显示
+
+配置主题模式、主色、品牌展示和界面元素：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `theme_mode` | `light`、`dark` 或 `system` | `light` | 主题模式 |
+| `theme_primary_color` | string | `#3B82F6` | 主题主色 |
+| `theme_branding_display` | `full`、`name_only`、`icon_only` 或 `hidden` | `full` | 品牌展示 |
+
+还可自定义更多颜色令牌（主色前景、背景、卡片、侧边栏、导航栏、强调色、图表色等）。
+
+更新品牌：前往**设置** > **常规**，调整主题模式和颜色令牌后点击**保存更改**。
+
+### 语言设置
+
+配置站点默认语言和多语言支持：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `default_language` | `en` 或 `zh` | `en` | 站点默认语言 |
+
+用户可在个人设置中切换界面语言。语言切换后，界面文本和通知消息将使用对应语言的翻译。
+
+### 法律与合规
+
+配置 ICP 备案、服务条款和隐私政策：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `icp_record_number` | string | 空 | ICP 备案号 |
+| `icp_record_url` | string | 空 | ICP 备案链接 |
+| `terms_enabled` | boolean | `false` | 启用服务条款 |
+| `terms_url` | string | 空 | 服务条款链接 |
+| `terms_text` | string | 空 | 服务条款文本（Markdown，无链接时使用） |
+| `privacy_enabled` | boolean | `false` | 启用隐私政策 |
+| `privacy_url` | string | 空 | 隐私政策链接 |
+| `privacy_text` | string | 空 | 隐私政策文本（Markdown，无链接时使用） |
+| `require_terms_acceptance_on_register` | boolean | `false` | 注册时要求接受条款 |
+
+服务条款和隐私政策仅在启用且提供 URL 或文本时显示。注册接受仅在 `require_terms_acceptance_on_register` 为 `true` 时强制。
+
+## 安全设置
+
+### 注册
+
+配置注册、审批、邮箱验证和账户删除策略：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `allow_registration` | boolean | `true` | 允许注册 |
+| `require_approval` | boolean | `true` | 新用户需管理员审批 |
+| `email_verification` | boolean | `true` | 邮箱验证 |
+| `allow_account_deletion` | boolean | `true` | 允许删除账户 |
+| `default_role_id` | string | Viewer 角色 | 默认角色（初始化时自动设置） |
+| `default_team_id` | string | 空 | 默认团队 |
+| `default_team_role` | `viewer`、`member` 或 `admin` | `member` | 默认团队角色 |
+
+### 密码策略
+
+配置密码复杂度要求：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `min_password_length` | number | `8` | 最小密码长度 |
+| `require_uppercase` | boolean | `true` | 需要大写字母 |
+| `require_number` | boolean | `true` | 需要数字 |
+| `require_special_char` | boolean | `false` | 需要特殊字符 |
+
+<Callout type="note">没有 `require_lowercase` 设置。</Callout>
+
+密码过期配置：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `password_expiration_enabled` | boolean | `false` | 启用密码过期 |
+| `password_expiration_days` | number | `90` | 密码过期天数 |
+| `password_expiration_warning_days` | number | `7` | 过期前警告天数 |
+| `password_history_count` | number | `5` | 密码历史数量 |
+| `password_min_age_days` | number | `0` | 密码最短使用天数 |
+| `force_password_change_on_first_login` | boolean | `false` | 首次登录强制修改密码 |
+
+### 会话设置
+
+配置会话超时、登录尝试限制和验证码：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `session_timeout_days` | number | `30` | 会话超时天数 |
+| `single_session` | boolean | `false` | 仅允许单一会话 |
+| `max_login_attempts` | number | `5` | 最大登录尝试次数（超过锁定） |
+| `lockout_duration_minutes` | number | `15` | 锁定时长（分钟） |
+| `enable_captcha` | boolean | `false` | 启用验证码 |
+
+<Callout type="note">没有「最大并发会话数」计数器。相关控制是 `single_session` 布尔值，会话有效期为 `session_timeout_days`（默认 30 天）。</Callout>
+
+### 双因素认证
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `require_totp` | boolean | `false` | 要求所有用户启用 TOTP |
+
+管理员 TOTP 统计和每用户状态/禁用端点在 `/api/v1/admin/totp` 下可用。
+
+### 模型端点白名单
+
+保存或测试具有新 API 端点的模型前：
+
+1. 前往**设置** > **安全**。
+2. 将端点 Origin 添加到**模型端点白名单**，每行一个。
+3. 仅包含 scheme、主机名和非默认端口，例如 `https://gateway.example.com` 或 `http://ollama.internal:11434`。
+4. 保存安全设置，然后再次保存或测试模型。
+
+<Callout type="warn" title="安全">
+远程端点优先使用 HTTPS。仅对可信私有网络上的端点使用 HTTP，因为 API 密钥和模型流量在没有传输加密的情况下发送。
+</Callout>
+
+匹配是精确的。URL 路径被忽略，但 scheme、主机名和端口必须全部匹配。移除 Origin 会阻止后续的模型发现、连接测试和运行时请求，无需重启服务。
+
+## 通知设置
+
+### SMTP（邮件）
+
+配置邮件发送：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `smtp_enabled` | boolean | `true` | 启用 SMTP |
+| `smtp_host` | string | `smtp.gmail.com` | SMTP 主机 |
+| `smtp_port` | number | `587` | SMTP 端口 |
+| `smtp_encryption` | `none`、`ssl` 或 `tls` | `tls` | 加密方式 |
+| `smtp_username` | string | 空 | SMTP 用户名 |
+| `smtp_password` | string | 空 | SMTP 密码 |
+| `email_sender_name` | string | `Clouisle` | 发件人名称 |
+| `email_sender_address` | string | 空 | 发件人地址 |
+
+更新 SMTP 设置：前往**设置** > **通知渠道**，输入 SMTP 详情，设置发件人名称和地址，点击**测试**（`POST /api/v1/admin/site-settings/test-email`），然后点击**保存更改**。
+
+### 外部通知渠道
+
+以下渠道可单独启用和配置（各有自己的设置页分区和测试端点）：
+
+| 渠道 | 关键设置 | 测试端点 |
+| --- | --- | --- |
+| 钉钉 | `dingtalk_enabled`、类型（`webhook` 或 `app`）、Webhook URL/Secret 或 App Key/Secret/Agent ID | `/test-dingtalk` |
+| 企业微信 | `wechat_enabled`、类型（`webhook` 或 `app`）、Webhook URL 或 Corp ID/App ID/Secret | `/test-wechat` |
+| 飞书 | `feishu_enabled`、类型（`webhook` 或 `app`）、Webhook URL/Secret 或 App ID/Secret | `/test-feishu` |
+| Slack | `slack_enabled`、Incoming Webhook URL | `/test-slack` |
+| Webhook | `webhook_enabled`、URL、方法、自定义请求头、正文模板、HMAC Secret | `/test-webhook` |
+
+### 自动通知
+
+**自动通知**页（`GET/PUT /api/v1/admin/site-settings/auto-notifications`）控制哪些事件类型创建通知以及哪些外部渠道接收通知。详见[通知与外部渠道](./notifications.mdx)。
+
+### 邮件模板
+
+<Callout type="note">未实现 / Roadmap。没有邮件模板编辑器。通知消息由内置 i18n 翻译生成（`app/core/i18n.py`）。</Callout>
+
+## 通知偏好
+
+Clouisle 的通知投递由管理员全局配置——没有每用户通知偏好系统。普通用户无法自定义接收哪些通知。
+
+> **注意：** 每用户偏好（邮件频率/摘要、每类型切换、免打扰时段、推送通知、通知分组、优先级级别、自定义规则和用户 Webhook 端点）**未实现**。
+
+### 应用内通知
+
+每个用户在通知中心和 `/app/notifications` 查看通知。通知范围分为：
+
+- **全局**：所有用户可见
+- **团队**：目标团队成员可见
+- **用户**：特定用户可见
+
+### 外部渠道（管理员配置）
+
+管理员为自动通知类型全局配置外部投递渠道。可用渠道：
+
+- **邮件**（需 SMTP 配置）
+- **钉钉**
+- **企业微信**
+- **飞书**
+- **Webhook**（通用 Webhook）
+- **Slack**
+
+渠道仅在全局配置中选中且管理员启用/配置时发送通知。未配置渠道时，通知仅停留在应用内。
+
+### 管理员可配置项
+
+管理员选择启用哪些自动事件类型（`enabled_types`）。默认启用以下类型：
+
+| 类型 | 事件 |
+| --- | --- |
+| `team.member_added` / `team.member_removed` | 团队成员变更 |
+| `team.role_changed` / `team.ownership_transferred` | 角色/所有权变更 |
+| `team.model_granted` / `team.model_revoked` | 团队模型访问变更 |
+| `user.activated` / `user.deactivated` | 账户状态变更 |
+| `user.password_reset` | 管理员重置密码 |
+| `user.pending_approval` | 新注册待审批 |
+| `kb.doc_indexed` / `kb.doc_failed` | 知识库文档处理 |
+| `workflow.run_failed` | 工作流执行失败 |
+| `apikey.expiring` / `apikey.expired` | API Key 生命周期 |
+| `security.login_anomaly` | 新地点/设备登录 |
+| `security.account_locked` | 多次失败后账户锁定 |
+| `security.password_changed` | 密码变更 |
+
+其他类型（如 `workflow.run_success`、`agent.published`、`agent.unpublished`、`password.expiring` 等）存在并可启用。
+
+管理员在**管理后台** > **站点设置** > **通知渠道** > **自动通知**（以及对应的渠道标签：邮件、钉钉、企业微信、飞书、Webhook、Slack）中配置。
+
+### 用户可执行操作
+
+作为用户可以：
+
+- 在通知中心和 `/app/notifications` 查看通知
+- 将单条通知标记为已读
+- 将所有通知标记为已读
+- 筛选通知列表（按类型、级别、范围、未读和搜索）
+
+详见[通知与外部渠道](./notifications.mdx)。
+
+### 通知 API
+
+- `GET /api/v1/notifications` — 列出可见通知（筛选：scope、type、level、unread、search）
+- `GET /api/v1/notifications/unread-count` — 未读数量
+- `POST /api/v1/notifications/read` — 标记通知已读（`notification_ids` 或 `mark_all`）
+- 管理端点（`/api/v1/admin/notifications`）— 创建/删除通知，管理自动通知配置
+
+<Callout type="note">没有 `PATCH /api/v1/notifications/{id}` 或用户级 `DELETE /api/v1/notifications/{id}`——读取是批量操作，删除仅管理员可执行。</Callout>
+
+### 最佳实践
+
+**用户：**
+- 定期查看通知中心
+- 立即查看安全通知
+
+**管理员：**
+- 仅在配置完渠道（SMTP、钉钉等）后再启用外部渠道
+- 谨慎选择启用类型，避免通知噪音
+
+## 存储设置
+
+### 文件存储
+
+配置存储后端和知识库上传大小限制：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `upload_storage_backend` | `local` 或 `object` | `local` | 上传存储后端 |
+| `kb_document_max_upload_size_mb` | number (1-1024) | `50` | 知识库单文件上传大小限制（MB） |
+
+更新存储设置：前往**设置** > **存储**，配置存储后端和最大上传大小后点击**保存更改**。
+
+<Callout type="note">不支持 Azure Blob 存储。没有公共对象存储 URL 设置，也没有存储清理功能。</Callout>
+
+### 对象存储（S3 兼容）
+
+配置 S3 兼容对象存储：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `upload_storage_backend` | `object` | - | 上传存储后端设为对象存储 |
+| `object_storage_endpoint` | string | 空 | 对象存储端点 |
+| `object_storage_bucket` | string | 空 | 存储桶名称 |
+| `object_storage_region` | string | 空 | 区域 |
+| `object_storage_access_key` | string | 空 | Access Key |
+| `object_storage_secret_key` | string | 空 | Secret Key |
+| `object_storage_force_path_style` | boolean | `true` | 使用路径样式 URL |
+| `object_storage_secure` | boolean | `true` | 使用 HTTPS |
+
+配置对象存储：前往**设置** > **存储**，输入端点、存储桶、区域、Access Key 和 Secret Key，配置路径样式和 HTTPS 选项后点击**保存更改**。
+
+### 审计日志保留
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `audit_log_retention_days` | number (30-3650) | `365` | 审计日志保留天数 |
+| `audit_log_archive_path` | string | 空 | 审计日志归档路径 |
+
+超过保留期限的日志被归档（手动触发）到归档路径下的月度 JSON 文件，然后删除。详见[审计日志管理](./audit-logs.mdx)。
+
+## SSO 设置
+
+### 全局 SSO 行为
+
+在**设置** > **安全**（SSO 分区）或**设置** > **SSO** 中配置：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `sso_enabled` | boolean | `false` | 启用 SSO |
+| `sso_allow_password_login` | boolean | `true` | 允许密码登录 |
+| `sso_auto_create_users` | boolean | `true` | 自动创建用户 |
+| `sso_require_approval` | boolean | `false` | 需要审批 |
+| `sso_match_by_email` | boolean | `true` | 通过邮箱匹配 |
+
+### SSO 提供商
+
+SSO 提供商在**设置** > **SSO** 中管理。提供商通过名称和协议通用创建——没有预设选择器（Google、GitHub、Azure AD 等）；每个提供商的配置和属性映射需手动输入。详见[配置单点登录](./sso.mdx)。
+
+## 团队设置
+
+团队管理员可以管理团队成员、模型授权和团队信息。团队用于分组用户和资源（Agent、工作流和知识库）。
+
+> **注意：** 团队 slug、可见性、邀请流程、加入请求、成员限制、每团队资源限制、每团队安全/API 设置、计费、数据保留、自定义域名和品牌**未实现**。
+
+### 访问团队管理
+
+1. 打开平台**团队切换器**。
+2. 选择**管理团队**。
+3. 团队管理页在 `/teams` 打开。
+4. 选择团队查看**成员**标签，或（对授权经理）**模型授权**标签。
+
+**所需权限：** 团队管理员或所有者（用于编辑和成员/模型管理）。
+
+### 团队信息
+
+仅可编辑三个字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| **名称** | 团队显示名称（必填） |
+| **描述** | 可选描述（最多 500 字符） |
+| **头像 URL** | 可选头像图片 URL |
+
+> **注意：** 没有团队 slug——团队通过 ID 标识，在 UI 中通过名称引用。
+
+### 模型授权
+
+团队管理员和所有者可以管理团队可使用哪些已启用的模型：
+
+1. 打开**管理团队**（`/teams`）并选择团队。
+2. 打开**模型授权**。
+3. 选择**授权模型**并选择已启用的模型，或撤销现有授权。
+4. 保存授权变更。
+
+授权后的模型在团队的 Agent 和知识库配置需要模型时可用。
+
+### 成员管理
+
+成员必须已有 Clouisle 账户；没有邮箱邀请或加入请求流程。
+
+#### 添加成员
+
+1. 打开**管理团队**（`/teams`）并选择团队。
+2. 打开**成员**标签。
+3. 点击**添加成员**。
+4. 选择现有用户和角色（管理员、成员或观察者——所有者不能在此分配）。
+5. 确认。
+
+仅团队所有者或管理员可以添加成员。所有者不能添加另一成员为所有者。
+
+#### 改变成员角色
+
+1. 在成员列表中找到成员
+2. 选择**「改变角色」**
+3. 选择新角色（管理员、成员或观察者）
+
+仅团队所有者可以改变成员角色（所有者自身除外）。
+
+#### 移除成员
+
+1. 在成员列表中找到成员
+2. 点击**「移除」**
+3. 确认
+
+所有者不能被其他成员移除。
+
+#### 离开团队
+
+1. 打开**管理团队**（`/teams`）并选择团队。
+2. 打开**成员**。
+3. 确认
+
+所有者在转让所有权前不能离开。
+
+#### 转让所有权
+
+1. 打开**管理团队**（`/teams`）并选择团队。
+2. 打开**成员**。
+3. 确认转让
+
+前所有者变为管理员，新所有者获得完整控制权。
+
+### 团队角色
+
+角色固定：**所有者**、**管理员**、**成员**、**观察者**。没有每团队自定义角色。参见[团队与成员](./teams.mdx)了解完整权限矩阵。
+
+### 未实现的功能
+
+以下团队级功能**未实现**：
+
+- 团队 slug / 自定义 URL
+- 团队可见性（私有/内部/公开）和发现
+- 邀请过期、需要审批、允许的邮箱域名
+- 成员限制
+- 资源限制（Agent、知识库、工作流、对话）
+- 每团队密码/2FA/会话/IP 策略
+- 团队 API 设置、API Key 策略、速率限制
+- 计费 / 订阅 / 支付方式
+- 数据保留 / 导出 / 删除策略
+- 审计告警、自定义域名、品牌
+
+参见：
+- [团队与成员](./teams.mdx) — 团队管理详细指南
+- [角色与权限](./roles-permissions.mdx) — 角色和权限
+
+## 功能标志与其他设置
+
+<Callout type="note">未实现 / Roadmap。以下**不是**可配置的系统设置：</Callout>
+
+- 功能标志（启用/禁用 Agent、工作流、知识库等）
+- 邮件模板
+- 安全头（HSTS、CSP、X-Frame-Options）
+- CORS 配置
+- IP 白名单
+- API 速率限制
+- 作为通用系统功能的 Webhook 配置
+- 第三方集成（Salesforce、HubSpot、Slack 应用、Google Analytics/Mixpanel 等分析）
+- 维护模式
+- 数据库连接池 / 缓存设置
+- 设置导出/导入和重置为默认值工作流
+
+模型端点通过**模型端点白名单**（安全设置）限制，而非全局集成注册表。
 
 ## 关键默认值
 

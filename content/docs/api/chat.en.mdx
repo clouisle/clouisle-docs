@@ -4,7 +4,23 @@ description: Send Agent messages and receive text, sources, tools, and media res
 icon: MessagesSquare
 ---
 
-## Endpoints
+The Chat API allows you to send messages to agents, stream responses, manage runs, and handle conversations. Chat endpoints live under `/api/v1/agents`; conversation-management endpoints live under `/api/v1/conversations` and `/api/v1/agents/conversations`.
+
+## Authentication
+
+`POST /api/v1/agents/{agent_id}/chat` and `/chat/stream` support either a JWT bearer token or an API key. Conversation management and message-version routes require the authenticated JWT user who owns the conversation.
+
+**Required scopes:**
+- `agent:read` - View agents
+- `agent:chat` - Chat with agents
+- `conversation:read` - List and view conversations
+- `conversation:delete` - Delete conversations
+
+<Callout type="info">
+The Agent must be published. The API Key needs the matching permission, and if bound to an Agent, it can only access IDs in the allowlist. The Agent's attachment limits, tool iteration caps, and model quotas still apply.
+</Callout>
+
+## Endpoint Overview
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -15,25 +31,588 @@ icon: MessagesSquare
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | Edit a user message and create a branch |
 | GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | Query message versions |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | Switch version |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | Run status (owner-scoped) |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | Replay buffered events after N |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up (`delivery: steer / follow_up / auto`) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | Submit structured answers for a waiting `ask_user` call |
+| GET | `/api/v1/conversations` | List conversations |
+| GET | `/api/v1/conversations/{conversation_id}` | Get a conversation and its messages |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | Update the conversation title |
+| DELETE | `/api/v1/conversations/{conversation_id}` | Delete a conversation |
 
-## Request Body
+## Send Message
 
-`message` is required; `conversation_id` can be `null` on the first call; `variables` is for variables defined by the Agent; `images` and `file_urls` are for attachments. Image objects should contain at least a URL; file URL objects require `url`, `filename`, `mime_type`, and `size`.
+Send a message to an agent and receive a response.
+
+### Endpoint
+
+```
+POST /api/v1/agents/{agent_id}/chat
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agent_id` | string | Yes | Agent UUID |
+
+### Request Body
 
 ```json
 {
-  "message": "Please summarize the refund rules based on the materials",
-  "conversation_id": null,
-  "variables": {"customer_type": "enterprise"},
-  "images": [],
-  "file_urls": []
+  "message": "What are your business hours?",
+  "conversation_id": "conv-123",
+  "files": [
+    {
+      "name": "document.pdf",
+      "url": "https://example.com/document.pdf",
+      "type": "application/pdf"
+    }
+  ],
+  "file_urls": [
+    {
+      "asset_id": "asset-456",
+      "url": "https://your-domain.com/api/v1/upload/files/asset-456",
+      "filename": "report.pdf"
+    }
+  ],
+  "variables": {
+    "customer_tier": "premium"
+  }
 }
 ```
 
-## Non-Streaming Response
+### Request Fields
 
-A successful response's `data` contains conversation/message identifiers, text, RAG context, tool calls, media results, Token usage, and elapsed time. Non-streaming suits short responses; SSE is recommended for long tasks.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `message` | string | Yes | User message (max 32000 chars) |
+| `images` | array | No | Images for vision (name, url, type) |
+| `files` | array | No | Parsed files for upload (deprecated, use `file_urls`) |
+| `file_urls` | array | No | Raw uploaded Asset metadata (`asset_id`, `url`, `filename`) |
+| `conversation_id` | string | No | Conversation UUID (creates new if not provided) |
+| `variables` | object | No | Variable values for the chat input form |
+| `history_override` | array | No | Override conversation history (used for version switching/regeneration) |
 
-## Access Boundaries
+### Request Example
 
-The Agent must be published. The API Key needs the matching permission, and if bound to an Agent, it can only access IDs in the allowlist. The Agent's attachment limits, tool iteration caps, and model quotas still apply.
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are your business hours?",
+    "conversation_id": "conv-123"
+  }'
+```
+
+### Non-Streaming Response
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "conversation_id": "conv-123",
+    "message": {
+      "id": "msg-456",
+      "conversation_id": "conv-123",
+      "role": "assistant",
+      "content": "Our business hours are Monday-Friday, 9 AM to 5 PM EST.",
+      "tool_calls": [],
+      "tool_name": null,
+      "model_used": "gpt-4",
+      "token_usage": {
+        "prompt": 150,
+        "completion": 25,
+        "total": 175
+      },
+      "duration_ms": 2300,
+      "rag_context": [
+        {
+          "document_id": "doc-789",
+          "document_name": "Business Hours Policy",
+          "chunk_id": "chunk-012",
+          "content": "Business hours: Monday-Friday, 9 AM to 5 PM EST",
+          "score": 0.95
+        }
+      ],
+      "created_at": "2026-02-11T16:00:00Z",
+      "version_number": 1,
+      "version_count": 1
+    },
+    "usage": {
+      "prompt": 150,
+      "completion": 25,
+      "total": 175
+    }
+  },
+  "msg": "success"
+}
+```
+
+### Streaming Response
+
+Streaming is a separate endpoint; there is no `stream` flag on `POST /chat`.
+
+**Endpoint:** `POST /api/v1/agents/{agent_id}/chat/stream`
+
+The request body is the same `ChatRequest` payload. The response is sent as Server-Sent Events (SSE).
+
+**Content-Type**: `text/event-stream`
+
+**Event format:**
+
+```
+event: message_start
+data: {"conversation_id": "conv-123", "message_id": "msg-456"}
+
+event: content_delta
+data: {"delta": "Our"}
+
+event: content_delta
+data: {"delta": " business"}
+
+event: content_delta
+data: {"delta": " hours"}
+
+event: rag_context
+data: {"contexts": [{"document_name": "FAQ", "content": "...", "score": 0.95}]}
+
+event: message_end
+data: {"usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 175}, "timing": {"first_token_ms": 320, "duration_ms": 2300, "tokens_per_second": 10.9}}
+```
+
+See [SSE Streaming](./streaming) for details.
+
+## Durable Runs and Control
+
+Chat execution is backed by a durable `AgentRun` so a browser disconnect never stops the model loop. The streaming endpoints stream the same SSE events as before; additionally, run-scoped events carry an envelope with `run_id`, `sequence`, `timestamp`, `round_id`, `message_id` and `type` so reconnects resume without duplicates (`after_sequence`).
+
+Additional run events: `run_start` (run identity/status), `run_status` (queued/running/stopping transitions), `input_accepted` (a queued steering/follow-up was committed), `run_end` (exactly one terminal event with `completed | stopped | failed | interrupted`).
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | Run status (owner-scoped) |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | Replay buffered events after N |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up (`delivery: steer / follow_up / auto`) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | Submit structured answers for a waiting `ask_user` call |
+
+Submit answers for a waiting `ask_user` call:
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
+```
+
+**Request body:**
+```json
+{
+  "tool_call_id": "call-123",
+  "answers": {
+    "deployment_target": "cloud"
+  },
+  "skipped": false
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `tool_call_id` | string | Yes | Pending tool-call ID from the `run_status` waiting event |
+| `answers` | object | No | ID-keyed answer map; each value is the chosen option or a custom string |
+| `skipped` | boolean | No | Explicitly skip every question (sends `{ "answers": {}, "skipped": true }`) |
+
+The run must be in `waiting` status and the `tool_call_id` must match the pending interaction. On success the run resumes from its paused state.
+
+While a run is active, the composer can queue steering (mid-work) or follow-up (final boundary) instead of being disabled; stop sends a server command and waits for the terminal `run_end` event.
+
+## Regenerate Response
+
+Regenerate an assistant message. This endpoint lives under the agents router and is addressed by `agent_id` + `message_id` (no `conversation_id` in the path).
+
+### Endpoint
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/regenerate
+```
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agent_id` | string | Yes | Agent UUID |
+| `message_id` | string | Yes | Message UUID to regenerate |
+
+### Request Body
+
+```json
+{
+  "variables": {}
+}
+```
+
+### Request Example
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/agents/agent-123/messages/msg-002/regenerate" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "variables": {}
+  }'
+```
+
+### Response
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "conversation_id": "conv-123",
+    "message": {
+      "id": "msg-003",
+      "conversation_id": "conv-123",
+      "role": "assistant",
+      "content": "Our business hours are Monday through Friday, from 9:00 AM to 5:00 PM Eastern Standard Time.",
+      "token_usage": {
+        "total": 180
+      },
+      "created_at": "2026-02-11T16:15:00Z",
+      "version_number": 2,
+      "version_count": 2
+    },
+    "usage": {
+      "total": 180
+    }
+  },
+  "msg": "success"
+}
+```
+
+## Edit User Message and Regenerate (SSE)
+
+Edit a user message, create a new version, and stream the regenerated reply:
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/edit/stream
+```
+
+Request body:
+
+```json
+{"content": "What are your holiday hours?"}
+```
+
+Only user messages can be edited. The response is an authenticated SSE stream (`text/event-stream`) using the chat stream event format; the final `message_end` event includes `edited_version_number` and `edited_version_count`.
+
+## Message Versions
+
+### List Versions
+
+List the versions in a message's version group. This route requires the authenticated owner of the conversation.
+
+```
+GET /api/v1/agents/{agent_id}/messages/{message_id}/versions
+```
+
+The `200 OK` response is an array of message-version objects containing `id`, `version_number`, `is_active`, `content`, and `created_at`.
+
+### Switch Version
+
+Activate a different version in the same message group. Versions after the selected message are deactivated because they were based on the previous branch.
+
+```
+POST /api/v1/agents/{agent_id}/messages/{message_id}/switch-version
+```
+
+Request body:
+
+```json
+{"version_id": "msg-version-003"}
+```
+
+The `200 OK` response returns the selected `MessageOut`, including version information. The authenticated user must own the conversation.
+
+## Conversation Management
+
+### List Conversations
+
+```
+GET /api/v1/conversations
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `page` | integer | No | 1 | Page number |
+| `page_size` | integer | No | 20 | Items per page (max: 100) |
+| `team_id` | string | No | - | Filter by team |
+| `agent_id` | string | No | - | Filter by agent ID |
+| `user_id` | string | No | - | Filter by user (admin/dashboard access only) |
+| `search` | string | No | - | Search by title |
+| `untitled_only` | boolean | No | false | Show only untitled conversations |
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "conv-123",
+        "agent_id": "agent-456",
+        "agent_name": "Customer Support Agent",
+        "agent_icon": "🤖",
+        "title": "Business Hours Inquiry",
+        "message_count": 5,
+        "created_at": "2026-02-11T16:00:00Z",
+        "updated_at": "2026-02-11T16:05:00Z",
+        "user_id": "user-123",
+        "user_name": "alice"
+      }
+    ],
+    "total": 42,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+### Get Conversation
+
+```
+GET /api/v1/conversations/{conversation_id}
+```
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "conv-123",
+    "agent_id": "agent-456",
+    "agent_name": "Customer Support Agent",
+    "agent_icon": "🤖",
+    "title": "Business Hours Inquiry",
+    "variables": {},
+    "message_count": 5,
+    "token_usage": 875,
+    "created_at": "2026-02-11T16:00:00Z",
+    "updated_at": "2026-02-11T16:05:00Z",
+    "messages": [
+      {
+        "id": "msg-001",
+        "conversation_id": "conv-123",
+        "role": "user",
+        "content": "What are your business hours?",
+        "created_at": "2026-02-11T16:00:00Z",
+        "version_number": 1,
+        "version_count": 1
+      },
+      {
+        "id": "msg-002",
+        "conversation_id": "conv-123",
+        "role": "assistant",
+        "content": "Our business hours are Monday-Friday, 9 AM to 5 PM EST.",
+        "tool_calls": [],
+        "rag_context": [
+          {
+            "document_id": "doc-789",
+            "document_name": "Business Hours Policy",
+            "score": 0.95
+          }
+        ],
+        "created_at": "2026-02-11T16:00:02Z",
+        "version_number": 1,
+        "version_count": 1
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="warn">
+Paginated `GET /conversations/{id}/messages` is not implemented / Roadmap. Messages are included inline in `GET /api/v1/conversations/{conversation_id}`.
+</Callout>
+
+### Update Conversation
+
+Update conversation details (e.g. rename). This endpoint lives under the agents router.
+
+```
+PATCH /api/v1/agents/conversations/{conversation_id}
+```
+
+**Request body:**
+```json
+{
+  "title": "Updated Conversation Title"
+}
+```
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "conv-123",
+    "title": "Updated Conversation Title",
+    "updated_at": "2026-02-11T16:10:00Z"
+  },
+  "msg": "Conversation updated successfully"
+}
+```
+
+### Delete Conversation
+
+Delete a conversation permanently.
+
+```
+DELETE /api/v1/conversations/{conversation_id}
+```
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Conversation deleted successfully"
+}
+```
+
+> For user-scoped conversation endpoints (e.g. `GET /api/v1/agents/conversations/my`), see [Conversations API](./conversations).
+
+## Error Codes
+
+| Code | Message | Description |
+| --- | --- | --- |
+| `6200` | Agent not found | Agent does not exist |
+| `6210` | Conversation not found | Conversation does not exist |
+| `6211` | Message not found | Message does not exist |
+| `3000` | Permission denied | Insufficient permissions |
+| `1001` | Validation failed | Invalid request data |
+
+<Callout type="warn">
+No per-endpoint rate limits are implemented. There is no rate-limit middleware on these endpoints.
+</Callout>
+
+For full error handling and retry strategies, see [API Errors and Retries](./errors).
+
+## Best Practices
+
+### Message Handling
+
+**✅ Do:**
+- Keep messages concise and clear
+- Provide context when needed
+- Use `conversation_id` to maintain context
+- Handle streaming for better UX
+- Implement retry logic for failures
+
+**❌ Don't:**
+- Send extremely long messages
+- Create new conversation for each message
+- Ignore error responses
+- Skip error handling
+- Spam the API
+
+### Conversation Management
+
+**✅ Do:**
+- Use descriptive conversation titles
+- Clean up old conversations
+- Monitor conversation count
+
+**❌ Don't:**
+- Create unnecessary conversations
+- Keep all conversations forever
+- Forget to delete test conversations
+
+## Code Examples
+
+### Python
+
+```python
+import requests
+
+def chat_with_agent(agent_id, message, conversation_id=None):
+    """Send message to agent."""
+    url = f"https://your-domain.com/api/v1/agents/{agent_id}/chat"
+    headers = {
+        "Authorization": "Bearer YOUR_TOKEN",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "message": message,
+        "conversation_id": conversation_id
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+    result = response.json()
+
+    if result['code'] == 0:
+        return result['data']
+    else:
+        raise Exception(f"Error: {result['msg']}")
+
+# Usage
+response = chat_with_agent(
+    agent_id="agent-123",
+    message="What are your business hours?",
+    conversation_id="conv-123"
+)
+
+print(f"Response: {response['message']['content']}")
+print(f"Conversation ID: {response['conversation_id']}")
+```
+
+### JavaScript
+
+```javascript
+async function chatWithAgent(agentId, message, conversationId = null) {
+  const url = `https://your-domain.com/api/v1/agents/${agentId}/chat`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer YOUR_TOKEN',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message: message,
+      conversation_id: conversationId,
+    }),
+  });
+
+  const result = await response.json();
+
+  if (result.code === 0) {
+    return result.data;
+  } else {
+    throw new Error(result.msg);
+  }
+}
+
+// Usage
+const response = await chatWithAgent(
+  'agent-123',
+  'What are your business hours?',
+  'conv-123'
+);
+
+console.log('Response:', response.message.content);
+console.log('Conversation ID:', response.conversation_id);
+```
+
+## Related Documentation
+
+- [SSE Streaming](./streaming) - Streaming responses
+- [API Errors and Retries](./errors) - Error details
+- [Conversations API](./conversations) - Conversation management

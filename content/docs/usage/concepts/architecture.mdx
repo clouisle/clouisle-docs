@@ -14,34 +14,72 @@ Clouisle 采用前端、后端与基础设施分层的架构：Next.js 前端负
 | 后端 | FastAPI（Python 3.13）、Tortoise ORM + asyncpg、Celery + Redis | LangChain 适配器（对话/嵌入/文本切分）；自研 `WorkflowOrchestrator` 执行工作流；LangGraph 已声明但运行时未使用；MarkItDown 做文档转换 |
 | 基础设施 | PostgreSQL 17（`pg_search` 全文检索）、Redis 7（缓存/Celery broker/限速计数）、Qdrant（向量） | 向量按嵌入维度存入独立集合（`{prefix}_{dimension}`），维度由所选嵌入模型决定 |
 
-### 请求链路
+### 请求链路与执行模型
 
-**用户请求**：
-
-```text
-浏览器 → （可选外部反代/Ingress）→ Next.js SSR → API → FastAPI → PostgreSQL → 响应
-```
-
-**聊天（RAG）**：
+#### 1. 基础请求链路
 
 ```text
-用户消息 → FastAPI → Agent 引擎 → 知识库检索 → Qdrant
-                                         ↓
-                                   LLM 适配器 → 模型提供商 → SSE 流式响应 → 前端
+浏览器 → （可选外部反代/Ingress）→ Next.js SSR (node server.js) → FastAPI API → PostgreSQL → 响应
 ```
 
-**文档处理**：
+#### 2. 对话请求流与持久化 AgentRun 生命周期
+
+Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行架构：
 
 ```text
-上传 → FastAPI → Celery 任务 → MarkItDown 提取文本 → 分块 → 嵌入 → Qdrant 存储 → 状态更新（PostgreSQL）
+用户消息 ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis 队列 (Celery default)
+                   │ (202 Accepted, run_id)                           │
+                   ▼                                                  ▼
+              SSE 流式通道                                   Celery Worker (run_agent_task)
+ (GET /api/v1/agents/{agent_id}/chat/runs/{id}/stream)                │
+                   ▲                                         获取会话排他锁 (Conversation Lock)
+                   │                                                  │
+          Redis 事件缓冲区 ◄────────────────────────────── AgentLoop ReAct 思考循环
+          (SSE Event Pub/Sub)                                         │
+                                                           ┌──────────┴──────────┐
+                                                           ▼                     ▼
+                                                    工具调用 / RAG 检索      三层上下文压缩
+                                                           │               (微压缩与宏总结)
+                                                           ▼                     │
+                                                    [ask_user 交互挂起]          ▼
+                                                    (状态: WAITING)        带水印摘要消息
 ```
 
-**工作流执行**：
+1. **持久化 AgentRun**：发起运行提交 Celery 任务并立即返回 `202 Accepted` 与 `run_id`。客户端通过 SSE（`/chat/runs/{run_id}/stream`）监听事件流，支持断线后基于 `from_sequence` 无缝重连，后台工具执行不受影响。
+2. **AgentLoop ReAct 引擎**：管理多轮迭代推理与工具调用（最大轮次 `max_iterations`、单轮超时与凭据安全注入）。
+3. **三层上下文压缩机制**：
+   - **微压缩（Micro Compaction）**：自动截断或摘要过长的工具输出和原始 base64 数据，保护 token 预算。
+   - **宏总结（Macro Compaction）**：当会话 token 超过触发预算时，在完整轮次边界启动 LLM 总结历史消息，插入带水印的 `context_summary` 消息，保留最近轮次的原始对话。
+   - **预检与恢复保护**：预留 token 缓冲空间，遇到模型提供商上下文长度超限时自动重试与兜底。
+4. **人机协同（`ask_user`）挂起与恢复**：当模型调用 `ask_user` 时，`AgentRun` 转入 `WAITING` 状态挂起。用户提交答案（`POST /chat/runs/{run_id}/answers`）后，后端使用 ORM 行锁校验并无缝恢复同一运行。
+
+#### 3. 工作流引擎执行流
 
 ```text
-触发 → FastAPI → Celery 任务 → WorkflowOrchestrator → 节点执行（LLM/工具/代码等）→ 结果存储 → SSE（实时场景）
+触发事件 / 用户输入 ──► FastAPI (POST /workflows/{id}/runs) ──► Celery 队列 (workflow)
+                                                                      │
+                                                                      ▼
+                                                           WorkflowOrchestrator
+                                                                      │
+                                                           解析 DAG 图拓扑规划
+                                                           (ExecutionPlan，过滤注释节点)
+                                                                      │
+                                                           执行节点流水线
+                                                           (LLM, Code, Condition,
+                                                            Iteration, Pause...)
+                                                                      │
+                                              ┌───────────────────────┴───────────────────────┐
+                                              ▼                                               ▼
+                                       常规节点并发执行                                人工审批挂起
+                                    (ExecutionContext 上下文)                       (状态: WAITING)
+                                              │                                               │
+                                              ▼                                               ▼
+                                         完成最终输出                                   提交反馈后恢复执行
 ```
 
+1. **拓扑规划器（`ExecutionPlan`）**：校验 DAG 依赖，规划可并行批次，自动过滤画布注释等非执行节点（`NON_EXECUTABLE_NODE_TYPES = {"comment"}`）。
+2. **模块化节点执行器**：提供 `llm`、`condition`、`code`（沙箱）、`iteration`/`loop`、`template`、`variable_aggregator`、`knowledge_retrieval`、`tool`、`agent` 与 `sub_workflow` 执行器。
+3. **暂停与恢复机制**：需要人工确认的 `pause` 节点持久化 `WorkflowPauseRequest` 并将状态设为 `WAITING`，待用户提交反馈后恢复执行。
 ### 扩展性
 
 前端与 API 无状态，可多副本水平扩展；Celery Worker 按队列（`default`、`knowledge`、`workflow`）独立扩展。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。部署拓扑与卷说明见 [部署架构](../self-host/architecture.mdx)。

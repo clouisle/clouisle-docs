@@ -4,18 +4,549 @@ description: 配置全局角色和团队作用域权限
 icon: ShieldCheck
 ---
 
-Clouisle 同时使用全局角色权限和资源作用域角色。前端根据权限隐藏菜单，后端在 API 依赖中再次校验；不要把“看不到菜单”当作安全边界。
+Clouisle 同时使用全局角色权限和资源作用域角色。前端根据权限隐藏菜单，后端在 API 依赖中再次校验；不要把"看不到菜单"当作安全边界。
 
-## 权限代码
+## 权限模型
 
-权限代码通常为 `resource:action`，例如 `agent:read`、`agent:create`、`workflow:run`、`kb:read`、`tool:execute`、`apikey:read`。管理权限使用 `admin:` 前缀，例如 `admin:model:read` 和 `admin:settings:read`。
+### 权限层级
 
-## 角色操作
+```
+系统层级（超级管理员 / 管理员仪表盘 API）
+  ├── 全局设置（admin:settings:*）
+  ├── 用户管理（admin:user:*）
+  ├── 角色与权限管理（admin:role:*、admin:permission:*）
+  ├── 团队管理（admin:team:*）
+  ├── 模型管理（admin:model:*）
+  ├── 应用管理（admin:app:*）
+  ├── 能力管理（admin:capability:*）
+  ├── 知识库管理（admin:knowledge-base:*）
+  ├── SSO 管理（admin:sso:*）
+  └── 审计日志（audit:read、audit:export）
 
-1. 超级管理员前往**角色**查看系统角色或创建自定义角色。
-2. 为角色选择权限。
-3. 把角色分配给用户，或在团队/资源作用域分配作用域角色。
-4. 使用目标用户登录测试实际菜单和 API 行为。
+团队作用域平台 API
+  ├── 团队权限（team:read/create/update/delete/manage）
+  └── 资源权限（agent:*、workflow:*、kb:*、tool:*、skill:*）
+```
+
+仪表盘权限授权超级管理员 / 管理员用户访问系统级管理 API；团队作用域权限仅授权用户在其所属团队内访问平台资源 API。团队角色映射为 `admin → Admin`、`member → Member`、`viewer → Viewer`；`Owner` 是团队所有权概念，不是权限矩阵中额外的可选成员角色。
+
+### 权限类型
+
+**仪表盘 / 管理权限（需 `admin:dashboard:access`）：**
+
+- `admin:user:*` — 用户管理
+- `admin:role:*` — 角色管理
+- `admin:permission:*` — 权限管理
+- `admin:model:*` — 模型管理
+- `admin:team:*` — 系统级团队管理
+- `admin:app:*` — 跨团队 Agent 与工作流管理
+- `admin:capability:*` — 跨团队工具与 Skill 管理
+- `admin:knowledge-base:*` — 管理台知识库管理
+- `admin:settings:read/update` — 查看 / 修改站点设置
+- `admin:sso:read/update` — 查看 / 管理 SSO
+- `admin:conversation:*` — 会话管理
+- `admin:memory:*` — 记忆记录管理
+- `admin:notification:*` — 通知管理
+- `audit:read` / `audit:export` — 查看 / 导出审计日志
+
+**团队 / 资源权限（团队隔离）：**
+
+- `team:read/create/update/delete/manage` — 团队管理
+- `agent:read/create/update/delete/publish/chat` — Agent 管理
+- `workflow:read/create/update/delete/publish/run/execute` — 工作流管理
+- `kb:read/test/create/update/delete` — 知识库管理
+- `tool:read/create/update/delete/execute` — 工具管理
+- `skill:read/create/update/delete/execute` — Skill 管理
+- `apikey:read/create/update/delete` — API Key 管理
+- `conversation:read/delete` — 会话管理
+
+<Callout type="info">
+  在管理仪表盘中，工具与 Skill 通过 **Capabilities**（`/capabilities`）访问，而非独立的 Tools 导航项。
+</Callout>
+
+完整的权限目录与侧边栏菜单映射请参阅 [权限与角色参考](/reference/permissions)。
+
+## 访问权限管理
+
+### 管理仪表盘
+
+1. 以管理员身份登录
+2. 导航至 **Admin** → **Permissions**
+3. 查看权限管理界面
+
+### 权限视图
+
+- **Roles**：预定义角色与自定义角色
+- **Users**：用户权限与角色
+- **Teams**：团队权限
+- **API Scopes**：API 访问权限
+- **Audit**：权限变更历史
+
+## 角色管理
+
+### 系统角色
+
+**超级管理员（Super Admin）：**
+
+```yaml
+名称: 超级管理员
+类型: 系统
+描述: 完全系统访问权限
+权限:
+  - "*"（所有权限）
+```
+
+**管理员（Admin）：**
+
+```yaml
+名称: 管理员
+类型: 系统
+描述: 仪表盘访问、系统读取可见性、团队作用域资源管理
+权限:
+  - admin:dashboard:access
+  - admin:user:read/create/update/delete
+  - admin:role:read
+  - admin:permission:read
+  - admin:team:read/create/update/delete
+  - admin:model:read/create/update/delete
+  - admin:app:read/create/update/delete/publish/duplicate
+  - admin:capability:read/create/update/delete/execute
+  - admin:knowledge-base:read/test/create/update/delete
+  - admin:settings:read
+  - admin:sso:read
+  - admin:conversation:read/delete
+  - admin:notification:create/delete
+  - admin:memory:read
+  - audit:read
+  - audit:export
+  # 团队作用域权限使用显式权限码，无通配权限码。
+```
+
+**成员（Member）：**
+
+```yaml
+名称: 成员
+类型: 系统
+描述: 无仪表盘访问权限的协作成员角色
+权限:
+  - team:read
+  - agent:read/create/update/chat
+  - workflow:read/create/update/run
+  - kb:read/test/create/update/delete
+  - tool:read/create/update/delete/execute
+  - skill:read/create/update/delete/execute
+  - apikey:read/create/update/delete
+  - conversation:read/delete
+```
+
+**访客（Viewer）：**
+
+```yaml
+名称: 访客
+类型: 系统
+描述: 默认只读角色，含执行权限
+权限:
+  - team:read
+  - agent:read
+  - agent:chat
+  - workflow:read
+  - workflow:run
+  - kb:read
+  - kb:test
+  - tool:read
+  - tool:execute
+  - skill:read
+  - skill:execute
+  - conversation:read
+```
+
+### 团队作用域角色与权限
+
+团队成员关系角色不是通配权限集。固定角色为 `owner`、`admin`、`member`、`viewer`；启动迁移将 `owner` 和 `admin` 映射为作用域 **Admin** 角色，`member` 映射为 **Member**，`viewer` 映射为 **Viewer**。
+
+平台权限码为显式值：
+
+| 区域 | 权限码 |
+|------|--------|
+| 团队 | `team:read`、`team:create`、`team:update`、`team:delete`、`team:manage` |
+| Agent | `agent:read`、`agent:create`、`agent:update`、`agent:delete`、`agent:publish`、`agent:chat` |
+| 工作流 | `workflow:read`、`workflow:create`、`workflow:update`、`workflow:delete`、`workflow:publish`、`workflow:run` |
+| 知识库 | `kb:read`、`kb:create`、`kb:update`、`kb:delete`、`kb:test` |
+
+使用 `team:update`/`team:delete` 进行团队变更，使用 `team:manage` 进行成员管理。不存在 `team:view` 或 `team:members` 权限码，权限注册表中平台权限也不以 `team:*` 通配符表示。
+
+全局仪表盘权限使用独立的 `admin:*` 命名空间；团队作用域角色不授予仪表盘访问权限。
+
+### 创建自定义角色
+
+1. 导航至 **Admin** → **Permissions** → **Roles**
+2. 点击 **Create Role**
+3. 填写角色详情：
+   - **Name**：角色名称
+   - **Description**：角色描述
+4. 选择权限：
+   - 浏览权限分类
+   - 勾选要包含的权限
+   - 使用分类的「全选」
+5. 审核权限
+6. 点击 **Create Role**
+
+自定义角色为全局角色（`is_system_role = false`）。权限后续可通过 `PUT /api/v1/admin/roles/{role_id}/permissions` 替换。
+
+**自定义角色示例：**
+
+```yaml
+名称: 内容管理员
+描述: 管理知识库和文档
+权限:
+  - team:read
+  - kb:create
+  - kb:read
+  - kb:update
+  - kb:delete
+  - kb:test
+  - agent:read
+  - agent:chat
+```
+
+### 编辑角色
+
+1. 导航至 **Roles**
+2. 选择角色
+3. 点击 **Edit**
+4. 修改：
+   - 角色名称
+   - 描述
+   - 权限
+5. 保存变更
+
+<Callout type="warn">
+  系统角色（超级管理员、管理员、成员、访客）不能被修改或删除。自定义角色通过 `PUT /api/v1/admin/roles/{role_id}` 和 `PUT /api/v1/admin/roles/{role_id}/permissions` 编辑（替换完整权限集）。
+</Callout>
+
+### 删除角色
+
+1. 导航至 **Roles**
+2. 选择自定义角色
+3. 点击 **Delete**
+4. 选择对该角色用户的处理方式：
+   - 分配到其他角色
+   - 移除角色（保留用户）
+5. 确认删除
+
+## 用户权限
+
+### 查看用户权限
+
+1. 导航至 **Admin** → **Users**
+2. 选择用户
+3. 查看用户的全局角色和团队成员关系
+4. 查看：
+   - 全局角色
+   - 团队成员关系与团队角色
+   - 有效权限（由用户全局角色 + 团队作用域角色分配派生）
+
+**用户权限视图：**
+
+```yaml
+用户: john.doe@example.com
+全局角色: 成员
+
+团队成员关系:
+  支持团队:
+    角色: 管理员
+  销售团队:
+    角色: 成员
+```
+
+### 变更用户系统角色
+
+1. 导航至 **Admin** → **Users**
+2. 选择用户
+3. 点击 **Edit**
+4. 变更用户全局角色：
+   - 超级管理员
+   - 管理员
+   - 成员
+   - 访客
+5. 保存变更
+
+<Callout type="warn">
+  分配管理员角色授予仪表盘访问和系统读取权限；超级管理员授予完全系统访问权限。
+</Callout>
+
+### 授予特殊权限
+
+> **注意：未实现 / Roadmap。** 目前不存在带作用域和有效期的用户级权限授予 / 撤销。端点 `GET /users/{user_id}/permissions`、`/permissions/check` 和 `POST/DELETE /users/{user_id}/permissions` 不存在。权限通过全局角色（`PUT /api/v1/admin/roles/{role_id}/permissions`）和团队成员关系分配。
+
+## 团队权限
+
+### 查看团队权限
+
+1. 导航至 **Teams**
+2. 选择团队
+3. 查看成员及其团队角色
+
+### 配置团队角色
+
+团队成员关系被镜像为团队作用域角色分配：
+
+| 团队角色 | 该团队中的作用域角色 |
+|----------|----------------------|
+| Owner | Admin |
+| Admin | Admin |
+| Member | Member |
+| Viewer | Viewer |
+
+> **注意：** 团队角色是固定的 Owner / Admin / Member / Viewer 集合。不支持按团队覆盖权限（为团队添加 / 删除单个权限）。可创建自定义全局角色并分配为用户的全局角色，但团队作用域访问使用上述镜像角色分配。
+
+### 资源权限
+
+**Agent 权限示例：**
+
+```yaml
+Agent: Customer Support Agent
+所有者: john.doe@example.com
+团队: 支持团队
+
+访问控制:
+  所有者: 完全访问
+  团队管理员: 完全访问
+  团队成员: 读取、对话
+  团队访客: 读取、对话
+  其他团队: 无访问权限
+```
+
+**工作流权限示例：**
+
+```yaml
+工作流: Customer Inquiry Processing
+所有者: jane.smith@example.com
+团队: 支持团队
+
+访问控制:
+  所有者: 完全访问
+  团队管理员: 完全访问
+  团队成员: 读取、执行
+  团队访客: 读取
+  其他团队: 无访问权限
+```
+
+### 共享资源
+
+跨团队共享受限：
+
+- **工具**：自定义工具可通过 `POST /api/v1/admin/tools/{tool_id}/share` 共享给其他团队（通过 `GET /{tool_id}/shares` 列出、`DELETE /{tool_id}/share/{team_id}` 取消共享）。
+- **Agent / 工作流 / 知识库**：不支持按资源设置跨团队权限级别。跨团队可见性由资源的 `visibility`（Agent 为 Team / Public）控制，访问默认团队隔离。
+
+## API 作用域管理
+
+### API 作用域
+
+API Key 携带 `scopes` 列表（默认 `["chat"]`；空表示完全访问）、`rate_limit`（每分钟请求数，0 = 无限制）、`expires_at` 日期，并可关联特定 Agent 和工作流。API Key 在 **API Keys**（`/api-keys`）管理，通过 `POST /api/v1/api-keys` 创建。
+
+### 配置 API Key 作用域
+
+1. 导航至 **API Keys**
+2. 选择 API Key
+3. 编辑作用域和关联
+4. 保存变更
+
+**API Key 作用域示例：**
+
+```yaml
+API Key: ak_...
+所有者: integration@example.com
+作用域:
+  - chat
+
+速率限制: 1000（每分钟请求数）
+过期时间: 2027-02-11
+关联 Agent: 2
+关联工作流: 1
+```
+
+## 权限审计
+
+### 查看权限变更
+
+> **注意：未实现 / Roadmap。** 目前不存在专门的权限变更审计视图，审计日志也没有 `granted` / `revoked` 操作。角色变更和团队成员变更会产生审计日志条目（如 `update_user`、`add_team_member`、`update_team_member`、`create_role`、`update_role`），可在 **Audit Logs** 中查看。
+
+### 权限使用报告
+
+> **注意：未实现 / Roadmap。** 权限使用报告（按用户 / 团队的使用情况、未使用权限、权限过高的用户）不存在。
+
+## 排查 403
+
+### 权限被拒绝错误
+
+**症状：**
+- 用户无法访问功能
+- "Permission denied" 错误
+- 403 Forbidden 响应
+
+**解决方案：**
+
+1. **检查用户权限：**
+   ```
+   Admin → Users → 选择用户
+   Permissions → 查看有效权限
+   ```
+
+2. **检查团队成员关系：**
+   - 验证用户在正确的团队中
+   - 检查团队角色
+   - 验证团队是否有权访问资源
+
+3. **检查资源权限：**
+   - 验证资源是否与团队共享
+   - 检查资源访问级别
+   - 验证资源不是私有的
+
+4. **检查 API Key 作用域：**
+   - 验证 API Key 具有所需作用域
+   - 检查作用域限制
+   - 必要时重新生成密钥
+
+### 权限过高的用户
+
+**症状：**
+- 用户拥有不必要的权限
+- 安全审计发现
+
+**解决方案：**
+
+1. **审查用户权限：**
+   - 在 **Users** 中审查用户的全局角色和团队成员关系
+   - 对照角色权限矩阵交叉检查
+
+2. **应用最小权限原则：**
+   - 从角色中移除未使用的权限
+   - 适当降级角色
+   - 针对特定需求使用自定义角色
+
+3. **定期审计：**
+   - 安排季度权限审查
+   - 根据工作变更更新角色
+
+### 权限冲突
+
+**症状：**
+- 意外的权限行为
+- 访问不一致
+
+**解决方案：**
+
+1. **检查权限层级：**
+   - 全局角色提供权限码
+   - 团队作用域角色仅在目标团队内生效
+   - `admin:*` 权限不能通过团队作用域分配满足
+
+2. **审查角色分配：**
+   - 查看用户的全局角色和团队成员关系
+   - 在 **Roles** 中检查角色权限集
+
+3. **解决冲突：**
+   - 调整角色权限集
+   - 使用更具体的角色
+   - 记录权限决策
+
+## 最佳实践
+
+### 权限管理
+
+**✅ 推荐：**
+- 遵循最小权限原则
+- 使用角色而非单个权限
+- 记录权限决策
+- 定期审查权限
+- 审计权限变更
+- 适当使用临时权限
+- 在测试环境验证权限变更
+
+**❌ 避免：**
+- 不必要地授予管理员访问权限
+- 使用过于宽泛的权限
+- 跳过文档记录
+- 忘记定期审查
+- 忽略审计日志
+- 将临时权限设为永久
+- 在生产环境未经测试就变更权限
+
+### 角色设计
+
+**✅ 推荐：**
+- 基于工作职能创建角色
+- 使用描述性角色名称
+- 记录角色用途
+- 保持角色简单聚焦
+- 定期审查角色
+- 对角色变更进行版本管理
+
+**❌ 避免：**
+- 创建过多角色
+- 使用模糊的角色名称
+- 跳过文档记录
+- 使角色过于复杂
+- 忘记定期审查
+- 变更角色时不做版本管理
+
+### 安全
+
+**✅ 推荐：**
+- 强制强身份验证
+- 对特权账户使用双因素认证
+- 定期轮换 API Key
+- 监控权限使用
+- 审计权限变更
+- 限制管理员访问
+- 对敏感操作使用 IP 白名单
+
+**❌ 避免：**
+- 允许弱密码
+- 管理员跳过双因素认证
+- 永久使用静态 API Key
+- 忽略使用模式
+- 跳过审计日志
+- 随意授予管理员访问权限
+- 允许无限制访问
+
+## API 访问
+
+### 通过 API 管理权限
+
+管理员角色和权限端点位于 `/api/v1/admin/roles` 和 `/api/v1/admin/permissions` 下，需要 `admin:role:*` / `admin:permission:*` 权限。
+
+**角色操作：**
+
+```python
+# 列出角色
+roles = api.get("/api/v1/admin/roles")
+
+# 创建角色
+role = api.post("/api/v1/admin/roles", json={
+    "name": "Content Manager",
+    "description": "Manages knowledge bases",
+    "permissions": ["team:read", "kb:read", "kb:create", "kb:update", "kb:delete", "kb:test"]
+})
+
+# 替换角色权限（PUT，非 PATCH）
+api.put(f"/api/v1/admin/roles/{role_id}/permissions", json={
+    "permissions": ["kb:read", "kb:create"]
+})
+```
+
+**权限操作：**
+
+```python
+# 列出权限（可按作用域过滤）
+permissions = api.get("/api/v1/admin/permissions", params={"scope": ["admin", "team"]})
+
+# 列出权限作用域
+scopes = api.get("/api/v1/admin/permissions/scopes")
+```
+
+> **注意：** 不存在用户级权限端点（`/users/{user_id}/permissions`）。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/roles-permissions.png" alt="角色与权限管理" />
@@ -26,6 +557,9 @@ Clouisle 同时使用全局角色权限和资源作用域角色。前端根据�
 
 系统角色和系统权限不能删除或任意修改。不能删除超级管理员、默认团队所有者或正在使用的角色。权限变更会影响后续请求；已签发 JWT 不应被视为永久权限缓存。
 
-## 排查 403
+## 相关文档
 
-查看响应中的权限信息、当前团队和用户角色。确认资源所属团队、当前账号是否有效、是否需要团队管理员或超级管理员，以及 API Key 是否配置了目标 Agent/工作流访问范围。
+- [权限与角色参考](/reference/permissions) — 完整的权限目录与侧边栏菜单映射
+- [团队角色](/usage/guides/teams/team-roles) — 用户指南中的团队角色
+- [API Key 作用域](/usage/guides/api-keys/api-key-scopes) — API 作用域参考
+- [审计日志](/usage/guides/administration/audit-logs) — 审计日志管理

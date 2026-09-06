@@ -8,40 +8,338 @@ Clouisle's authentication flow may include password, email verification, adminis
 
 ## Sign-up & Email Verification
 
-1. Select **Sign up** and fill in the username, email, password, and confirm password.
-2. The password must be at least `8` characters; administrators can raise the minimum length and require uppercase letters, numbers, or special characters.
-3. If the site requires it, check the user agreement and privacy policy.
-4. After submitting, verify your email with the verification code or link in the email.
-5. If administrator approval is enabled, the account enters a pending-approval state and cannot log in until approved.
+Clouisle supports self-registration when enabled by administrators.
+
+### Self-Registration
+
+1. Navigate to the login page at `https://your-domain.com` and click **Sign up**.
+2. Fill in the registration form:
+   - **Username**: Unique identifier, max 50 characters
+   - **Email**: Valid email address
+   - **Password**: At least 8 characters (see [Password Requirements](#password-requirements))
+   - **Confirm Password**: Re-enter password
+3. If human verification is shown, click **Click to verify you are human** to complete it.
+4. Click **Register** to submit.
+5. If email verification is enabled, check your email for the verification code or link.
+6. Verify your email to activate your account, then log in.
+
+<Callout type="info">
+  The first registered user is automatically promoted to Super Admin. If administrator approval is required (`require_approval`), the account enters a pending-approval state and cannot log in until approved. Administrators receive a global notification.
+</Callout>
+
+<Callout type="note">
+  There is no invitation-based registration flow. Users are created via self-registration, by administrators (user management), or automatically through SSO (when `sso_auto_create_users` is enabled).
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/registration-verification.png" alt="Sign-up and email verification" />
   <figcaption>Sign-up and email verification</figcaption>
 </figure>
 
+## Login Methods
+
+### Password Login
+
+1. Navigate to the login page and enter your **username** or **email**.
+2. Enter your **password**.
+3. If human verification is shown, click **Click to verify you are human** to complete it.
+4. Click **Log In**.
+
+### SSO Single Sign-On
+
+If your organization has configured SSO, you can log in with corporate credentials.
+
+1. Navigate to the login page and click the SSO provider button (e.g., "Continue with Google", "Continue with GitHub").
+2. Authenticate with your SSO provider.
+3. You are redirected back to Clouisle and logged in automatically.
+
+**First-time SSO login:**
+
+- If your email matches an existing account, the SSO connection is linked to it (email matching is enabled by default)
+- If no account exists, a new account is created automatically (if `sso_auto_create_users` is enabled)
+
+**Supported SSO providers:**
+
+- OAuth2/OIDC (Google, GitHub, GitLab, etc.)
+- SAML 2.0 (Azure AD, Okta, OneLogin)
+- CAS (University systems)
+
+See [SSO Configuration](./sso.mdx) for details.
+
+### First-Time Login
+
+After your first successful login:
+
+1. **Welcome Screen**: A welcome message is displayed
+2. **Profile Setup**: Complete your profile information (optional)
+3. **Team Assignment**: You may be assigned to the default team (if configured) or added to a team by an administrator
+4. **Dashboard Access**:
+   - Regular users see the platform interface
+   - Administrators see the admin dashboard
+
 ## Login Protection
 
-Login may require a click-through CAPTCHA. The CAPTCHA proof is valid for `300` seconds (5 minutes) by default; re-fetch it after a failure or expiration. Repeated failures trigger account lockout and rate limiting.
+### Human Verification
 
-## Password Recovery & Expiration
+Login and self-registration may require a click-through CAPTCHA. The CAPTCHA proof is valid for `300` seconds (5 minutes) by default; re-fetch it after a failure or expiration.
 
-Send a reset email from **Forgot password**, enter the verification code, and set a new password. Administrators can configure password history, minimum change interval, expiration period, and forced change on first login. When a password expires or is force-changed, you must complete **Change password** first.
+### Account Lockout
+
+Repeated failures trigger account lockout and rate locking:
+
+- Default 5 failed attempts before lockout
+- Lockout lasts 15 minutes (configurable)
+- Contact your administrator if locked out repeatedly
+
+### Login Anomaly Detection
+
+The system tracks your usual login locations and devices, and sends security notifications when logging in from a new location. Check your notifications if you see anomaly alerts.
+
+## Password Management
+
+### Password Requirements
+
+| Requirement | Default |
+| --- | --- |
+| **Minimum Length** | 8 characters (configurable) |
+| **Uppercase** | At least one uppercase letter (A-Z) |
+| **Number** | At least one digit (0-9) |
+| **Special Character** | Not required by default |
+| **No Recent Reuse** | Cannot reuse the last 5 passwords (configurable) |
+
+<Callout type="note">
+  There is no dictionary / weak-password check.
+</Callout>
+
+**Example of a valid password:**
+```
+MySecure#Pass2026!
+```
+
+**Examples of weak passwords:**
+```
+❌ 12345678       (no letters/uppercase)
+❌ abcdefgh       (no numbers)
+❌ Pass123        (too short)
+```
+
+### Changing Your Password
+
+1. Open **Profile Settings** (profile menu) → **Account** tab
+2. Find the **Change Password** section
+3. Fill in the form:
+   - **Current Password**: Your existing password
+   - **New Password**: Your new password
+   - **Confirm New Password**: Re-enter new password
+4. Click **Change Password**
+5. You'll see a success message
+
+As you type, the UI shows a strength indicator (weak / fair / good / strong).
+
+**Tips for strong passwords:**
+- Use a mix of character types
+- Make it at least 12 characters long
+- Avoid personal information (name, birthday)
+- Consider using a password manager
+
+### Resetting a Forgotten Password
+
+1. Go to the login page and click the **Forgot Password?** link
+2. Enter your **email address**
+3. Click **Send Reset Link**
+4. Check your email inbox
+
+The email contains:
+- Subject: "Password Reset Request - Clouisle"
+- Reset link with a verification code (valid for **10 minutes**)
+- Instructions
+
+5. Click the reset link / enter the code from the email
+6. Enter your **new password** and confirm it
+7. Click **Reset Password**
+8. You'll see a success message; log in with your new password
+
+<Callout type="warn">
+  Reset links/codes expire after 10 minutes. Resend is rate-limited to 60 seconds.
+</Callout>
+
+### Password Expiration
+
+If your administrator enables password expiration:
+
+- Password expires after a configured number of days (e.g., 90)
+- You'll receive reminders before expiration (default: warning starts 7 days before)
+- After expiration, you must change your password to log in
+
+**Changing an expired password:**
+
+1. Try to log in
+2. You'll see a "Password expired" / "Change password required" message
+3. Enter your current password to authenticate first, then enter a new password
+4. Log in with the new password
 
 ## TOTP Two-Factor Authentication
 
-1. Open **Two-factor authentication** in account settings, or follow the administrator-enforced wizard.
-2. Scan the QR code with an authenticator app, or enter the secret manually.
-3. Enter the 6-digit verification code to confirm.
-4. Download or copy the one-time backup codes; each backup code can only be used once.
-5. Enter TOTP on subsequent logins; use a backup code when your device is unavailable.
+If your organization enables 2FA, you must enter a TOTP code when logging in.
+
+### Setting Up TOTP
+
+1. Open **Profile Settings** → **Account** tab and click **Enable Two-Factor Authentication** (or follow the administrator-enforced wizard)
+2. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.), or enter the secret manually
+3. Enter the 6-digit verification code to confirm
+4. Download or copy the one-time backup codes; each backup code can only be used once
+5. Click **Enable**
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/totp-setup-wizard.png" alt="TOTP setup wizard" />
   <figcaption>TOTP setup wizard</figcaption>
 </figure>
 
-## SSO Login
+### Logging In with TOTP
 
-After SSO is enabled, the login page shows the providers configured by the administrator. If password login is also disabled, the username/password form is unavailable. SSO settings determine whether the first SSO login auto-creates users, whether approval is required, and whether existing accounts are matched by email.
+1. Enter your username and password
+2. Enter the 6-digit code from your authenticator app
+3. Click **Verify**
 
-Related pages: [SSO configuration](./sso.mdx), [Site security reference](/reference/site-settings).
+### Backup Codes
+
+- Save backup codes in a safe place
+- Use a backup code if you lose access to your authenticator
+- Each code can only be used once
+
+## Session Management
+
+### Session Duration
+
+- Sessions last until the configured **session timeout** (`session_timeout_days`, in days, default 30)
+- There is no "Remember Me" option and no inactivity-based logout
+
+### Single Session Mode
+
+If enabled by your administrator, only one active session is allowed per user — logging in elsewhere invalidates the previous session.
+
+### Logging Out
+
+1. Click your profile icon in the top-right corner
+2. Select **Logout**
+3. You are redirected to the login page
+
+Logging out only invalidates the current session/token.
+
+## Account Security
+
+### Security Notifications
+
+You'll receive notifications for:
+
+- Password changed successfully
+- Failed login attempts / account locked
+- Login from a new location/device
+- Password expiration reminders
+
+**Check notifications regularly** to detect unauthorized access.
+
+### If Your Account Is Compromised
+
+If you suspect unauthorized access:
+
+1. **Change your password immediately**
+2. **Enable 2FA** (if not already enabled)
+3. **Review login notifications** for suspicious activity
+4. **Contact your administrator** to report the incident
+
+### Admin Password Reset
+
+An administrator can reset your password from user management:
+
+1. Administrator resets your password
+2. You receive an email with a temporary password
+3. Log in with the temporary password
+4. Change your password
+
+## Troubleshooting
+
+### Cannot Access Login Page
+
+1. Check your internet connection
+2. Verify the URL is correct
+3. Try a different browser
+4. Clear browser cache and cookies
+5. Contact your IT administrator
+
+### Forgot Password
+
+1. Click **Forgot Password?** on the login page
+2. Enter your email address
+3. Check your email for the reset link
+4. Click the link and enter a new password
+5. Log in with your new password
+
+See [Password Management](#password-management) for details.
+
+### Account Locked
+
+1. Wait for automatic unlock (default 15 minutes)
+2. Contact administrator for immediate unlock
+3. Use password reset if you forgot your password
+
+### Email Verification Not Received
+
+1. Check spam/junk folder
+2. Wait a few minutes (email may be delayed)
+3. Click **Resend Verification Email**
+4. Verify the email address is correct
+5. Contact administrator if still not received
+
+### SSO Login Fails
+
+1. Verify you're using the correct SSO provider
+2. Check if your SSO account is active
+3. Clear browser cookies and try again
+4. Contact your SSO administrator
+5. Try password login if available
+
+See [SSO Configuration](./sso.mdx) for SSO-specific troubleshooting.
+
+### Account Pending Approval
+
+- Your account requires administrator approval
+- Wait for an administrator to activate your account
+- You'll receive an email when approved
+- Contact administrator if waiting too long
+
+### Session Expired
+
+1. Log in again
+2. Contact administrator to adjust the session timeout
+3. Check if you're logged in on another device (single session mode)
+
+## Best Practices
+
+### Security Recommendations
+
+**✅ Do:**
+- Use a strong, unique password
+- Enable two-factor authentication
+- Log out when using shared computers
+- Keep your email address up to date
+- Review login notifications regularly
+- Use SSO if available (more secure)
+
+**❌ Don't:**
+- Share your password with others
+- Use the same password as other services
+- Stay logged in on public computers
+- Ignore login anomaly notifications
+
+### Account Management
+
+**Regular Tasks:**
+- Update your password when required
+- Review login notifications for suspicious activity
+- Keep profile information current
+
+## Related Pages
+
+- [SSO Configuration](./sso.mdx) — Single Sign-On details
+- [Site Security Reference](/reference/site-settings) — Site security configuration

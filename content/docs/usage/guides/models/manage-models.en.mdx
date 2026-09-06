@@ -32,3 +32,414 @@ The non-negative integer limits on a model authorization are `daily_token_limit`
 ## Connection Testing
 
 The administrator model form provides a connection test whose response contains a success status, a message, and an optional latency in milliseconds. When a test fails, first check the endpoint whitelist, credentials, network access, and model type.
+
+---
+
+The following sections cover how administrators manage global models on the **Models** page.
+
+## Adding Models
+
+### Add OpenAI Model
+
+1. Click **Add Model** button.
+2. Select provider: **OpenAI**.
+3. Fill in model details:
+   - **Name**: Display name (e.g., "GPT-4 Turbo")
+   - **Model ID**: OpenAI model ID (e.g., `gpt-4-turbo-preview`)
+   - **Type**: Chat, Embedding, or other supported type
+   - **Description**: Model description (via `provider_display_name` / config)
+4. Configure API settings:
+   - **API Key**: OpenAI API key
+   - **API Base**: (Optional, for custom endpoints)
+5. Set capabilities:
+   - **Context Length**: Maximum context window
+   - **Max Output Tokens**: Maximum response length
+   - **Capabilities**: Streaming, function calling, vision, etc. (JSON)
+6. Configure pricing:
+   - **Input Price**: Cost per 1M input tokens
+   - **Output Price**: Cost per 1M output tokens
+7. Set default parameters (JSON, e.g. `{"temperature": 0.7, "top_p": 0.9}`)
+8. Click **Test Connection**
+9. Click **Save Model**
+
+<Callout type="info">
+Models do not have an organization (`org-...`) field, and pricing has no currency field — prices are per 1M tokens in USD terms.
+</Callout>
+
+### Add Anthropic Model
+
+1. Click **Add Model** button.
+2. Select provider: **Anthropic**.
+3. Fill in model details:
+   - **Name**: "Claude 3.5 Sonnet"
+   - **Model ID**: `claude-3-5-sonnet-20240620`
+   - **Type**: Chat
+4. Configure API settings:
+   - **API Key**: Anthropic API key
+   - **API Base**: (Optional)
+5. Set capabilities and pricing (per 1M tokens)
+6. Test and save
+
+### Add Azure OpenAI Model
+
+1. Click **Add Model** button.
+2. Select provider: **Azure OpenAI**.
+3. Fill in model details:
+   - **Name**: "GPT-4 (Azure)"
+   - **Model ID**: Deployment name
+   - **Type**: Chat
+4. Configure API settings:
+   - **API Key**: Azure API key
+   - **API Base**: Azure endpoint URL
+   - **API Version**: API version (e.g., `2024-02-15-preview`) — via config
+   - **Deployment Name**: Azure deployment name (as Model ID)
+5. Set capabilities and pricing
+6. Test and save
+
+### Add Custom Model
+
+For custom or self-hosted models:
+
+1. Click **Add Model** button.
+2. Select provider: **Custom**.
+3. Fill in model details
+4. Configure API settings:
+   - **Endpoint**: Custom API endpoint
+   - **Authentication**: API Key, Bearer Token, or Custom
+   - **Headers**: Custom headers
+   - **Request Format**: OpenAI-compatible or Custom
+5. Set capabilities
+6. Test and save
+
+## Editing Models
+
+### Update Model Settings
+
+1. Find model in list
+2. Click **Edit** button
+3. Modify settings:
+   - Basic information
+   - API credentials
+   - Capabilities
+   - Pricing
+   - Default parameters
+4. Click **Test Connection**
+5. Click **Save Changes**
+
+### Rotate API Keys
+
+<Callout type="warn">
+Rotate API keys regularly for security.
+</Callout>
+
+1. Edit model
+2. Update API key
+3. Test connection
+4. Save changes
+5. Monitor for errors
+
+### Update Pricing
+
+When provider pricing changes:
+
+1. Edit model
+2. Update pricing information:
+   - Input price per 1M tokens
+   - Output price per 1M tokens
+3. Save changes
+
+## Testing Models
+
+### Test Model Connection
+
+1. Select model
+2. Click **Test** button
+3. Enter test prompt:
+   ```
+   Hello, how are you?
+   ```
+4. Configure test parameters (temperature, max tokens)
+5. Click **Run Test**
+
+The test endpoint is `POST /api/v1/admin/models/{model_id}/test`; a configuration can also be tested before creating the model via `POST /api/v1/admin/models/test`.
+
+**Test Results Example:**
+
+| Field | Value |
+|-------|-------|
+| Status | Success |
+| Response | "Hello! I'm doing well, thank you for asking..." |
+| Prompt Tokens | 6 |
+| Completion Tokens | 18 |
+| Total Tokens | 24 |
+| Response Time | 1.2 seconds |
+
+### Test Model Performance
+
+<Callout type="info">
+Not implemented / Roadmap. There is no multi-request performance test (request count, concurrency, p50/p95/p99 percentiles, cost aggregation). Testing is a single connection/response test.
+</Callout>
+
+## Model Status Management
+
+### Model Statuses
+
+**Enabled:**
+- Model is operational
+- Available for use
+- Appears in model selection
+
+**Disabled:**
+- Model is disabled
+- Cannot be used
+- Hidden from users
+- Preserves configuration
+
+<Callout type="info">
+Models have a single `is_enabled` flag. There are no `testing` or `deprecated` statuses, no deprecation message/end-of-life date, and no "replacement model" suggestion.
+</Callout>
+
+### Change Model Status
+
+**Enable Model:**
+1. Select model
+2. Set "Enabled" to on
+3. Confirm
+
+**Disable Model:**
+1. Select model
+2. Set "Enabled" to off
+3. Confirm
+
+## Model Limits
+
+<Callout type="info">
+Not implemented / Roadmap. There are no global or team rate limits (requests/minute, tokens/day, cost caps, concurrent requests) for models. Model access control is done through team model authorization (which models a team may use), not quotas.
+</Callout>
+
+### Rate Limiting
+
+<Callout type="info">
+Not implemented / Roadmap. No per-user, per-team, per-API-key, or global rate limiting for models.
+</Callout>
+
+## Provider Management
+
+### Configure Providers
+
+Providers are not configured as separate entities. Each model carries its own provider (`openai`, `anthropic`, `azure_openai`, `ollama`, `custom`, etc.), API key, base URL, and provider display name. There is no global provider registry with default API keys, timeouts, or retry policies.
+
+### Update Provider Settings
+
+1. Navigate to **Admin** → **Models**
+2. Select the model
+3. Update its provider, API key, base URL, or other fields
+4. Test connection
+5. Save changes
+
+Remote model discovery is supported via `POST /api/v1/admin/models/discover`, which lists models available from a provider configuration before you save them.
+
+### Approve Model API Origins
+
+Before saving or testing a model with a new API endpoint:
+
+1. Navigate to **Admin** → **Site Settings** → **Security**.
+2. Add the endpoint Origin to **Model Endpoint Allowlist**, one per line.
+3. Include only the scheme, hostname, and non-default port, for example `https://gateway.example.com` or `http://ollama.internal:11434`.
+4. Save the Security settings, then save or test the model again.
+
+<Callout type="warn">
+Security: Prefer HTTPS for remote endpoints. Use HTTP only for endpoints on a trusted private network because API keys and model traffic are otherwise sent without transport encryption.
+</Callout>
+
+Matching is exact. URL paths are ignored, but the scheme, hostname, and port must all match. Removing an Origin blocks subsequent model discovery, connection tests, and runtime requests without restarting the service.
+
+## Troubleshooting
+
+### Model Connection Failed
+
+**Symptoms:**
+- Test connection fails
+- API errors in logs
+
+**Solutions:**
+
+1. **Check API key:**
+   - Verify key is valid
+   - Check key permissions
+   - Try regenerating key
+
+2. **Check endpoint:**
+   - Verify URL is correct
+   - Test endpoint with curl
+   - Check firewall rules
+
+3. **Check rate limits:**
+   - Review provider dashboard
+   - Check for quota exceeded
+   - Wait for rate limit reset
+
+4. **Check logs:**
+   ```
+   Admin → Models → Select model
+   Logs → View recent errors
+   ```
+
+### High Model Costs
+
+**Symptoms:**
+- Unexpected high costs
+
+**Solutions:**
+
+1. **Review usage:**
+   - Check dashboard statistics and audit logs for high-usage agents/teams
+
+2. **Optimize usage:**
+   - Use cheaper models for simple tasks
+   - Reduce max_tokens
+   - Optimize prompts
+
+3. **Review agents:**
+   - Check agent configurations
+   - Identify inefficient agents
+   - Optimize system prompts
+
+<Callout type="info">
+Not implemented / Roadmap: cost dashboards, daily/monthly token limits, and cost alerts are not available.
+</Callout>
+
+### Slow Model Responses
+
+**Symptoms:**
+- Long response times
+- Timeouts
+
+**Solutions:**
+
+1. **Check configuration:**
+   - Review the model's context length and max output tokens
+   - Verify the model is enabled and set as default where needed
+
+2. **Optimize requests:**
+   - Reduce max_tokens
+   - Use streaming
+   - Use faster models
+
+3. **Check provider status:**
+   - Review provider status page
+   - Check for outages
+   - Contact provider support
+
+4. **Scale infrastructure:**
+   - Increase timeout
+   - Add retry logic
+   - Use multiple providers
+
+## Best Practices
+
+### Model Configuration
+
+<Callout type="success">
+**Do:**
+- Test models before enabling
+- Set appropriate pricing (per 1M tokens)
+- Configure reasonable defaults
+- Rotate API keys regularly
+- Document model purposes
+- Keep models updated
+</Callout>
+
+<Callout type="error">
+**Don't:**
+- Enable untested models
+- Use extreme parameters
+- Use static API keys forever
+- Skip documentation
+</Callout>
+
+### Cost Management
+
+<Callout type="info">
+Cost limits and cost alerts are not implemented. Pricing per 1M tokens is stored per model for reference; usage-based cost reports are not available.
+</Callout>
+
+<Callout type="success">
+**Do:**
+- Monitor usage through the dashboard
+- Use cheaper models when possible
+- Optimize prompts
+- Review model grants to teams
+</Callout>
+
+<Callout type="error">
+**Don't:**
+- Use expensive models for everything
+- Skip testing
+- Use verbose prompts
+- Grant unnecessary models to teams
+</Callout>
+
+### Security
+
+<Callout type="success">
+**Do:**
+- Rotate API keys regularly
+- Use separate keys per environment
+- Restrict model access by team
+- Enable audit logging
+- Monitor for abuse
+- Use HTTPS only
+</Callout>
+
+<Callout type="error">
+**Don't:**
+- Share API keys
+- Use production keys in development
+- Allow unrestricted access
+- Disable audit logs
+- Ignore suspicious activity
+- Allow HTTP connections
+</Callout>
+
+## Bulk Operations
+
+<Callout type="info">
+Not implemented / Roadmap. There are no bulk actions (activate/deactivate, update pricing, rotate API keys, export configuration). Models are managed individually; team grants use the team-model authorization endpoints.
+</Callout>
+
+## API Access
+
+### Manage Models via API
+
+Admin model endpoints live under `/api/v1/admin/models` and require `admin:model:*` permissions. See [Models API](../../api-reference/endpoints/models.md) for details.
+
+**Common Operations:**
+
+```python
+# List models (admin)
+models = api.get("/api/v1/admin/models")
+
+# Create model
+model = api.post("/api/v1/admin/models", json={
+    "name": "GPT-4 Turbo",
+    "provider": "openai",
+    "model_id": "gpt-4-turbo-preview",
+    "model_type": "chat",
+    "api_key": "sk-...",
+    "input_price": 10.0,   # per 1M tokens
+    "output_price": 30.0   # per 1M tokens
+})
+
+# Test model connection
+test_result = api.post(f"/api/v1/admin/models/{model_id}/test", json={
+    "prompt": "Hello, how are you?",
+    "temperature": 0.7
+})
+
+# Set default model
+api.post(f"/api/v1/admin/models/{model_id}/set-default")
+
+# Discover models from a provider config
+discovery = api.post("/api/v1/admin/models/discover", json={...})
+```

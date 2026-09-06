@@ -6,28 +6,245 @@ icon: ScrollText
 
 审计日志记录系统内的资源操作：操作者、动作、资源、变更前后快照与来源 IP。敏感字段在落库与展示时自动脱敏，原始密钥不会出现在日志中。查看审计日志需要 `audit:read`，导出需要 `audit:export`。
 
+## 审计日志事件
+
+审计日志覆盖以下事件类型，每种事件记录操作者、时间戳、资源、操作类型、状态及变更详情。
+
+### 认证事件
+
+用户登录、登出与注册行为：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `login_success` | 登录成功 | 用户、时间、IP、User Agent、认证方式、是否使用 2FA |
+| `login_failed` | 登录失败 | 用户、时间、IP、失败原因、尝试次数 |
+| `logout` | 登出 | 用户、时间、IP、会话时长 |
+| `register` | 注册 | 用户、时间、IP、注册方式、邮箱是否已验证 |
+
+### 用户管理事件
+
+管理员对用户账号的创建、更新与删除操作：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `create_user` | 创建用户 | 操作者、时间、新用户邮箱、姓名、角色、状态 |
+| `update_user` | 更新用户 | 操作者、时间、变更前后字段（如角色、状态） |
+| `delete_user` | 删除用户 | 操作者、时间、被删除用户标识 |
+
+### 团队管理事件
+
+团队的创建与成员变更：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `create_team` | 创建团队 | 操作者、时间、团队名称、描述、所有者 |
+| `add_team_member` | 添加团队成员 | 操作者、时间、团队、成员 ID、成员邮箱、角色 |
+| `remove_team_member` | 移除团队成员 | 操作者、时间、团队、成员 ID、移除原因 |
+
+### Agent 事件
+
+Agent 的创建、更新、发布与删除：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `create_agent` | 创建 Agent | 操作者、时间、Agent 名称、所属团队、模型 |
+| `update_agent` | 更新 Agent | 操作者、时间、变更前后字段（如 `max_iterations`、`system_prompt`） |
+| `publish_agent` | 发布 Agent | 操作者、时间、可见性、是否上架市场 |
+| `delete_agent` | 删除 Agent | 操作者、时间、Agent 标识 |
+
+### API Key 事件
+
+API Key 的创建与状态变更：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `create_api_key` | 创建 API Key | 操作者、时间、Key 名称、权限范围、关联 Agent/工作流数、过期时间 |
+| `activate_api_key` | 激活 API Key | 操作者、时间、Key 标识 |
+| `deactivate_api_key` | 停用 API Key | 操作者、时间、Key 标识、停用原因 |
+
+### 系统设置事件
+
+站点配置的变更：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `update_site_setting` | 更新单项设置 | 操作者、时间、设置项、变更前后值 |
+| `bulk_update_site_settings` | 批量更新设置 | 操作者、时间、更新项数、设置项列表 |
+| `reset_site_settings` | 重置设置 | 操作者、时间、重置分类、重置项数 |
+
+### 安全事件
+
+账号安全相关操作：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `change_password` | 修改密码 | 用户、时间、IP |
+| `reset_password` | 重置密码 | 用户、时间、重置方式、发起者 |
+| `activate_user` | 激活账号 | 操作者、时间、目标用户 |
+| `deactivate_user` | 停用账号 | 操作者、时间、目标用户、停用原因 |
+
 ## 查看与筛选
 
-在**管理后台** > **审计日志**查看。每条记录包含：时间、用户、动作、资源类型、资源名称、操作（创建/读取/更新/删除）、状态、IP 地址与详情。可按关键词、事件类型、用户、团队和时间范围搜索；变更前后字段值不能作为筛选条件（Roadmap）。
+在**管理后台** > **审计日志**查看。每条记录包含：时间、用户、动作、资源类型、资源名称、操作（创建/读取/更新/删除）、状态、IP 地址与详情。
 
-主要事件类型：认证（`login_success`、`login_failed`、`logout`、`register`）、用户管理（`create_user`、`update_user`、`delete_user`）、团队（`create_team`、`add_team_member`、`remove_team_member`）、Agent（`create_agent`、`update_agent`、`publish_agent`、`delete_agent`）、API Key（`create_api_key`、`activate_api_key`、`deactivate_api_key`）、系统设置与安全事件。
+### 搜索与过滤
+
+列表接口 `GET /api/v1/admin/audit-logs` 支持以下查询参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `user_id` | 按用户 UUID 过滤 |
+| `team_id` | 按团队 UUID 过滤 |
+| `action` | 按精确动作值过滤；支持多次传入进行 `action__in` 匹配（不支持通配符） |
+| `resource_type` | 按资源类型过滤（user、team、agent、workflow 等） |
+| `resource_id` | 按资源 UUID 过滤 |
+| `status` | 按状态过滤（`success`、`failed` 等） |
+| `start_date` / `end_date` | 按时间范围过滤 |
+| `search` | 对资源名称、资源 ID、IP 地址进行不区分大小写的子串（`icontains`）搜索 |
+
+<Callout type="info">
+  没有专门的 IP 地址过滤参数，但 `search` 字段支持对 IP 进行子串匹配（如 `192.168.1.`）。`search` 不解释 `*` 或其他 glob 模式。
+</Callout>
+
+<Callout type="warn">
+  **Roadmap：** 无法按变更字段、变更前/后值进行筛选。字段级 `changes` 仅在日志详情和导出中可见。
+</Callout>
+
+<Callout type="warn">
+  **Roadmap：** 暂无保存搜索功能，需手动重新执行过滤条件。
+</Callout>
+
+### 查看日志详情
+
+点击日志条目可查看完整详情，包括：
+
+- **基本信息**：ID、时间戳、用户、用户 ID、动作、状态
+- **资源信息**：资源类型、资源 ID、资源名称、操作类型
+- **请求信息**：IP 地址、User Agent、认证方式
+- **变更详情**：`before` / `after` 字段级变更快照（敏感值已脱敏）
+- **元数据**：团队 ID/名称、模型、执行时长等
+
+<Callout type="warn">
+  **Roadmap：** 暂无「关联日志」视图。如需查找相关条目，请按相同 `user_id`、`resource_id` 或时间范围过滤。
+</Callout>
 
 ## 敏感数据脱敏
 
-键名包含 `password`、`hashed_password`、`api_key`、`secret_key`、`access_token`、`refresh_token`、`private_key`、`secret` 或 `token` 的字段会被掩码：字符串超过 8 个字符只显示前 8 位加 `***`，其余值替换为 `***`。变更快照（`changes`）在详情与导出中可见，但敏感值已被掩码。
+字段级变更的 `before` / `after` 数据在存储前会经过 `AuditLogService.sanitize_changes` 处理：
 
-## 导出
+- **敏感字段掩码**：键名包含 `password`、`hashed_password`、`api_key`、`secret_key`、`access_token`、`refresh_token`、`private_key`、`secret` 或 `token` 的字段会被掩码。字符串超过 8 个字符只显示前 8 位加 `***`，其余值替换为 `***`。
+- **邮箱部分掩码**：如 `a***e@example.com`。
+- **嵌套字典递归处理**。
+- **值截断**：单字段最大 500 字符，超大结构替换为预览字符串。
+
+由于落库时即脱敏，原始密钥不会出现在审计日志的任何位置。
+
+## 导出审计日志
+
+### 导出格式
+
+支持 CSV 和 JSON 两种格式。导出接口 `GET /api/v1/admin/audit-logs/export?format=csv|json` 与列表接口使用相同筛选条件，最多返回 `10,000` 条。
+
+**CSV 列：** ID、Time、User、Action、Resource Type、Resource Name、Operation、Status、IP Address、Error Message
+
+**JSON：** 导出完整序列化条目（含 `changes`）。
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-`GET /api/v1/admin/audit-logs/export?format=csv|json` 与列表接口使用相同筛选条件，最多返回 `10,000` 条。CSV 列：ID、Time、User、Action、Resource Type、Resource Name、Operation、Status、IP Address、Error Message；JSON 导出完整序列化条目（含 `changes`）。导出为手动操作，无定时导出（Roadmap）。
+<Callout type="warn">
+  **Roadmap：** 暂无定时导出（日/周/月）或邮件/S3 投递功能，导出为手动操作。
+</Callout>
 
 ## 保留与归档
 
-保留天数由站点设置 `audit_log_retention_days` 控制，默认 `365` 天，范围 `30-3650`。归档状态可通过 `GET /api/v1/admin/audit-logs/stats/retention` 查看：已配置的保留天数、截止日期、待归档日志数、最旧日志和下次归档时间。
+### 保留策略
+
+保留天数由站点设置 `audit_log_retention_days` 控制，默认 `365` 天，范围 `30-3650`。
+
+**配置方式：** 前往**管理后台** > **站点设置** > **存储**，设置**审计日志保留天数**与**归档文件存储路径**（默认 `/var/log/clouisle/audit_archives`）。
+
+### 手动归档
+
+1. 前往**审计日志** > **归档**
+2. 点击**归档**
+3. 归档任务异步执行（需要 `audit:export`），通过返回的任务 ID 跟踪状态
+
+**归档机制：**
+
+- 归档任务 `tasks.archive_old_audit_logs` 选取超过保留截止日期的日志
+- 日志按月导出为本地 JSON 文件，如 `/var/log/clouisle/audit_archives/audit_logs_202602.json`（已有月度文件会追加）
+- 已归档日志从数据库中删除
+
+<Callout type="warn">
+  **Roadmap：** 暂无定时自动归档（如每日凌晨 2 点）和 S3/Azure/Blob 归档目标，归档输出写入本地 `audit_log_archive_path` 配置的路径。
+</Callout>
+
+<Callout type="warn">
+  **Roadmap：** 暂无归档日志恢复工作流。归档路径下的月度 JSON 文件可供手动检查。
+</Callout>
+
+### 归档状态查询
+
+`GET /api/v1/admin/audit-logs/stats/retention` 返回：已配置的保留天数、截止日期、待归档日志数、最旧日志和下次归档时间。
+
+## 统计接口
+
+`GET /api/v1/admin/audit-logs/stats` 返回聚合统计：总日志数、今日日志数、失败日志数、近 7 天活跃用户数、Top 5 动作、Top 5 用户。
+
+<Callout type="warn">
+  **Roadmap：** 暂无审计报告生成器（用户活动、管理员操作、安全事件、资源变更、失败操作等报告），以上统计端点提供当前可用的聚合数据。
+</Callout>
+
+<Callout type="warn">
+  **Roadmap：** 暂无审计日志实时监控仪表盘。站点设置中的 `audit_alert_enabled`、`audit_alert_webhook` 及失败登录阈值等配置项当前未被任何监控或通知代码消费。
+</Callout>
+
+## API 端点参考
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/admin/audit-logs` | 查询审计日志列表（支持筛选） | `audit:read` |
+| `GET` | `/api/v1/admin/audit-logs/{id}` | 获取单条审计日志详情 | `audit:read` |
+| `GET` | `/api/v1/admin/audit-logs/export?format=csv\|json` | 导出审计日志（最多 10,000 条） | `audit:export` |
+| `GET` | `/api/v1/admin/audit-logs/stats` | 获取审计统计聚合 | `audit:read` |
+| `GET` | `/api/v1/admin/audit-logs/stats/retention` | 获取保留与归档状态 | `audit:read` |
+| `POST` | `/api/v1/admin/audit-logs/archive` | 触发手动归档任务 | `audit:export` |
+
+## 最佳实践
+
+### 审计日志配置
+
+- 启用所有操作的审计日志记录
+- 同时记录成功与失败操作
+- 包含足够的上下文信息
+- 保护日志完整性
+- 定期审查日志
+- 适当归档日志
+- 监控异常行为
+- 为关键事件设置告警
+
+### 日志分析
+
+- 定期审查日志
+- 寻找模式与趋势
+- 调查异常事件
+- 生成定期报告
+- 与团队分享发现
+- 记录事件与处置
+- 使用日志满足合规要求
+
+### 安全
+
+- 限制日志访问权限
+- 加密归档日志
+- 使用安全存储
+- 监控日志访问行为
+- 审计审计者自身
+- 维护日志完整性
+- 遵守相关法规
 
 ---
 
