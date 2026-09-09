@@ -83,7 +83,7 @@ Trigger Event / User Input ──► FastAPI (POST /workflows/{id}/runs) ──�
 3. **Pause & Resume Handlers**: Nodes requiring human review (`pause`) persist a `WorkflowPauseRequest` and suspend execution until approved or filled via `/runs/{id}/pause-requests/{req_id}/submit`.
 ### Scalability
 
-The frontend and API are stateless and scale horizontally; Celery Workers scale independently by queue (`default`, `knowledge`, `workflow`). **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. See [Deployment Architecture](../self-host/architecture.mdx) for the service topology and volumes.
+The frontend and API are stateless and scale horizontally; Celery Workers scale independently by queue (`default`, `knowledge`, `workflow`). **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. See [Deployment Architecture](../../self-host/architecture.mdx) for the service topology and volumes.
 
 ### Security and Multi-tenancy
 
@@ -104,7 +104,7 @@ User sessions default to `30` days (controlled by the `session_timeout_days` sit
 ---
 
 See also:
-- [Deployment Architecture](../self-host/architecture.mdx) — 3 images / 5 services topology and volumes
+- [Deployment Architecture](../../self-host/architecture.mdx) — 3 images / 5 services topology and volumes
 - [Agent](./agent.mdx), [Workflow](./workflow.mdx), [Knowledge Base](./knowledge-base.mdx) — core resource concepts
 - [Teams & Security](./security.mdx) — multi-tenancy and permission boundaries
-- [Environment Variables Reference](../self-host/configuration/environment-variables.mdx) — startup-level configuration
+- [Environment Variables Reference](../../self-host/configuration/environment-variables.mdx) — startup-level configuration

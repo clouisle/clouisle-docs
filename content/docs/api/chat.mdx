@@ -62,18 +62,13 @@ POST /api/v1/agents/{agent_id}/chat
 {
   "message": "营业时间是什么？",
   "conversation_id": "conv-123",
-  "files": [
-    {
-      "name": "document.pdf",
-      "url": "https://example.com/document.pdf",
-      "type": "application/pdf"
-    }
-  ],
   "file_urls": [
     {
       "asset_id": "asset-456",
-      "url": "https://your-domain.com/api/v1/upload/files/asset-456",
-      "filename": "report.pdf"
+      "url": "https://your-domain.com/api/v1/upload/files/general/2026/09/7f3a1c9d2b10_a1b2c3d4.pdf",
+      "filename": "7f3a1c9d2b10_a1b2c3d4.pdf",
+      "size": 1048576,
+      "mime_type": "application/pdf"
     }
   ],
   "variables": {
@@ -82,14 +77,17 @@ POST /api/v1/agents/{agent_id}/chat
 }
 ```
 
+
+使用上传响应中的 `url`、`filename`、`size` 和 `mime_type` 原样提交，不要根据 `asset_id` 自行拼接 `/upload/files/{asset_id}`。生成图片或视频的 `asset_ref` 仅在对应会话或工作流运行范围内有效；受保护媒体 URL 需要带当前 JWT 或 API Key 请求。
+
 ### 请求字段
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `message` | string | 是 | 用户消息（最多 32000 字符） |
-| `images` | array | 否 | 视觉图片（name, url, type） |
+| `images` | array | 否 | 视觉图片（`asset_id` 或 `asset_ref`、`type`、`url`） |
 | `files` | array | 否 | 已解析的上传文件（已弃用，使用 `file_urls`） |
-| `file_urls` | array | 否 | 原始上传的 Asset 元数据（`asset_id`, `url`, `filename`） |
+| `file_urls` | array | 否 | 上传响应中的 Asset 元数据（`asset_id`、`filename`、`url`、`size`、`mime_type`） |
 | `conversation_id` | string | 否 | 会话 UUID（不提供则创建新会话） |
 | `variables` | object | 否 | 聊天输入表单的变量值 |
 | `history_override` | array | 否 | 覆盖会话历史（用于版本切换/重新生成） |
@@ -107,7 +105,6 @@ curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
 ```
 
 ### 非流式响应
-
 **成功 (200 OK):**
 
 ```json
@@ -135,7 +132,8 @@ curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
           "document_name": "营业时间政策",
           "chunk_id": "chunk-012",
           "content": "营业时间：周一至周五，美东时间上午 9 点至下午 5 点",
-          "score": 0.95
+          "score": 0.95,
+          "citation_id": "kb-789-chunk-012"
         }
       ],
       "created_at": "2026-02-11T16:00:00Z",
@@ -151,6 +149,8 @@ curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
   "msg": "success"
 }
 ```
+未执行检索时 `rag_context` 为 `null`（例如 RAG 关闭或 Agent 未关联知识库）；执行检索但没有上下文时为 `[]`。检索上下文可能包含稳定的 `citation_id`；引用时使用精确的 `[[cite:SOURCE_ID]]`。
+
 
 ## 流式响应
 
@@ -185,12 +185,22 @@ data: {"usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 
 ```
 
 详见 [SSE 流式事件](./streaming)。
+`media_result` 是成功生成媒体时用于 UI 的事件，不会作为文本回放给模型：
+客户端应保留收到的 SSE 事件顺序。检索、压缩、推理、工具、媒体和正文事件可能交错；`rag_start` 与 `rag_context` 仅在实际执行检索时发送。
+
+
+```text
+event: media_result
+data: {"kind":"media.image","success":true,"images":[{"image":{"url":"/api/v1/upload/files/generated-images/2026/09/9a8b7c6d5e4f_55667788.png","asset_ref":"a1b2","format":"png"}}]}
+```
+
+生成图片或视频的受保护 URL 必须使用当前 JWT 或 API Key 获取；客户端应明确展示未认证、无权限、不可用或预览过大状态，不得回退到未认证原始 URL。
 
 ## 持久运行与控制
 
 聊天执行由持久化的 `AgentRun` 支持，浏览器断开连接不会停止模型循环。流式端点流式传输相同的 SSE 事件；此外，运行范围的事件携带包含 `run_id`、`sequence`、`timestamp`、`round_id`、`message_id` 和 `type` 的信封，以便重连后无需重复（`after_sequence`）恢复。
 
-额外的运行事件：`run_start`（运行身份/状态）、`run_status`（queued/running/stopping 转换）、`input_accepted`（排队的引导/追问已提交）、`run_end`（恰好一个终止事件：`completed | stopped | failed | interrupted`）。
+额外的运行事件：`run_start`（运行身份/状态）、`run_status`（queued/running/waiting/stopping 转换；模型调用 `ask_user` 时为 `waiting`，并携带 `pending_tool_call_id`、`pending_tool_name`、`pending_tool_input`）、`input_accepted`（排队的引导/追问已提交）、`run_end`（恰好一个终止事件：`completed | stopped | failed | interrupted`）。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |

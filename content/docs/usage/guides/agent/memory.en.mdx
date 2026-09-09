@@ -19,6 +19,18 @@ Clouisle has three layers of context: the current active message branch, convers
   <figcaption>Agent memory configuration</figcaption>
 </figure>
 
+## Background Memory Extraction
+
+Administrators can configure background extraction for completed conversations under **Site Settings** > **Memory** (`/site-settings/memory`). The Agent must also have memory enabled; disabling either switch prevents extraction tasks.
+
+| Setting | Default | Constraint |
+| --- | --- | --- |
+| `memory_async_extraction_enabled` | `false` | Global background-extraction switch |
+| `memory_extraction_model_id` | empty | Empty or unavailable models use the fallback chain |
+| `memory_extraction_cooldown_seconds` | `180` | `10-3600` second debounce |
+| `memory_extraction_max_pending_turns` | `6` | `1-50`, trigger immediately at the threshold |
+
+
 ## How Long Conversations Are Compressed
 
 Context compression is on by default. It computes the available input budget from the model's context window, reserving a default of `4000` output Tokens and a `1000` safety margin.

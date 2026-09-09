@@ -15,12 +15,36 @@ Clouisle's streaming interfaces return `Content-Type: text/event-stream`. Client
 | `reasoning_start` / `reasoning_delta` / `reasoning_end` | Reasoning (if the model supports it and it is not hidden) |
 | `content_delta` | Text delta |
 | `tool_call` / `tool_result` | Tool name, arguments, and result |
-| `media_result` | Image/video display payload |
+| `media_result` | UI image/video result; protected URLs require authentication and are not replayed to the model as text |
 | `compression_start` / `compression_end` | Context compression details |
 | `output_truncated` | Reached the maximum output Token |
 | `iteration_cap_reached` | Reached the Agent's tool iteration cap |
 | `message_end` | Token usage, elapsed time, and termination status |
 | `error` | Error details |
+`rag_start` and `rag_context` are emitted only when retrieval actually runs. If retrieval is not executed, persisted `rag_context` is `null`; if retrieval runs and returns no contexts, it is `[]`.
+
+Clients must preserve received event order when rendering the thought-process timeline. Retrieval, compression, reasoning, tool, media, and text events may interleave. Retrieved source payloads may include `citation_id`; use the exact `[[cite:SOURCE_ID]]` marker when citing that source.
+
+
+## Durable Run Events
+
+Agent chat runs are backed by a durable `AgentRun`. Run-scoped events include `run_id`, `sequence`, `timestamp`, `round_id`, `message_id`, and `type`; reconnect with `after_sequence` to replay without duplicates.
+
+```text
+event: run_start
+data: {"status":"running","run_id":"run-123"}
+
+event: run_status
+data: {"status":"waiting","pending_tool_call_id":"call-123","pending_tool_name":"ask_user","pending_tool_input":{"questions":[...]}}
+
+event: input_accepted
+data: {"kind":"steer","content":"..."}
+
+event: run_end
+data: {"status":"completed","message_id":"msg-456"}
+```
+
+`run_status` enters `waiting` while the model awaits an `ask_user` answer. Use the pending fields to render the question form and submit answers through `POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers`. Each run emits exactly one `run_end` with status `completed`, `stopped`, `failed`, or `interrupted`.
 
 ## Workflow Events
 
@@ -30,5 +54,6 @@ Workflow streams contain status events for run start, node start/output/skipped,
 
 - Concatenate `content_delta` in order; do not overwrite earlier fragments.
 - Store reasoning separately from text; do not render hidden content where display is not allowed.
-- Treat `message_end` as normal termination and `error` as failed termination.
+- Treat `message_end` as normal message termination, `run_end` as durable-run termination, and `error` as failed termination.
 - Configure heartbeats and reconnection for long connections; after reconnecting, use the conversation/run ID instead of creating new resources.
+- Send the active JWT or API key when fetching protected image, video, or sandbox-artifact URLs; never fall back to an unauthenticated raw URL.

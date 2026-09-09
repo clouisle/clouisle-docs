@@ -18,6 +18,30 @@ Clouisle 有三层上下文：当前活动消息分支、会话级摘要，以�
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-memory-settings.png" alt="Agent 记忆配置" />
   <figcaption>Agent 记忆配置</figcaption>
 </figure>
+## 管理后台记忆提取
+
+管理员可在**站点设置** > **记忆**（`/site-settings/memory`）配置完成对话的后台记忆提取。Agent 必须同时启用记忆；关闭任一开关都不会创建提取任务。
+
+| 设置 | 默认值 | 约束 |
+| --- | --- | --- |
+| `memory_async_extraction_enabled` | `false` | 后台提取总开关 |
+| `memory_extraction_model_id` | 空 | 空值或不可用模型使用回退模型链 |
+| `memory_extraction_cooldown_seconds` | `180` | `10-3600` 秒去抖 |
+| `memory_extraction_max_pending_turns` | `6` | `1-50`，达到阈值立即触发 |
+
+[/Users/yunhai/Documents/CodeData/Project/clouisle-docs/content/docs/usage/guides/agent/memory.en.mdx#75D7]
+PUT >20:
+## Background Memory Extraction
+
+Administrators can configure background extraction for completed conversations under **Site Settings** > **Memory** (`/site-settings/memory`). The Agent must also have memory enabled; disabling either switch prevents extraction tasks.
+
+| Setting | Default | Constraint |
+| --- | --- | --- |
+| `memory_async_extraction_enabled` | `false` | Global background-extraction switch |
+| `memory_extraction_model_id` | empty | Empty or unavailable models use the fallback chain |
+| `memory_extraction_cooldown_seconds` | `180` | `10-3600` second debounce |
+| `memory_extraction_max_pending_turns` | `6` | `1-50`, trigger immediately at the threshold |
+
 
 ## 长对话如何压缩
 

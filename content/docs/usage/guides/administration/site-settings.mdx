@@ -18,9 +18,11 @@ icon: MonitorCog
 - **安全**（`/site-settings/security`）
 - **通知渠道**（`/site-settings/notifications`）
 - **存储**（`/site-settings/storage`）
+- **记忆**（`/site-settings/memory`）
 - **SSO**（`/site-settings/sso`）
 
 设置以键值形式存储，通过 `GET /api/v1/admin/site-settings` 暴露（单键：`GET/PUT /api/v1/admin/site-settings/{key}`，批量更新：`PUT /api/v1/admin/site-settings`）。查看需要 `admin:settings:read`；更新需要 `admin:settings:update`。
+
 
 ## 常规设置
 
@@ -277,7 +279,21 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 - 仅在配置完渠道（SMTP、钉钉等）后再启用外部渠道
 - 谨慎选择启用类型，避免通知噪音
 
+## 后台记忆提取设置
+
+**记忆**（`/site-settings/memory`）控制已完成对话的可选后台记忆提取。Agent 还必须启用记忆；关闭 Agent 记忆或关闭该总开关都不会创建提取任务。
+
+| 字段 | 类型 | 默认值 | 约束与行为 |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | boolean | `false` | 启用后台提取 |
+| `memory_extraction_model_id` | string | `""` | 空值使用回退模型链；不可用或已禁用模型也会回退 |
+| `memory_extraction_cooldown_seconds` | integer | `180` | `10-3600`，去抖等待时间 |
+| `memory_extraction_max_pending_turns` | integer | `6` | `1-50`，达到待处理轮次后立即触发 |
+
+提取模型按以下顺序回退：显式配置且启用的模型、Agent 分配的模型、系统默认聊天模型、首个可用聊天模型。冷却时间内会去抖；待处理轮次达到阈值时立即排队任务。
+
 ## 存储设置
+
 
 ### 文件存储
 

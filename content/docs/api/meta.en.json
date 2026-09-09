@@ -6,6 +6,7 @@
   "pages": [
     "index",
     "get-started",
+    "file-uploads",
     "api-keys",
     "agents",
     "chat",
@@ -17,6 +18,7 @@
     "tools",
     "users",
     "errors",
-    "admin"
+    "admin",
+    "settings"
   ]
 }

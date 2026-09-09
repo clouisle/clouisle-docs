@@ -61,7 +61,8 @@ Clouisle provides a dedicated **Agent Studio** workspace (`/app/apps/{agent_id}`
 
 <TypeTable
   type={{
-    rag_mode: { description: 'Overall RAG mode', type: "'off' | 'auto' | 'agentic'", default: 'auto' },
+    rag_mode: { description: 'Overall RAG mode', type: "'off' | 'auto' | 'agentic'", default: 'agentic with a KB; off without a KB' },
+
     search_mode: { description: 'Per-KB retrieval mode', type: "'vector' | 'fulltext' | 'hybrid'", default: 'hybrid' },
     top_k: { description: 'Per-KB result count', type: 'number', default: 5 },
     score_threshold: { description: 'Minimum recall score', type: 'number', default: 0.3 },
@@ -70,6 +71,8 @@ Clouisle provides a dedicated **Agent Studio** workspace (`/app/apps/{agent_id}`
 />
 
 Knowledge base ordering is defined by the `knowledge_base_configs` list and can be adjusted when editing the agent; this order is applied when the agent retrieves context.
+Without a knowledge-base association, the backend normalizes persisted `rag_mode` to `off` and the editor hides the RAG mode selector; the selector appears after a knowledge base is attached.
+
 
 ## Add Tools and Capabilities
 

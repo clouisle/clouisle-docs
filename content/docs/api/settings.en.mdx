@@ -1,0 +1,135 @@
+---
+title: Settings API
+description: Manage site settings, notification channels, and background memory extraction
+icon: Settings2
+---
+
+The Settings API manages administrator site configuration and the unauthenticated public settings subset. Admin settings are stored as key-value records and use the unified `code`, `data`, and `msg` response shape.
+
+## Endpoint Overview
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/admin/site-settings` | Read all settings or filter by category |
+| GET | `/api/v1/admin/site-settings/{key}` | Read one setting |
+| PUT | `/api/v1/admin/site-settings/{key}` | Update one setting |
+| PUT | `/api/v1/admin/site-settings` | Bulk-update settings |
+| POST | `/api/v1/admin/site-settings/reset` | Reset all settings or one category |
+| GET | `/api/v1/site-settings/public` | Read public settings without authentication |
+| GET/PUT | `/api/v1/admin/site-settings/auto-notifications` | Read or update auto-notification configuration |
+| POST | `/api/v1/admin/site-settings/test-*` | Test notification channels |
+| POST/GET | `/api/v1/admin/site-settings/archive-audit-logs` | Start and inspect audit-log archiving |
+
+## Authentication and Permissions
+
+Admin endpoints require a JWT or an API key with the corresponding permission:
+
+- `admin:settings:read`: read settings
+- `admin:settings:update`: update and reset settings
+
+The public settings endpoint requires no authentication. The admin API is primarily used by the administration UI and should not be treated as an anonymous public API.
+
+## Read Settings
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/site-settings?category=general" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+The optional `category` filter accepts values such as `general`, `security`, `email`, `storage`, `notification`, and `memory`. A single-setting response contains `key`, `value`, `value_type`, `category`, `description`, and `is_public`.
+
+## Update Settings
+
+Update one setting:
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/admin/site-settings/site_name" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"value":"My Clouisle Instance"}'
+```
+
+Bulk update:
+
+```json
+{
+  "settings": {
+    "site_name": "My Clouisle Instance",
+    "smtp_enabled": true
+  }
+}
+```
+
+Send the object to `PUT /api/v1/admin/site-settings`. The backend validates each value against its type and constraints; inspect `data` and `msg` when validation fails.
+
+## Background Memory Settings
+
+The `memory` category controls optional background extraction from completed conversations. The Agent must also have memory enabled; disabling either the global switch or the Agent memory feature prevents extraction tasks. The administration page is `/site-settings/memory`.
+
+| Key | Type | Default | Constraints and behavior |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | boolean | `false` | Enable background extraction |
+| `memory_extraction_model_id` | string | `""` | Empty uses the fallback model chain; unavailable or disabled models also fall back |
+| `memory_extraction_cooldown_seconds` | integer | `180` | `10-3600`, debounce window |
+| `memory_extraction_max_pending_turns` | integer | `6` | `1-50`, trigger immediately at this pending-turn count |
+
+Read the category:
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/site-settings?category=memory" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+The extraction model falls back in this order: explicitly configured enabled model, the Agent's assigned model, the system default chat model, then the first available chat model. The cooldown debounces extraction; reaching the pending-turn threshold queues it immediately.
+
+## Reset Settings
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/site-settings/reset?category=general" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+Omit `category` to reset every setting. Include it to reset only that category.
+
+## Public Settings
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/site-settings/public"
+```
+
+Only fields marked `is_public: true` are returned, such as the site name, default language, authentication-page layout, theme, registration policy, and knowledge-base upload limit. Background memory settings are not exposed through this endpoint.
+
+## Auto Notifications and Tests
+
+Auto-notification configuration uses:
+
+```text
+GET /api/v1/admin/site-settings/auto-notifications
+PUT /api/v1/admin/site-settings/auto-notifications
+```
+
+Notification test endpoints include `test-email`, `test-dingtalk`, `test-wechat`, `test-feishu`, `test-webhook`, and `test-slack`. `test-email` accepts `{ "to_email": "admin@example.com" }`; the other test endpoints take no body.
+
+## Audit-Log Archiving
+
+```text
+POST /api/v1/admin/site-settings/archive-audit-logs
+GET  /api/v1/admin/site-settings/archive-audit-logs/{task_id}
+```
+
+The start endpoint returns a background task ID. Use the status endpoint to inspect the archive task.
+
+## Common Errors
+
+| HTTP / code | Meaning |
+| --- | --- |
+| `400 / 1001` | Setting value failed validation |
+| `401 / 2000` | Authentication is missing |
+| `403 / 3000` | Permission denied |
+| `404 / 4000` | Setting key or resource not found |
+
+See [Site Settings](../usage/guides/administration/site-settings) for the administrator-facing configuration guide.
+
+---
+
+**Last Updated**: 2026-09-09

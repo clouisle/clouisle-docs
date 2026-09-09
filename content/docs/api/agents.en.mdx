@@ -177,9 +177,10 @@ In addition to the [list fields](#response-fields) above, the details endpoint r
 | `enable_attachments` | boolean | Enable file and image attachments |
 | `enable_user_input_request` | boolean | Enable model-callable `ask_user` tool |
 | `enable_memory` | boolean | Enable cross-conversation memory |
-| `rag_mode` | string | RAG mode: `off`, `auto`, `agentic` (default) |
+| `rag_mode` | string | RAG mode: `off`, `auto`, `agentic` (`agentic` by default with a knowledge base; normalized to `off` when the response `knowledge_bases` list is empty) |
 | `variables` | array | Chat input variable definitions |
-| `knowledge_bases` | array | Associated knowledge base configs (with `retrieval_top_k`, `score_threshold`, `search_mode`) |
+| `knowledge_bases` | array | Attached knowledge-base response objects (`knowledge_base`, `retrieval_top_k`, `score_threshold`, `search_mode`) |
+
 
 ### Success Response (200 OK)
 
@@ -306,8 +307,8 @@ Create a new AI agent. The agent is in `draft` status by default and must be [pu
 | `image_generation_config` | object | No | Image generation configuration |
 | `enable_video_generation` | boolean | No | Enable video generation tool (default false) |
 | `video_generation_config` | object | No | Video generation configuration |
-| `rag_mode` | string | No | RAG mode: `off`, `auto`, `agentic` (default `agentic`) |
-| `knowledge_base_configs` | array | No | KB configs (`knowledge_base_id`, `retrieval_top_k`, `score_threshold`, `search_mode`) |
+| `rag_mode` | string | No | RAG mode: `off`, `auto`, `agentic` (`agentic` by default with a knowledge base; normalized to `off` when no knowledge base is attached) |
+| `knowledge_base_configs` | array | No | Knowledge-base configs submitted on create/update (`knowledge_base_id`, `retrieval_top_k`, `score_threshold`, `search_mode`); an empty list forces `rag_mode` to `off` |
 | `variables` | array | No | Chat input variable definitions |
 | `opening_message` | string | No | Opening message shown in chat |
 | `suggested_questions` | array | No | Suggested questions |
@@ -600,18 +601,13 @@ Send a message to the agent and synchronously receive the complete response. Sui
 {
   "message": "What are your business hours?",
   "conversation_id": "conv-123",
-  "files": [
-    {
-      "name": "document.pdf",
-      "url": "https://example.com/document.pdf",
-      "type": "application/pdf"
-    }
-  ],
   "file_urls": [
     {
       "asset_id": "asset-456",
-      "url": "https://your-domain.com/api/v1/upload/files/asset-456",
-      "filename": "report.pdf"
+      "url": "https://your-domain.com/api/v1/upload/files/general/2026/09/7f3a1c9d2b10_a1b2c3d4.pdf",
+      "filename": "7f3a1c9d2b10_a1b2c3d4.pdf",
+      "size": 1048576,
+      "mime_type": "application/pdf"
     }
   ],
   "variables": {
@@ -620,14 +616,17 @@ Send a message to the agent and synchronously receive the complete response. Sui
 }
 ```
 
+
+Submit `url`, `filename`, `size`, and `mime_type` exactly as returned by the upload response; do not construct `/upload/files/{asset_id}` from the asset ID. A generated media `asset_ref` is valid only within its conversation or workflow-run scope, and protected URLs require the active JWT or API key.
+
 ### Request Fields
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `message` | string | Yes | User message (max 32000 chars) |
-| `images` | array | No | Images for vision (`name`, `url`, `type`) |
+| `images` | array | No | Vision images (`asset_id` or `asset_ref`, `type`, `url`) |
 | `files` | array | No | Parsed files (deprecated, use `file_urls`) |
-| `file_urls` | array | No | Raw uploaded asset metadata (`asset_id`, `url`, `filename`) |
+| `file_urls` | array | No | Asset metadata from the upload response (`asset_id`, `filename`, `url`, `size`, `mime_type`) |
 | `conversation_id` | string | No | Conversation UUID; creates a new one if not provided |
 | `variables` | object | No | Variable values for the chat input form |
 | `history_override` | array | No | Override conversation history (used for version switching/regeneration) |
@@ -740,7 +739,7 @@ data: {"usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 
 | `message_end` | Message ended, returns token usage and timing metrics |
 
 <Callout type="info">
-  SSE clients need to parse the event stream as `text/event-stream`. See [SSE Streaming Events](../streaming) for details.
+  SSE clients need to parse the event stream as `text/event-stream`. See [SSE Streaming Events](./streaming) for details.
 </Callout>
 
 ---
@@ -874,7 +873,7 @@ curl -X GET "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-44665
 
 ## Related Documentation
 
-- [API Get Started](../get-started) — Create an API Key, configure the base URL, and send your first request
-- [Agent Chat](../chat) — Send messages, attachments, variables, and consume streaming responses
-- [SSE Streaming Events](../streaming) — Parse SSE events for agents and workflows
-- [Error Handling](../errors) — Recover by HTTP status and business error codes
+- [API Get Started](./get-started) — Create an API Key, configure the base URL, and send your first request
+- [Agent Chat](./chat) — Send messages, attachments, variables, and consume streaming responses
+- [SSE Streaming Events](./streaming) — Parse SSE events for agents and workflows
+- [Error Handling](./errors) — Recover by HTTP status and business error codes

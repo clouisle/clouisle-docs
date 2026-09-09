@@ -1,0 +1,93 @@
+---
+title: 文件上传 API
+description: 上传图片、文档、沙箱产物并解析文件
+icon: Upload
+---
+
+Clouisle 提供知识库文档、聊天附件、沙箱产物和文件解析接口。所有请求都使用 `multipart/form-data`，响应遵循统一的 `code`、`data`、`msg` 结构。
+
+## 端点总览
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/v1/knowledge-bases/{kb_id}/documents/upload` | 上传知识库文档并创建待处理文档 |
+| POST | `/api/v1/knowledge-bases/{kb_id}/documents/url` | 从 URL 创建知识库文档 |
+| POST | `/api/v1/upload/image` | 上传图片 |
+| POST | `/api/v1/upload/file` | 上传通用图片或文档 |
+| POST | `/api/v1/upload/sandbox-artifact` | 上传沙箱生成的产物 |
+| POST | `/api/v1/upload/parse` | 解析单个文件文本 |
+| POST | `/api/v1/upload/parse/batch` | 批量解析最多 5 个文件 |
+
+## 支持的格式与大小
+
+知识库文档上传支持 PDF、DOC/DOCX、TXT/Markdown、HTML、CSV、XLS/XLSX、JSON 和 PPTX。图片、压缩包和视频不属于知识库文档类型。
+
+通用图片上传支持 JPEG、PNG、GIF、WebP、SVG 和 ICO；通用文件上传还支持 PDF、TXT、Markdown、HTML、CSV、JSON、DOC/DOCX、XLSX 和 PPTX。
+
+| 端点 | 大小限制 |
+| --- | --- |
+| `/api/v1/upload/image` | 每个文件 10 MB |
+| `/api/v1/upload/file` | 每个文件 10 MB |
+| `/api/v1/upload/parse` | 每个文件 10 MB |
+| `/api/v1/upload/parse/batch` | 每个文件 10 MB，最多 5 个 |
+| 知识库文档上传 | 默认 50 MB；由 `kb_document_max_upload_size_mb` 配置，范围 1–1024 MB |
+
+聊天通用上传没有按格式拆分的大小上限；服务端统一执行每文件 10 MB 限制。
+
+## 上传图片或通用文件
+
+```bash
+curl -X POST "$API_BASE_URL/api/v1/upload/file" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "file=@/path/to/report.pdf"
+```
+
+响应中的文件名是生成的存储名。提交聊天附件时，使用响应返回的 `url`、`filename`、`size` 和 `mime_type`，不要根据 `asset_id` 自行拼接 `/upload/files/{asset_id}`。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "asset_id": "550e8400-e29b-41d4-a716-446655440000",
+    "url": "/api/v1/upload/files/general/2026/09/7f3a1c9d2b10_a1b2c3d4.pdf",
+    "filename": "7f3a1c9d2b10_a1b2c3d4.pdf",
+    "original_name": "report.pdf",
+    "size": 1048576,
+    "content_type": "application/pdf"
+  },
+  "msg": "success"
+}
+```
+
+将元数据放入 Agent 聊天请求的 `file_urls` 数组；已解析文件的旧 `files` 字段已弃用。详见 [Agent 聊天 API](./chat)。
+
+## 解析文件
+
+```bash
+curl -X POST "$API_BASE_URL/api/v1/upload/parse?max_content_length=100000&truncate_strategy=end" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "file=@/path/to/document.pdf"
+```
+
+`max_content_length` 默认 `100000`，允许 `1000–500000`；`truncate_strategy` 支持 `end`、`start` 和 `middle`。批量解析使用字段名 `files`，每次最多 5 个文件；单个文件失败会记录在对应错误结果中。
+
+## 知识库文档与沙箱产物
+
+知识库文档上传成功后状态为 `pending`。配置分块参数后，调用知识库处理端点开始嵌入和索引。
+
+沙箱产物端点可以使用 JWT 或 `clou_` API Key；内部沙箱请求也可以使用时间戳和签名请求头。大小限制由 `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` 控制。
+
+## 访问控制与错误
+
+- 生成图片、生成视频和沙箱产物属于受保护 Asset；查看或下载需要当前用户或 API Key 对相关会话/工作流运行拥有权限。
+- 受保护媒体 URL 必须携带当前 JWT 或 API Key。客户端应展示未认证、无权限、不可用和预览过大状态，不得回退到未认证原始 URL。
+- `asset_ref` 仅在对应会话或工作流运行范围内有效，不要猜测或跨范围复用。
+
+| 错误 | 代码 | 说明 |
+| --- | --- | --- |
+| 文件过大 | `1001` | 超过端点限制；`data.max_size` 提供限制 |
+| 类型不支持 | `1001` / `6003` | MIME 类型或扩展名不在允许列表中 |
+| 批量文件过多 | `1001` | `parse/batch` 超过 5 个文件 |
+| 文件不存在 | `4000` | 存储文件已不存在 |
+
+上传或解析失败时读取响应中的 `data.errors` 和 `msg`，不要仅依据 HTTP 状态码判断失败原因。

@@ -1,0 +1,93 @@
+---
+title: File Upload API
+description: Upload images, documents, sandbox artifacts, and parse files
+icon: Upload
+---
+
+Clouisle provides endpoints for knowledge-base documents, chat attachments, sandbox artifacts, and file parsing. Requests use `multipart/form-data`, and responses follow the unified `code`, `data`, `msg` shape.
+
+## Endpoint Overview
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/knowledge-bases/{kb_id}/documents/upload` | Upload a knowledge-base document in pending state |
+| POST | `/api/v1/knowledge-bases/{kb_id}/documents/url` | Create a knowledge-base document from a URL |
+| POST | `/api/v1/upload/image` | Upload an image |
+| POST | `/api/v1/upload/file` | Upload a generic image or document |
+| POST | `/api/v1/upload/sandbox-artifact` | Upload a sandbox-generated artifact |
+| POST | `/api/v1/upload/parse` | Parse one file into text |
+| POST | `/api/v1/upload/parse/batch` | Parse up to five files |
+
+## Supported Formats and Limits
+
+Knowledge-base document uploads support PDF, DOC/DOCX, TXT/Markdown, HTML, CSV, XLS/XLSX, JSON, and PPTX. Images, archives, and video are not knowledge-base document types.
+
+Generic image uploads support JPEG, PNG, GIF, WebP, SVG, and ICO. Generic file uploads also support PDF, TXT, Markdown, HTML, CSV, JSON, DOC/DOCX, XLSX, and PPTX.
+
+| Endpoint | Size limit |
+| --- | --- |
+| `/api/v1/upload/image` | 10 MB per file |
+| `/api/v1/upload/file` | 10 MB per file |
+| `/api/v1/upload/parse` | 10 MB per file |
+| `/api/v1/upload/parse/batch` | 10 MB per file, up to 5 files |
+| Knowledge-base document upload | 50 MB by default; `kb_document_max_upload_size_mb`, range 1–1024 MB |
+
+Chat's generic upload path has one server-enforced 10 MB per-file limit rather than separate limits by format.
+
+## Upload an Image or Generic File
+
+```bash
+curl -X POST "$API_BASE_URL/api/v1/upload/file" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "file=@/path/to/report.pdf"
+```
+
+The response contains a generated storage filename. When submitting a chat attachment, use the returned `url`, `filename`, `size`, and `mime_type`; do not construct `/upload/files/{asset_id}` from the asset ID.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "asset_id": "550e8400-e29b-41d4-a716-446655440000",
+    "url": "/api/v1/upload/files/general/2026/09/7f3a1c9d2b10_a1b2c3d4.pdf",
+    "filename": "7f3a1c9d2b10_a1b2c3d4.pdf",
+    "original_name": "report.pdf",
+    "size": 1048576,
+    "content_type": "application/pdf"
+  },
+  "msg": "success"
+}
+```
+
+Pass these fields in the `file_urls` array of an Agent chat request; the older parsed `files` field is deprecated. See the [Agent Chat API](./chat).
+
+## Parse Files
+
+```bash
+curl -X POST "$API_BASE_URL/api/v1/upload/parse?max_content_length=100000&truncate_strategy=end" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "file=@/path/to/document.pdf"
+```
+
+`max_content_length` defaults to `100000` and accepts `1000–500000`. `truncate_strategy` accepts `end`, `start`, or `middle`. Batch parsing uses the `files` field and accepts at most five files; individual failures are returned with the corresponding result instead of failing every item.
+
+## Knowledge-Base Documents and Sandbox Artifacts
+
+A successful knowledge-base document upload returns `pending`. Configure chunk settings and call the knowledge-base process endpoint to start embedding and indexing.
+
+The sandbox artifact endpoint accepts a JWT or `clou_` API key. Internal sandbox requests may instead use timestamp and signature headers. Its size limit is controlled by `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB`.
+
+## Access Control and Errors
+
+- Generated images, generated videos, and sandbox artifacts are protected Assets. Viewing or downloading them requires the current user or API key to have access to the related conversation or workflow run.
+- Fetch protected media URLs with the active JWT or API key. Clients should surface unauthenticated, unauthorized, unavailable, and too-large preview states instead of falling back to an unauthenticated raw URL.
+- An `asset_ref` is valid only within its conversation or workflow-run scope; do not guess or reuse it across scopes.
+
+| Error | Code | Description |
+| --- | --- | --- |
+| File too large | `1001` | Exceeds the endpoint limit; `data.max_size` reports the limit |
+| Unsupported type | `1001` / `6003` | MIME type or extension is not allowed |
+| Too many batch files | `1001` | More than 5 files for `parse/batch` |
+| File not found | `4000` | Stored file no longer exists |
+
+When an upload or parse fails, read `data.errors` and `msg`; do not infer the cause from the HTTP status alone.
