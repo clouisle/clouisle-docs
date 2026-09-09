@@ -113,6 +113,12 @@ A reply may consist of the following parts:
 - **Tool calls**: Parameters, results, logs, and artifacts; details can be hidden by the Agent.
 - **Media results**: Images or videos rendered directly into the assistant's message body.
 - **Message actions**: Copy, version, Token, speed, and more; can be hidden by the Agent.
+### Thought Timeline and Source Citations
+
+Progress events are displayed in the order they are emitted. Retrieval, context compression, reasoning, tool calls, media results, and text can be interleaved; the UI does not always put retrieval first.
+
+Retrieved sources may include a stable `citation_id`. When citing a factual claim, use the exact `[[cite:SOURCE_ID]]` marker and replace `SOURCE_ID` with the value returned by the source.
+
 
 ### Response Quality
 

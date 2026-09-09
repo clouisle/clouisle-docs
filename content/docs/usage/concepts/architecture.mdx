@@ -82,7 +82,7 @@ Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行�
 3. **暂停与恢复机制**：需要人工确认的 `pause` 节点持久化 `WorkflowPauseRequest` 并将状态设为 `WAITING`，待用户提交反馈后恢复执行。
 ### 扩展性
 
-前端与 API 无状态，可多副本水平扩展；Celery Worker 按队列（`default`、`knowledge`、`workflow`）独立扩展。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。部署拓扑与卷说明见 [部署架构](../self-host/architecture.mdx)。
+前端与 API 无状态，可多副本水平扩展；Celery Worker 按队列（`default`、`knowledge`、`workflow`）独立扩展。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。部署拓扑与卷说明见 [部署架构](../../self-host/architecture.mdx)。
 
 ### 安全与多租户
 
@@ -103,7 +103,7 @@ Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行�
 ---
 
 参见：
-- [部署架构](../self-host/architecture.mdx) — 3 镜像 5 服务拓扑与卷
+- [部署架构](../../self-host/architecture.mdx) — 3 镜像 5 服务拓扑与卷
 - [Agent](./agent.mdx)、[工作流](./workflow.mdx)、[知识库](./knowledge-base.mdx) — 核心资源概念
 - [团队与安全](./security.mdx) — 多租户与权限边界
-- [环境变量参考](../self-host/configuration/environment-variables.mdx) — 启动级配置
+- [环境变量参考](../../self-host/configuration/environment-variables.mdx) — 启动级配置

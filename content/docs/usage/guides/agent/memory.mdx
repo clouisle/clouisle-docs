@@ -18,6 +18,17 @@ Clouisle 有三层上下文：当前活动消息分支、会话级摘要，以�
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-memory-settings.png" alt="Agent 记忆配置" />
   <figcaption>Agent 记忆配置</figcaption>
 </figure>
+## 管理后台记忆提取
+
+管理员可在**站点设置** > **记忆**（`/site-settings/memory`）配置待处理用户轮次的后台记忆提取。提取会在配置的冷却时间后排队，或在达到待处理轮次阈值时立即触发。Agent 必须同时启用记忆；关闭任一开关都不会创建提取任务。
+
+| 设置 | 默认值 | 约束 |
+| --- | --- | --- |
+| `memory_async_extraction_enabled` | `false` | 后台提取总开关 |
+| `memory_extraction_model_id` | 空 | 空值或不可用模型使用回退模型链 |
+| `memory_extraction_cooldown_seconds` | `180` | `10-3600` 秒去抖 |
+| `memory_extraction_max_pending_turns` | `6` | `1-50`，达到阈值立即触发 |
+
 
 ## 长对话如何压缩
 

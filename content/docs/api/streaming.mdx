@@ -4,23 +4,47 @@ description: 解析 Agent 聊天和工作流运行的 Server-Sent Events
 icon: RadioTower
 ---
 
-Clouisle 的流式接口返回 `Content-Type: text/event-stream`。客户端应逐条读取 `event:` 与 `data:`，处理未知事件并在 `error` 或连接断开时关闭资源。
+Clouisle 的流式接口返回 `Content-Type: text/event-stream`。客户端应逐条读取 `event:` 与 `data:`，处理未知事件，并在 `error` 或连接断开时关闭资源。
 
 ## Agent 事件
 
 | 事件 | 说明 |
 | --- | --- |
 | `message_start` | 返回 `conversation_id` 和 `message_id` |
-| `rag_start` / `rag_context` | 开始检索及返回来源 |
+| `rag_start` / `rag_context` | 开始检索并返回来源 |
 | `reasoning_start` / `reasoning_delta` / `reasoning_end` | 思考过程（若模型支持且未隐藏） |
 | `content_delta` | 正文增量 |
 | `tool_call` / `tool_result` | 工具名称、参数和结果 |
-| `media_result` | 图片/视频展示载荷 |
+| `media_result` | UI 使用的图片/视频结果；受保护 URL 需要认证，不会作为文本回放给模型 |
 | `compression_start` / `compression_end` | 上下文压缩详情 |
 | `output_truncated` | 达到最大输出 Token |
 | `iteration_cap_reached` | 达到 Agent 工具迭代上限 |
 | `message_end` | Token 用量、耗时和终止状态 |
 | `error` | 错误详情 |
+`rag_start` 和 `rag_context` 仅在实际执行检索时发送。未执行检索时，持久化的 `rag_context` 为 `null`；执行检索但没有结果时为 `[]`。
+
+客户端渲染思考过程时间线时必须保留收到的事件顺序。检索、压缩、推理、工具、媒体和正文事件可能交错。来源负载可能包含 `citation_id`；引用来源时使用精确的 `[[cite:SOURCE_ID]]` 标记。
+
+
+## 持久运行事件
+
+Agent 聊天运行由持久化 `AgentRun` 支持。运行范围事件包含 `run_id`、`sequence`、`timestamp`、`round_id`、`message_id` 和 `type`；重连时通过 `after_sequence` 回放，避免重复。
+
+```text
+event: run_start
+data: {"status":"running","run_id":"run-123"}
+
+event: run_status
+data: {"status":"waiting","pending_tool_call_id":"call-123","pending_tool_name":"ask_user","pending_tool_input":{"questions":[...]}}
+
+event: input_accepted
+data: {"kind":"steer","content":"..."}
+
+event: run_end
+data: {"status":"completed","message_id":"msg-456"}
+```
+
+`run_status` 进入 `waiting` 表示模型正在等待 `ask_user` 答案；客户端使用待处理字段渲染问题表单，并通过 `POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` 提交答案。`run_end` 每次运行恰好一个，状态为 `completed`、`stopped`、`failed` 或 `interrupted`。
 
 ## 工作流事件
 
@@ -30,5 +54,6 @@ Clouisle 的流式接口返回 `Content-Type: text/event-stream`。客户端应�
 
 - 将 `content_delta` 按顺序拼接，不要覆盖前一片段。
 - 将 reasoning 与正文分离保存；不要在不允许展示时渲染隐藏内容。
-- 以 `message_end` 作为正常终止，以 `error` 作为失败终止。
+- 以 `message_end` 作为正常消息终止，以 `run_end` 作为持久运行终止，以 `error` 作为失败终止。
 - 为长连接配置心跳和重连；重连后使用会话/运行 ID，而不是重新创建资源。
+- 获取受保护的图片、视频和沙箱产物 URL 时携带当前 JWT 或 API Key；不要回退到未认证原始 URL。

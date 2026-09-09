@@ -1,0 +1,135 @@
+---
+title: 设置 API
+description: 管理站点设置、通知渠道和后台记忆提取
+icon: Settings2
+---
+
+设置 API 管理管理员站点配置，以及无需认证读取的公开设置。管理员设置存储为键值对，响应遵循统一的 `code`、`data`、`msg` 结构。
+
+## 端点总览
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/admin/site-settings` | 读取全部设置或按分类筛选 |
+| GET | `/api/v1/admin/site-settings/{key}` | 读取单个设置 |
+| PUT | `/api/v1/admin/site-settings/{key}` | 更新单个设置 |
+| PUT | `/api/v1/admin/site-settings` | 批量更新设置 |
+| POST | `/api/v1/admin/site-settings/reset` | 重置全部或一个分类 |
+| GET | `/api/v1/site-settings/public` | 读取公开设置，无需认证 |
+| GET/PUT | `/api/v1/admin/site-settings/auto-notifications` | 读取或更新自动通知配置 |
+| POST | `/api/v1/admin/site-settings/test-*` | 测试通知渠道 |
+| POST/GET | `/api/v1/admin/site-settings/archive-audit-logs` | 启动并查询审计日志归档 |
+
+## 认证与权限
+
+管理员端点需要 JWT 或具备对应权限的 API Key：
+
+- `admin:settings:read`：读取设置
+- `admin:settings:update`：更新和重置设置
+
+公开设置端点无需认证。管理 API 通常由管理后台使用，不应作为匿名公共 API。
+
+## 读取设置
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/site-settings?category=general" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+`category` 可选，例如 `general`、`security`、`email`、`storage`、`notification` 或 `memory`。单个设置响应包含 `key`、`value`、`value_type`、`category`、`description` 和 `is_public`。
+
+## 更新设置
+
+更新单个设置：
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/admin/site-settings/site_name" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"value":"My Clouisle Instance"}'
+```
+
+批量更新：
+
+```json
+{
+  "settings": {
+    "site_name": "My Clouisle Instance",
+    "smtp_enabled": true
+  }
+}
+```
+
+使用 `PUT /api/v1/admin/site-settings` 提交批量对象。后端会按每个设置的类型和约束校验值；校验失败时读取响应中的 `data` 和 `msg`。
+
+## 后台记忆提取设置
+
+`memory` 分类会在配置的冷却时间后处理待处理用户轮次，或在达到待处理轮次阈值时立即触发后台提取。Agent 还必须启用记忆；关闭该总开关或 Agent 记忆都不会创建提取任务。管理后台页面为 `/site-settings/memory`。
+
+| 键 | 类型 | 默认值 | 约束与行为 |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | boolean | `false` | 启用后台提取 |
+| `memory_extraction_model_id` | string | `""` | 空值使用回退模型链；不可用或已禁用的模型也会回退 |
+| `memory_extraction_cooldown_seconds` | integer | `180` | `10-3600`，用于去抖等待 |
+| `memory_extraction_max_pending_turns` | integer | `6` | `1-50`，达到待处理用户轮次后立即触发 |
+
+读取该分类：
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/site-settings?category=memory" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+提取模型按以下顺序回退：显式配置且启用的模型、Agent 分配的模型、系统默认聊天模型、首个可用聊天模型。冷却时间内会去抖；待处理轮次达到阈值时立即排队任务。
+
+## 重置设置
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/site-settings/reset?category=general" \\
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+不提供 `category` 时重置全部设置；提供分类时只重置该分类。
+
+## 公开设置
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/site-settings/public"
+```
+
+只返回 `is_public: true` 的字段，例如站点名称、默认语言、认证页布局、主题、注册策略和知识库上传大小限制。后台 `memory` 设置不会通过此端点公开。
+
+## 自动通知与测试
+
+自动通知配置端点：
+
+```text
+GET /api/v1/admin/site-settings/auto-notifications
+PUT /api/v1/admin/site-settings/auto-notifications
+```
+
+通知测试端点包括 `test-email`、`test-dingtalk`、`test-wechat`、`test-feishu`、`test-webhook` 和 `test-slack`。`test-email` 接收 `{ "to_email": "admin@example.com" }`，其他测试端点无需请求体。
+
+## 审计日志归档
+
+```text
+POST /api/v1/admin/site-settings/archive-audit-logs
+GET  /api/v1/admin/site-settings/archive-audit-logs/{task_id}
+```
+
+启动端点返回后台任务 ID，再使用查询端点读取归档状态。
+
+## 常见错误
+
+| HTTP / code | 含义 |
+| --- | --- |
+| `400 / 1001` | 设置值校验失败 |
+| `401 / 2000` | 缺少认证 |
+| `403 / 3000` | 权限不足 |
+| `404 / 4000` | 设置键或资源不存在 |
+
+更多后台配置说明参阅[站点设置](../usage/guides/administration/site-settings)。
+
+---
+
+**Last Updated**: 2026-09-09

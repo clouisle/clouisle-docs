@@ -61,7 +61,8 @@ Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排�
 
 <TypeTable
   type={{
-    rag_mode: { description: '整体 RAG 模式', type: "'off' | 'auto' | 'agentic'", default: 'auto' },
+    rag_mode: { description: '整体 RAG 模式', type: "'off' | 'auto' | 'agentic'", default: '关联知识库时为 agentic；无知识库时为 off' },
+
     search_mode: { description: '单知识库检索方式', type: "'vector' | 'fulltext' | 'hybrid'", default: 'hybrid' },
     top_k: { description: '单知识库返回结果数', type: 'number', default: 5 },
     score_threshold: { description: '最低召回分数', type: 'number', default: 0.3 },
@@ -70,6 +71,8 @@ Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排�
 />
 
 知识库顺序通过 `knowledge_base_configs` 列表定义，编辑 Agent 时可调整排列顺序，该顺序在 Agent 检索上下文时生效。
+未关联知识库时，后端会将持久化的 `rag_mode` 规范化为 `off`，编辑器也会隐藏 RAG 模式选择器；关联知识库后才显示该选择器。
+
 
 ## 添加工具和能力
 
