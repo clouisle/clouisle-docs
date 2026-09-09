@@ -64,7 +64,7 @@ curl -X PUT "https://your-domain.com/api/v1/admin/site-settings/site_name" \\
 
 ## 后台记忆提取设置
 
-`memory` 分类控制已完成对话的可选后台记忆提取。Agent 还必须启用记忆；关闭 Agent 记忆或关闭该总开关都不会创建提取任务。管理后台页面为 `/site-settings/memory`。
+`memory` 分类会在配置的冷却时间后处理待处理用户轮次，或在达到待处理轮次阈值时立即触发后台提取。Agent 还必须启用记忆；关闭该总开关或 Agent 记忆都不会创建提取任务。管理后台页面为 `/site-settings/memory`。
 
 | 键 | 类型 | 默认值 | 约束与行为 |
 | --- | --- | --- | --- |
