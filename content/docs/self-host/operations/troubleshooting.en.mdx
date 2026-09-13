@@ -63,6 +63,23 @@ The per-knowledge-base upload limit is the `kb_document_max_upload_size_mb` site
 5. On rerank failure, check rerank model credentials and provider quota.
 6. Read the retrieval lab's diagnostics and timings.
 
+## HTTP Tool or Intranet Requests Blocked [#outbound-allowlist]
+
+Custom HTTP tools, workflow HTTP request nodes, Knowledge Base URL import/preview extraction, and database connection testing are all governed by **Site Settings** > **Security** > **Outbound Network Allowlist** (`ssrf_allowed_targets`). This is a database `SiteSetting`, not an environment variable; it allows public addresses by default and blocks private (RFC 1918) and loopback addresses. Internal targets must be explicitly added, up to 200 entries, one per line:
+
+- Single IP: `192.168.1.50`, `10.20.1.10`
+- CIDR subnet: `10.10.0.0/16`, `172.20.0.0/24`
+- Exact domain: `oa.company.local`, `api.internal.service`
+- Wildcard domain: `*.corp.internal`
+
+<Callout type="warn">
+  The following targets are rejected whether or not they appear in the allowlist, checked both on save and during request execution: cloud metadata (`169.254.169.254`, `169.254.0.0/16`, `fe80::/10`, `metadata.google.internal`); unspecified addresses (`0.0.0.0`, `0.0.0.0/32`, `::`); multicast (`224.0.0.0/4`); universal wildcards (`*`, `0.0.0.0/0`, `::/0`); and loopback addresses (`127.0.0.1`, `localhost`, `::1`).
+</Callout>
+
+Loopback is permanently blocked to prevent agent abuse of host local services and Redis/Docker ports. To reach a companion service on the host, use the host LAN IP or `host.docker.internal`. Deployments using TUN-mode transparent proxies (Clash, Surge, Mihomo) require no extra configuration: the `198.18.0.0/15` benchmark range is built-in and permitted so `ipaddress` does not treat resolved public domains as private.
+
+The Model Endpoint Allowlist (**Site Settings** > **Security** > **Model Endpoint Allowlist**, `model_endpoint_allowlist`) is an independent policy scoped strictly to LLM, embedding, rerank, and media providers. It is a strict allowlist: an empty list blocks every model endpoint, but administrators may approve local inference services like `http://localhost:11434`. Do not substitute the outbound network allowlist for it.
+
 ## Model Calls Fail
 
 Check the model's `is_enabled`, team authorization, endpoint allowlist, API Key, context length, provider rate limits, and type capabilities. Error code `6103` means quota exceeded; `6104` means unauthorized.

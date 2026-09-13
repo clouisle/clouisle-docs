@@ -1,10 +1,13 @@
 ---
 title: Memory and Context
-description: Configure cross-conversation memory and understand long-conversation context compression
+description: Configure cross-conversation memory graphs, background extraction, and context compression
 icon: Brain
 ---
 
-Clouisle has three layers of context: the current active message branch, conversation-level summaries, and cross-conversation user memory. Each solves a different problem.
+Clouisle organizes context across three tiers to balance continuity against model context windows and cost:
+1. **Active message branch and context compression**: real-time turn history kept within budget via progressive compression so context windows never overflow.
+2. **Conversation summary**: an asynchronous summary of earlier turns that serves later turns inside the same conversation.
+3. **Cross-conversation Memory Graph**: a persistent knowledge network of entities and directional relations that retains user preferences, project background, and verified facts across separate conversations.
 
 ## Enable Cross-Conversation Memory
 
@@ -12,43 +15,129 @@ Clouisle has three layers of context: the current active message branch, convers
 2. Turn on **Enable Memory**.
 3. Set the maximum number of memories per retrieval, range `1-50`, default `10`.
 4. Turn on **Auto-extract Memories** as needed; it is on by default.
-5. Save the Agent and verify in two different conversations that user preferences are reused.
+5. Save and publish the Agent. When a user chats across different conversations, the Agent automatically recalls previously stored facts.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-memory-settings.png" alt="Agent memory configuration" />
   <figcaption>Agent memory configuration</figcaption>
 </figure>
 
+## The Memory Graph
+
+Persistent memory is structured as a directed topological knowledge graph of **Entities** and **Relations**, rather than a flat blob of text.
+
+You can inspect and manage your memory graph visually under the user menu > **My Memories** (`/app/memories`) or in the admin dashboard (`/memories`).
+
+<Callout type="info" title="Image needed: Memory graph canvas">
+  File: `/images/memory-graph-canvas.png`. Screenshot content: the interactive memory graph canvas showing entity nodes, relation edges, layout switchers (Grid, Hierarchical, Radial), and the entity detail drawer. Crop the screenshot to the canvas area and outline the selected entity node with the theme color. The future `alt` and caption for this image will both use "Memory graph canvas".
+</Callout>
+
+### Entity Types
+
+The system predefines 10 entity types:
+
+| Entity Type | Description | Examples |
+| --- | --- | --- |
+| `preference` | Personal user preference or working habit | "Prefers concise code style", "Uses TypeScript by default" |
+| `project` | Active initiative or work assignment | "Storefront redesign", "Internal documentation portal" |
+| `person` | Mentioned individual or stakeholder | "Manager Zhang (Product Lead)" |
+| `organization` | Company, department, or external group | "Engineering Dept", "Vendor Alpha" |
+| `skill` | Tech competency or specialization | "Python", "PostgreSQL performance tuning" |
+| `goal` | Milestone target or user intent | "Launch multilingual docs this quarter" |
+| `fact` | Concrete fact or environment attribute | "Production cluster deployed in Tokyo datacenter" |
+| `concept` | Domain concept or technical term | "RAG hybrid retrieval" |
+| `location` | Location or physical site | "Shanghai R&D Center" |
+| `custom` | Extensible custom entity | User-defined custom tags |
+
+### Relation Types
+
+Entities connect through directional relations used during graph traversal:
+
+| Relation Type | Meaning |
+| --- | --- |
+| `prefers` | User prefers this entity |
+| `uses` | Uses this tool, library, or method |
+| `works_on` | Contributes to this project or task |
+| `works_at` | Employed at this company or institution |
+| `knows` | Familiar with this person or subject |
+| `part_of` | Belongs to a higher-level entity |
+| `has_goal` | Pursuing this objective |
+| `located_in` | Situated at this physical site |
+| `related_to` | Associated with another concept |
+
+### Graph Management Capabilities
+
+- **Multiple layout engines**: switch between **Grid**, **Hierarchical**, and **Radial** layouts, with zoom in, zoom out, and Fit View controls.
+- **Search & filtering**: search entities by name or description keywords, or filter by entity type.
+- **Relation drawer**: select any entity to inspect its Outgoing and Incoming relations, edit its JSON property dictionary, or remove specific edges.
+- **Bulk and safe deletion**: use Select Mode to batch-delete outdated or sensitive entities. Deleting an entity automatically cleans up all its associated relations and vector embeddings.
+
+## Memory Retrieval and Recency Decay
+
+When an Agent retrieves memory, it balances semantic similarity with exponential recency decay using a weighted score:
+
+`Combined Score = (1 - w) * Similarity + w * Recency`
+
+- **Recency calculation**: uses an exponential half-life decay model with a default half-life of **30 days** (memories older than 30 days without updates receive half the temporal score).
+- **Weighting**: the recency weight `w` defaults to `0.15` (similarity accounts for `0.85`), balancing relevance with freshness.
+- **Time window filtering**: callers can pass `time_window_days` to restrict retrieval to memories created or touched within the last N days.
+- **Subgraph expansion**: after identifying candidate entities, the retriever can traverse outward `1-3` hops (`max_depth`) to supply a connected contextual subgraph to the LLM.
+
 ## Background Memory Extraction
 
-Administrators can configure background extraction for pending user turns under **Site Settings** > **Memory** (`/site-settings/memory`). Extraction queues after the configured cooldown or immediately at the pending-turn threshold. The Agent must also have memory enabled; disabling either switch prevents extraction tasks.
+Administrators configure background extraction under **Site Settings** > **Memory** (`/site-settings/memory`):
 
-| Setting | Default | Constraint |
-| --- | --- | --- |
-| `memory_async_extraction_enabled` | `false` | Global background-extraction switch |
-| `memory_extraction_model_id` | empty | Empty or unavailable models use the fallback chain |
-| `memory_extraction_cooldown_seconds` | `180` | `10-3600` second debounce |
-| `memory_extraction_max_pending_turns` | `6` | `1-50`, trigger immediately at the threshold |
+| Setting | Default | Type | Description |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | `false` | Boolean | Global switch for background extraction |
+| `memory_extraction_model_id` | empty | String | Model used for extraction; falls back to default model chain |
+| `memory_extraction_cooldown_seconds` | `180` | `10-3600`s | Debounce interval to avoid spamming extraction runs |
+| `memory_extraction_max_pending_turns` | `6` | `1-50` turns | Triggers extraction immediately once pending turns hit this threshold |
 
+<Callout type="info">
+  Extraction queues only when the Agent has **Enable Memory** and **Auto-extract Memories** enabled in its orchestration AND the administrator has enabled background extraction globally.
+</Callout>
 
 ## How Long Conversations Are Compressed
 
-Context compression is on by default. It computes the available input budget from the model's context window, reserving a default of `4000` output Tokens and a `1000` safety margin.
+Context compression is on by default. It computes available input budget from the model context window, reserving `4000` output Tokens and a `1000` Token safety margin by default.
 
 - At `70%` utilization, warning pressure begins.
-- At `80%` utilization, selective compression is triggered.
+- At `80%` utilization, selective compression triggers.
 - At `92%` utilization, it escalates to blocking-level macro compression.
-- By default, the last `3` raw turns and `2` tool turns are kept.
-- On context length errors, the system performs at most one more aggressive retry.
+- By default, the last `3` raw turns and `2` tool turns are preserved intact.
+- On context-length errors, the system performs at most one aggressive retry.
 
-The streaming API can send `compression_start` and `compression_end` to explain why this turn reorganized the history.
+Streaming APIs send `compression_start` and `compression_end` events to notify clients when history reorganization occurs.
 
 ## Conversation Summary
 
-A conversation-level summary is extracted asynchronously after at least `4` turns by default, with an injection budget of `400` Tokens by default. After `3` consecutive failures, the circuit breaker opens and cools down for `600` seconds. The summary only serves the current conversation and does not replace cross-conversation memory.
+A conversation-level summary is extracted asynchronously after at least `4` turns by default, with an injection budget of `400` Tokens. After `3` consecutive failures, the circuit breaker opens and cools down for `600` seconds. Summaries serve only the current session and never replace cross-conversation memory.
+
+## API Endpoints
+
+```http
+# List memory entities (filtered by entity_type with pagination)
+GET /api/v1/memories/entities?page=1&page_size=20&entity_type=preference
+
+# Create / read / update / delete an entity
+POST   /api/v1/memories/entities
+GET    /api/v1/memories/entities/{entity_id}
+PUT    /api/v1/memories/entities/{entity_id}
+DELETE /api/v1/memories/entities/{entity_id}
+
+# List / create / delete relations
+GET    /api/v1/memories/relations?entity_id={entity_id}&relation_type=uses
+POST   /api/v1/memories/relations
+DELETE /api/v1/memories/relations/{relation_id}
+
+# Fetch full or localized subgraph
+GET /api/v1/memories/graph?entity_ids={id1}&entity_ids={id2}&max_depth=2
+```
 
 ## Troubleshooting
 
-- **Preferences not remembered**: Confirm the Agent has memory enabled, the information reached the importance threshold, and the same signed-in user is used.
-- **Replies ignore very early details**: Long conversations may have been compressed; restate the key constraints or start a new conversation.
-- **Compression happens too often**: Check the model's context length, output reservation, and the size of tool results.
+- **Preferences not remembered**: confirm the Agent has memory enabled, the facts reached the extraction threshold, and you are logged in as the same user.
+- **Early details lost**: long sessions may have been compressed; restate key constraints or start a new conversation.
+- **Frequent compression**: inspect model context window size, output reservation, and tool output payload sizes.
+- **Inaccurate facts recorded**: navigate to `/app/memories`, locate the faulty entity via search, and click **Edit** or **Delete**.

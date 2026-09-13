@@ -16,6 +16,12 @@ icon: Wrench
 | POST | `/api/v1/tools?team_id={team_id}` | 创建自定义工具 |
 | PUT | `/api/v1/tools/{tool_id}` | 更新工具配置 |
 | DELETE | `/api/v1/tools/{tool_id}` | 删除自定义工具 |
+| POST | `/api/v1/tools/{tool_id}/share` | 将工具共享给其他团队 |
+| GET | `/api/v1/tools/{tool_id}/shares` | 查询工具的共享列表 |
+| DELETE | `/api/v1/tools/{tool_id}/share/{team_id}` | 取消对指定团队的共享 |
+| GET | `/api/v1/tools/shared-with-me?team_id={team_id}` | 查询共享给指定团队的工具 |
+| POST | `/api/v1/tools/mcp/list-tools` | 动态发现 MCP Server 的工具定义 |
+| POST | `/api/v1/tools/database/test-connection` | 测试数据库连通性 |
 
 ## 身份验证
 
@@ -504,13 +510,131 @@ curl -X DELETE "https://your-domain.com/api/v1/tools/tool-789" \
 }
 ```
 
+## 跨团队共享工具
+
+将自定义工具或 MCP 工具共享给同一工作区中的其他团队。共享需要「工具所属团队的管理员」权限；不能共享给工具自己所属的团队。
+
+### 共享工具
+
+```
+POST /api/v1/tools/{tool_id}/share
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string | 是 | 接收共享的团队 UUID |
+| `permission` | string | 否 | `read_only`（可查看并使用）或 `read_execute`（还可查看执行结果），默认 `read_only` |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/tools/tool-789/share" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id": "team-456", "permission": "read_execute"}'
+```
+
+响应返回共享记录，包含 `id`、`tool_id`、`tool_name`、`tool_display_name`、`shared_with_team_id`、`shared_with_team_name`、`permission`、`shared_by_id`、`shared_by_name`、`shared_at`。
+
+### 查询工具的共享列表
+
+```
+GET /api/v1/tools/{tool_id}/shares
+```
+
+返回 `{ "shares": [...], "total": N }`，仅工具所属团队的成员可读。
+
+### 查询共享给团队的工具
+
+```
+GET /api/v1/tools/shared-with-me?team_id={team_id}
+```
+
+`team_id` 为**必填查询参数**。返回的工具项带 `is_owned: false`、`owner_team_id`、`owner_team_name` 与 `share_permission`。
+
+### 取消共享
+
+```
+DELETE /api/v1/tools/{tool_id}/share/{team_id}
+```
+
+## MCP 与数据库工具诊断
+
+### 发现 MCP Server 工具
+
+```
+POST /api/v1/tools/mcp/list-tools
+```
+
+在保存 MCP 工具前，先连接 MCP Server 拉取可用工具定义。
+
+```json
+{
+  "mcp_config": {
+    "transport": "sse",
+    "command": null,
+    "args": [],
+    "env": {},
+    "url": "https://mcp.internal.example.com/sse",
+    "headers": {}
+  }
+}
+```
+
+`mcp_config.transport` 支持 `stdio`、`sse`、`http`：`stdio` 使用 `command`、`args`、`env`；`sse`/`http` 使用 `url` 与 `headers`。
+
+响应返回 `tools`（每个工具含名称、描述与参数 schema）、`server_name` 与 `server_version`。
+
+<Callout type="warn">
+  该端点会向 `url` 或 `command` 指定的目标发起真实网络调用。目标地址受部署级出站网络白名单限制，被拦截时返回 `400`。
+</Callout>
+
+### 测试数据库连通性
+
+```
+POST /api/v1/tools/database/test-connection
+```
+
+```json
+{
+  "db_type": "postgresql",
+  "host": "db.example.com",
+  "port": 5432,
+  "database": "analytics",
+  "username": "readonly",
+  "password": "secret_password",
+  "ssl": true,
+  "timeout": 15,
+  "max_limit": 100
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `db_type` | string | 是 | `postgresql`、`mysql`、`redis`、`mongodb` |
+| `host` | string | 否 | 主机名或 IP |
+| `port` | integer | 否 | 端口号 |
+| `database` | string | 否 | 数据库名称 |
+| `username` | string | 否 | 用户名 |
+| `password` | string | 否 | 密码 |
+| `ssl` | string \| boolean | 否 | SSL 配置 |
+| `url` | string | 否 | Redis / MongoDB 连接 URL（替代 host/port） |
+| `db` | integer | 否 | Redis 逻辑库序号 |
+| `auth_source` | string | 否 | MongoDB 认证库 |
+| `timeout` | integer | 否 | 查询超时秒数（1–120，默认 15） |
+| `max_limit` | integer | 否 | 最大返回记录数（1–1000，默认 100） |
+
+连接失败时返回 `400`，`msg` 为具体失败原因（例如 `database_connection_failed`）。
+
 ## 错误代码
 
 | 代码 | 消息 | 描述 |
 | --- | --- | --- |
 | `4000` | Not found | 工具不存在 |
-| `3000` | Permission denied | 权限不足 |
+| `4004` | Team not found | 目标团队不存在 |
+| `3000` | Permission denied | 权限不足（共享需要团队管理员） |
+| `3003` | Team admin required | 需要工具所属团队的管理员角色 |
+| `5001` | Already exists | 重复共享或工具名已占用 |
 | `1001` | Validation failed | 请求数据无效 |
+| `1002` | Bad request | 共享给工具自身所属团队、数据库连接测试失败等 |
 
 > **注意：** 当前无每端点限流实现，这些端点未配置限流中间件。代码 `6300`-`6306` 保留给 SSO 错误，工具 API 未使用。
 

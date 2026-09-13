@@ -10,12 +10,44 @@ icon: MonitorCog
 
 持续检查 `frontend`、`api`、`worker`、`sandbox-worker`、`beat`、PostgreSQL、Redis 和 Qdrant。重点关注 API 5xx、数据库连接、Redis 队列积压、知识库处理失败、Sandbox 超时/磁盘上限和 Beat 是否重复运行。
 
+队列按职责分开，排查积压时要先确认是哪一条：
+
+| 队列 | 消费服务 | 积压时的表现 |
+| --- | --- | --- |
+| `default` | `worker` | 通知延迟、用量重置滞后、审计归档堆积 |
+| `agent` | `worker` | 后台 AgentRun 长时间停留在运行中 |
+| `knowledge` | `worker` | 文档长时间停留在处理中 |
+| `workflow` | `worker` | 工作流运行排队 |
+| `sandbox` | `sandbox-worker` | 代码执行与 Agent 代码工具排队 |
+
 ```bash
 docker compose ps
 docker compose logs -f api worker sandbox-worker beat frontend
 ```
 
 Kubernetes 使用 `kubectl get pods`、`kubectl logs -f deployment/api` 等命令查看。
+
+## 数据库健康
+
+PostgreSQL 是统计、检索词法通道和审计的共同依赖，除连接状态外还要看：
+
+- `pg_stat_statements`（镜像已预载并设置 `track=all`）中最耗时的语句，用于发现缺失索引的查询。
+- 无效索引：`CONCURRENTLY` 构建失败会留下 `INVALID` 索引，`IF NOT EXISTS` 不会重建它。
+- 仪表盘与统计接口的响应时间：变慢且 CPU 不高通常意味着走了顺序扫描而非覆盖索引。
+
+```sql
+SELECT query, calls, mean_exec_time, total_exec_time
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+
+SELECT c.relname
+FROM pg_class c
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE NOT i.indisvalid;
+```
+
+索引创建、清理与验证步骤见[数据库维护与索引调优](./database-maintenance.mdx)。
 
 ## 产品指标
 

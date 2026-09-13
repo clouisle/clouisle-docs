@@ -12,12 +12,34 @@ Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 
 | --- | --- | --- | --- |
 | `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
 | `api` | clouisle-backend | FastAPI API | `8000` |
-| `worker` | clouisle-backend | Celery `default`、`knowledge`、`workflow` 队列 | 无 |
-| `sandbox-worker` | sandbox-worker | 沙箱队列与产物上传 | 无 |
+| `worker` | clouisle-backend | Celery `default`、`agent`、`knowledge`、`workflow` 队列 | 无 |
+| `sandbox-worker` | sandbox-worker | Celery `sandbox` 队列与产物上传 | 无 |
 | `beat` | clouisle-backend | Celery Beat 调度器，必须单副本 | 无 |
 | `db` | PostgreSQL 17 + pg_search | 业务、全文检索和审计数据 | `5432` |
 | `redis` | Redis 7 | 队列、缓存、会话 | `6379` |
 | `qdrant` | Qdrant 1.18.3 | 向量索引 | `6333` |
+
+## Celery 队列划分
+
+`clouisle-backend` 镜像用子命令启动 `api`、`worker`、`beat`。任务到队列的映射在 `backend/app/core/celery.py` 的 `task_routes` 中静态声明，队列名以 `-Q` 指定。
+
+| 队列 | 消费服务 | 任务模块 | 承载的工作 |
+| --- | --- | --- | --- |
+| `default` | `worker` | `app.tasks.usage`、`notification`、`audit_log`、`api_key`、`password_expiration`、`memory` | 用量重置、通知投递、审计日志归档、API Key 与密码到期检查 |
+| `agent` | `worker` | `app.tasks.agent` | AgentRun 执行（模型调用与工具循环） |
+| `knowledge` | `worker` | `app.tasks.knowledge_base` | 文档解析、分块、嵌入与索引 |
+| `workflow` | `worker` | `app.tasks.workflow` | 工作流运行 |
+| `sandbox` | `sandbox-worker` | `app.tasks.sandbox`、`tasks.cleanup_expired_sandbox_sessions` | 代码沙箱执行与过期沙箱会话清理 |
+
+官方 Compose、Helm 和单文件 manifest 的 `worker` 命令为 `python main.py worker -c 4 -Q default,agent,knowledge,workflow`，即一个服务同时消费 4 个队列；`sandbox-worker` 命令为 `python main.py sandbox-worker -c <SANDBOX_WORKER_CONCURRENCY>`，只消费 `sandbox`。
+
+Beat 投递的周期性任务：`sweep-lost-agent-runs` 每 2 分钟一次到 `default` 队列（回收 worker 崩溃后仍处于运行中的 AgentRun，是 `INTERRUPTED` 状态的唯一来源），`cleanup-expired-sandbox-sessions` 每 15 分钟一次到 `sandbox` 队列。`agent` 队列任务不配置重试：模型调用和工具执行有副作用，重试会重复执行。
+
+扩展规则：
+
+- `docker compose up -d --scale worker=4` 或 `kubectl scale deployment worker` 会同时扩展全部 4 个队列。需要按队列独立扩展时，运行额外的 Worker 容器并只订阅一个队列，例如 `-Q agent` 单独扩容 AgentRun 执行。
+- `sandbox` 队列独立成服务，扩容 `sandbox-worker` 不会影响知识库与工作流处理。
+- `beat` 始终单副本，见[服务拓扑](#服务拓扑)。
 
 ## 请求路由
 

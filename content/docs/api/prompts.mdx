@@ -1,0 +1,142 @@
+---
+title: 提示词生成与优化 API
+description: 基于大模型的系统提示词智能生成与迭代优化 SSE 流式接口
+icon: WandSparkles
+---
+
+提示词 API（Prompts API）通过大语言模型自动为 Agent 生成结构化系统提示词（System Prompt），并支持根据自然语言反馈进行流式迭代优化。基础路径为 `/api/v1/prompts`。
+
+## 端点总览
+
+| 方法 | 路径 | 说明 | 鉴权方式 |
+| --- | --- | --- | --- |
+| POST | `/api/v1/prompts/generate` | 基于 Agent 背景及配置智能生成系统提示词 | Bearer JWT |
+| POST | `/api/v1/prompts/optimize` | 根据人工反馈优化已有提示词 | Bearer JWT |
+
+<Callout type="info">
+  提示词生成与优化均使用系统配置的默认聊天模型（`model_type="chat"` 且 `is_default=true`）。若系统未配置或未启用默认聊天模型，服务端将返回 `MODEL_NOT_FOUND` 错误。
+</Callout>
+
+---
+
+## 1. 智能生成提示词（Generate）
+
+通过描述目标与上下文配置，流式生成包含角色职责、交互规范、工具与知识库使用指引的高质量提示词。
+
+```http
+POST /api/v1/prompts/generate HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "description": "打造一个专注于电商售后和退换货处理的客服助手",
+  "context": {
+    "agent_name": "售后小助手",
+    "agent_description": "解答退货、退款流程，核对订单号",
+    "rag_mode": "hybrid",
+    "capabilities": {
+      "enable_attachments": true
+    },
+    "tools": [
+      {
+        "name": "check_order_status",
+        "display_name": "查询订单状态",
+        "description": "输入订单号查询物流和售后进度"
+      }
+    ],
+    "variables": [
+      {
+        "name": "user_tier",
+        "type": "string",
+        "label": "用户会员等级"
+      }
+    ]
+  },
+  "style": {
+    "tone": "friendly",
+    "focus": "task-oriented",
+    "include_cot": true,
+    "include_constraints": true
+  },
+  "language": "zh"
+}
+```
+
+### 请求参数说明
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `description` | string | 是 | - | Agent 的核心任务与需求描述 |
+| `context` | object | 否 | `null` | Agent 上下文元数据（名称、描述、已配置工具、知识库、变量、能力开关） |
+| `style` | object | 否 | `null` | 风格参数控制 |
+| `style.tone` | string | 否 | `"professional"` | 语气：`professional`（专业正式）、`friendly`（友好亲切）、`concise`（简洁高效）、`detailed`（详细周到） |
+| `style.focus` | string | 否 | `"balanced"` | 侧重：`task-oriented`（任务导向）、`conversational`（对话为主）、`balanced`（平衡） |
+| `style.include_cot` | boolean | 否 | `false` | 是否包含思维链（Chain-of-Thought）引导，指导 Agent 展示推理步骤 |
+| `style.include_constraints` | boolean | 否 | `true` | 是否包含严格的行为规范与安全边界约束 |
+| `language` | string | 否 | `"zh"` | 生成提示词所用语言：`zh`（中文）或 `en`（英文） |
+
+### SSE 响应格式
+
+响应为 `text/event-stream` 格式：
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no
+
+event: start
+data: {"model": "gpt-4o"}
+
+event: content_delta
+data: {"delta": "你是一个专业的"}
+
+event: content_delta
+data: {"delta": "电商售后客服助手。"}
+
+event: complete
+data: {"total_length": 860}
+```
+
+---
+
+## 2. 迭代优化提示词（Optimize）
+
+根据用户反馈对现有系统提示词进行修改与强化。
+
+<Callout type="warn">
+  注意：`current_prompt` 和 `feedback` 作为 **Query 查询参数** 提交，而非 JSON Body。
+</Callout>
+
+```http
+POST /api/v1/prompts/optimize?current_prompt=原提示词内容...&feedback=语气需要更加亲切，并在遇到生气质检场景时主动安抚 HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+### 查询参数说明
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `current_prompt` | string | 是 | 待优化的当前提示词内容 |
+| `feedback` | string | 是 | 优化诉求或修改意见 |
+
+### SSE 响应事件类型
+
+| 事件名 (`event`) | 数据结构 (`data`) | 说明 |
+| --- | --- | --- |
+| `start` | `{"model": "string"}` | 启动生成，返回实际调用的底层模型名称 |
+| `content_delta` | `{"delta": "string"}` | 流式增量内容片段 |
+| `complete` | `{"total_length": number}` | 生成完成，返回优化后文本总字符数 |
+| `error` | `{"code": number, "msg": "string"}` | 生成过程中断或报错（如无可用模型时返回业务码 `4004`） |
+
+---
+
+## 常见错误代码
+
+| 错误码 | 标识 | 说明 |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | 缺少 Bearer 令牌或令牌无效 |
+| `2004` | INACTIVE_USER | 账号已被停用或待审批 |
+| `4004` | MODEL_NOT_FOUND | 系统中未找到已启用的默认聊天模型（`no_chat_model_available`） |
+| `9999` | UNKNOWN_ERROR | 生成过程异常中断 |

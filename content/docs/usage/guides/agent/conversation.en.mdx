@@ -150,12 +150,19 @@ If the agent defines required variables, complete the variable form before sendi
 2. Fill in the required fields
 3. Type your message and send
 
-## Stop, Edit, and Regenerate
+## Stop, Steer, and Regenerate
 
-- **Stop**: Select **Stop** during streaming. The message status is recorded as manually stopped.
-- **Edit**: Editing a historical user message creates a new branch from that message and streams a new reply.
-- **Regenerate**: Regenerating an assistant message creates a new version. Switching versions only changes the active branch; it never deletes older versions.
-- **Delete**: Deleting a message also handles its downstream branches; deleting a conversation permanently deletes all of its messages.
+- **Stop**: Click **Stop** during streaming. The client terminates the SSE stream and tells the worker to abort the run; the message state is recorded as manually stopped.
+- **Steering / User Guidance**: While the Agent is generating or thinking, you can type supplementary instructions or corrections into the composer and send them without stopping the run. The UI renders a floating capsule above the composer indicating queued guidance, shows a "User Guidance" step in the thought-process timeline, and injects the steer into the active LLM context.
+- **Edit**: Editing an earlier user message forks a new branch from that turn and streams a fresh reply under the new branch.
+- **Regenerate**: Regenerating an assistant message appends a new version to that turn. Use the left and right arrows to toggle between versions without losing history.
+- **Delete**: Deleting a message prunes downstream branches; deleting a conversation permanently deletes all of its messages and runs.
+
+### Scrolling and Interactive Optimizations
+
+- **Instant pin-to-bottom**: sending a message immediately pins the viewport to the new bubble before the stream starts, avoiding blank states or first-token jumpiness.
+- **Collapsible thought process**: expand or collapse the model's Chain of Thought at any time. Stream auto-scroll tracks thought steps cleanly, and tool-call cards support inline argument inspection, logs, and one-click artifact downloads.
+- **Queued follow-ups**: typing a follow-up near the end of a run persists the message directly to the database and smoothly transitions into the next generation turn.
 
 ### Message Branching
 

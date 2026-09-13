@@ -1,0 +1,171 @@
+---
+title: 工作流版本与模板 API
+description: 工作流历史版本控制、发布、差异比对、回滚以及模板市场管理接口
+icon: GitBranch
+---
+
+工作流版本与模板 API 提供了工作流图结构（Nodes & Edges）的版本快照、历史追溯、差异比对（Diff）、快速回滚与分支派生（Fork）能力，同时集成了工作流模板市场的创建、搜索、实例化与评分。
+
+- **版本控制基础路径**：`/api/v1/workflow-versions`
+- **模板市场基础路径**：`/api/v1/workflow-templates`
+
+---
+
+## 工作流版本控制
+
+### 端点总览
+
+| 方法 | 路径 | 说明 | 鉴权/权限 |
+| --- | --- | --- | --- |
+| POST | `/api/v1/workflow-versions` | 创建新版本快照 | Bearer JWT (写权限) |
+| GET | `/api/v1/workflow-versions/{workflow_id}/history` | 获取工作流历史版本列表 | Bearer JWT |
+| GET | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}` | 获取特定版本详情 | Bearer JWT |
+| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | 发布指定版本为生产运行版本 | Bearer JWT (`workflow:publish`) |
+| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | 归档指定版本 | Bearer JWT (写权限) |
+| GET | `/api/v1/workflow-versions/{workflow_id}/diff` | 比对两个版本之间的图节点与连线差异 | Bearer JWT |
+| POST | `/api/v1/workflow-versions/{workflow_id}/rollback` | 将工作流回滚至历史指定版本 | Bearer JWT (写权限) |
+| POST | `/api/v1/workflow-versions/{workflow_id}/fork` | 基于历史版本派生出全新工作流 | Bearer JWT (写权限) |
+| GET | `/api/v1/workflow-versions/{workflow_id}/stats` | 获取工作流版本统计概览 | Bearer JWT |
+
+### 版本状态枚举（VersionStatus）
+
+- `draft`：草稿版本
+- `published`：当前已发布并对外提供服务的版本
+- `archived`：历史归档版本
+- `deprecated`：已废弃版本
+
+### 1. 创建版本快照
+
+```http
+POST /api/v1/workflow-versions HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+  "nodes": [
+    {"id": "node_1", "type": "start", "data": {}},
+    {"id": "node_2", "type": "llm", "data": {"prompt": "总结输入文本"}}
+  ],
+  "edges": [
+    {"id": "e1-2", "source": "node_1", "target": "node_2"}
+  ],
+  "config": {},
+  "description": "添加总结处理节点"
+}
+```
+
+#### 响应（200 OK）
+
+```json
+{
+  "version_id": "v_7f9c2d1e-1234-4567-89ab-cdef01234567",
+  "version_number": 3,
+  "status": "draft",
+  "created_at": "2026-09-14T10:30:00Z"
+}
+```
+
+### 2. 查询版本历史
+
+```http
+GET /api/v1/workflow-versions/{workflow_id}/history?limit=20&offset=0&status=published HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+### 3. 版本差异比对（Diff）
+
+```http
+GET /api/v1/workflow-versions/{workflow_id}/diff?from_version=v_1&to_version=v_2 HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+#### 响应（200 OK）
+
+```json
+{
+  "from_version": "v_1",
+  "to_version": "v_2",
+  "diff": {
+    "added_nodes": [{"id": "node_2", "type": "llm"}],
+    "removed_nodes": [],
+    "modified_nodes": [],
+    "added_edges": [{"id": "e1-2", "source": "node_1", "target": "node_2"}],
+    "removed_edges": []
+  }
+}
+```
+
+### 4. 版本回滚与分支派生
+
+#### 回滚至指定版本
+```http
+POST /api/v1/workflow-versions/{workflow_id}/rollback HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "version_id": "v_1",
+  "create_backup": true
+}
+```
+
+#### 派生新工作流（Fork）
+```http
+POST /api/v1/workflow-versions/{workflow_id}/fork HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "version_id": "v_1",
+  "new_workflow_id": "660e8400-e29b-41d4-a716-446655440001",
+  "new_name": "派生的新工作流"
+}
+```
+
+---
+
+## 工作流模板市场
+
+### 端点总览
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/workflow-templates` | 分页列出模板库（支持按分类、可见性、标签筛选） |
+| GET | `/api/v1/workflow-templates/featured` | 获取精选推荐模板列表 |
+| GET | `/api/v1/workflow-templates/search` | 全文搜索模板 |
+| GET | `/api/v1/workflow-templates/categories` | 获取全部模板分类定义 |
+| GET | `/api/v1/workflow-templates/{template_id}` | 获取模板详情（含节点、变量定义） |
+| POST | `/api/v1/workflow-templates` | 发布新模板 |
+| POST | `/api/v1/workflow-templates/{template_id}/instantiate` | 将模板实例化为具体工作流定义 |
+| POST | `/api/v1/workflow-templates/{template_id}/rate` | 为模板打分（1.0 ~ 5.0 星） |
+| DELETE | `/api/v1/workflow-templates/{template_id}` | 删除模板（仅作者本人） |
+| GET | `/api/v1/workflow-templates/stats/summary` | 查询模板市场统计总览 |
+
+### 实例化模板示例
+
+```http
+POST /api/v1/workflow-templates/{template_id}/instantiate HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "template_id": "tpl-doc-summary",
+  "variables": {
+    "llm_model": "gpt-4o-mini",
+    "max_length": 500
+  },
+  "workflow_name": "我的文档总结工作流"
+}
+```
+
+---
+
+## 错误代码
+
+| 错误码 | 标识 | 说明 |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | 未认证或令牌无效 |
+| `3000` | FORBIDDEN | 无操作权限或无 `workflow:publish` 权限 |
+| `4000` | NOT_FOUND | 工作流、工作流版本或模板不存在 |
+| `1001` | VALIDATION_ERROR | 请求参数校验未通过，或模板实例化参数错误 |

@@ -36,19 +36,28 @@ Passwords must be at least `8` characters; administrators can require a longer m
 **Enabling TOTP**:
 
 1. Open **Profile Settings** → **Account** tab.
-2. Find the **Two-Factor Authentication** section and click **Enable**.
-3. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.), or enter the secret manually.
-4. Enter the 6-digit verification code to confirm.
-5. Download or copy the one-time backup codes; each backup code can only be used once.
-6. Click **Enable**.
+2. In the **Two-Factor Authentication** section, select **Enable Two-Factor Authentication**.
+3. The TOTP setup wizard opens:
+   - Scan the QR code with an authenticator app (Google Authenticator, Authy, 1Password), or enter the secret manually.
+   - Enter the current 6-digit code from the authenticator.
+   - Generate the one-time backup codes. Download or copy them; each backup code works only once.
+4. Select **Finish enabling**.
 
-**Backup codes**: Store them safely. Use a backup code to log in when you lose access to your authenticator. Regenerate them if needed.
+**Status and management**:
+- Once enabled, the card shows **Two-factor authentication enabled**, the activation timestamp, and the **remaining backup code count** (`{count} backup codes remaining`).
+- Select **Regenerate backup codes** and enter the current 6-digit code to issue a fresh batch; all previous codes are invalidated immediately.
 
-**Disabling TOTP**: Click **Disable** and confirm with your password or TOTP code.
+**Disabling TOTP**:
+1. Select **Disable Two-Factor Authentication**.
+2. In the confirmation dialog, verify with either your account password or the current 6-digit TOTP code.
+3. Confirm to unlink TOTP; the card returns to the disabled state.
 
 ### Connected Accounts
 
-View connected SSO providers and their last login time. Click **Disconnect** to unlink a provider.
+The **Connected Accounts** section lists linked SSO providers with the bound email and last login time.
+
+- Select **Disconnect** to unlink a provider when you have a password or another authentication method configured.
+- The system prevents lockout: it **refuses to disconnect your only authentication method** (when no standalone password is set and only one SSO link remains).
 
 <Callout type="note">
   There is no user-side "Connect" action — SSO connections are linked automatically during login when the provider email matches your account (see [SSO Configuration](./sso.mdx)).
@@ -95,6 +104,18 @@ API keys are managed on a dedicated page, not in profile settings:
 3. Or navigate directly to `/app/api-keys`.
 
 See [Managing API Keys](./api-keys.mdx) for details.
+
+## My Memories
+
+The user menu includes **My Memories** (`/app/memories`), with the subtitle "Explore what AI knows about you". Here you can:
+
+- Search memory entities by keyword or filter by entity type.
+- Switch the graph canvas across **Grid**, **Hierarchical**, and **Radial** layouts, with zoom and Fit View controls.
+- Inspect an entity's properties, outgoing and incoming relations, access count, and last-accessed timestamp.
+- Use **Select Mode** to batch-delete entities (**Delete selected**), or edit an entity's description.
+- When no memories have been formed yet, an empty state invites you to **Start conversation**.
+
+For extraction rules, entity and relation types, and recency-decay scoring, see [Memory and Context](../agent/memory.mdx).
 
 ## Notifications
 

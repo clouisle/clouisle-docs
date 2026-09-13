@@ -1,0 +1,333 @@
+---
+title: Authentication & Login API
+description: User registration, click captcha, password login, TOTP 2FA, password recovery, and email verification endpoints
+icon: KeyRound
+---
+
+The Authentication and Login API provides account registration, human verification captcha challenges, OAuth2-compatible password login, two-factor authentication (TOTP) workflows, password recovery, and email verification. The base path is `/api/v1`.
+
+## Endpoints Overview
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| GET | `/api/v1/captcha` | Generate a click-based human verification challenge | Public |
+| POST | `/api/v1/captcha/click` | Submit click pointer trace to obtain a single-use proof token | Public |
+| POST | `/api/v1/login/access-token` | Authenticate with username/email and password for JWT Access Token | Public |
+| POST | `/api/v1/login/verify-totp` | Exchange temporary token and TOTP code for an access token | Public (with `temp_token`) |
+| POST | `/api/v1/logout` | Invalidate current session and blacklist token | Bearer JWT |
+| POST | `/api/v1/register` | Register a new user account (open registration) | Public |
+| POST | `/api/v1/send-verification` | Send verification email for registration or binding | Public |
+| POST | `/api/v1/verify-email` | Verify email address using a 6-digit code | Public |
+| GET | `/api/v1/verify` | Verify email address using an email token link | Public |
+| POST | `/api/v1/resend-verification` | Resend verification email | Public |
+| POST | `/api/v1/forgot-password` | Request password reset code or link | Public |
+| POST | `/api/v1/reset-password` | Reset password using code or token | Public |
+| GET | `/api/v1/sso/providers` | List enabled public SSO providers | Public |
+| GET | `/api/v1/sso/login/{provider_name}` | Initiate SSO login flow | Public |
+| GET | `/api/v1/sso/callback/{provider_name}` | Handle SSO callback from identity provider | Public |
+| DELETE | `/api/v1/sso/connections/{connection_id}` | Disconnect an SSO provider connection | Bearer JWT |
+| POST | `/api/v1/totp/setup` | Generate TOTP secret and QR code | Bearer JWT |
+| POST | `/api/v1/totp/enable` | Verify code and enable two-factor authentication | Bearer JWT |
+| POST | `/api/v1/totp/disable` | Verify password and code to disable 2FA | Bearer JWT |
+| POST | `/api/v1/totp/regenerate-backup-codes` | Regenerate 10 backup recovery codes | Bearer JWT |
+| GET | `/api/v1/totp/status` | Get current user's 2FA status | Bearer JWT |
+
+---
+
+## Human Verification (Captcha)
+
+When human verification is enabled in site settings, registration, login, and password recovery require valid captcha proof.
+
+### 1. Get Challenge
+
+```http
+GET /api/v1/captcha
+```
+
+#### Response (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "captcha_id": "c62040db-91fa-4ff8-9125-5e3681428256",
+    "challenge": "{\"target_text\": \"Please click the red circle\", \"image\": \"data:image/png;base64,...\"}",
+    "prompt": "captcha_click_prompt",
+    "expires_in": 300
+  },
+  "msg": "success"
+}
+```
+
+### 2. Complete Click Interaction
+
+```http
+POST /api/v1/captcha/click
+Content-Type: application/json
+
+{
+  "captcha_id": "c62040db-91fa-4ff8-9125-5e3681428256",
+  "challenge": "{\"target_text\": \"Please click the red circle\", \"image\": \"data:image/png;base64,...\"}",
+  "clicked_option": "red_circle",
+  "elapsed_ms": 1340,
+  "pointer": [
+    {"x": 105.5, "y": 80.2, "t": 1200},
+    {"x": 108.0, "y": 82.0, "t": 1340}
+  ]
+}
+```
+
+#### Response (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "captcha_id": "c62040db-91fa-4ff8-9125-5e3681428256",
+    "captcha_token": "proof-token-string"
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## Password Login & Two-Factor Authentication
+
+### 1. Submit Credentials
+
+Uses OAuth2 form encoding (`application/x-www-form-urlencoded`):
+
+```http
+POST /api/v1/login/access-token
+Content-Type: application/x-www-form-urlencoded
+
+username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-91fa-4ff8-9125-5e3681428256&captcha_token=proof-token-string
+```
+
+- `username` accepts either username or email address.
+- When captcha is enabled, pass `captcha_id` and `captcha_token`.
+
+#### Direct Login Success (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer"
+  },
+  "msg": "login_successful"
+}
+```
+
+#### Two-Factor Authentication Required (2FA Challenge)
+
+When TOTP is enabled on the account, the server issues a 5-minute temporary token `temp_token`:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "requires_totp": true,
+    "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  },
+  "msg": "totp_required"
+}
+```
+
+### 2. Verify TOTP Code to Complete Login
+
+```http
+POST /api/v1/login/verify-totp
+Content-Type: application/x-www-form-urlencoded
+
+temp_token=temp-jwt-token-string&code=123456&is_backup_code=false
+```
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `temp_token` | string | Yes | Temporary 5-minute JWT issued during password login |
+| `code` | string | Yes | 6-digit authenticator code or 8-digit backup code |
+| `is_backup_code` | boolean | No | Set to `true` when submitting a backup recovery code, default `false` |
+
+Returns the standard `access_token` on success.
+
+### 3. Logout
+
+```http
+POST /api/v1/logout
+Authorization: Bearer YOUR_TOKEN
+```
+
+Blacklists the active token and terminates the session.
+
+---
+
+## Registration and Email Verification
+
+### 1. Register Account
+
+```http
+POST /api/v1/register
+Content-Type: application/json
+
+{
+  "username": "bob",
+  "email": "bob@example.com",
+  "password": "StrongPassword123!",
+  "terms_accepted": true,
+  "captcha_id": "captcha-uuid",
+  "captcha_token": "proof-token"
+}
+```
+
+The first registered account automatically receives the Super Admin role.
+
+### 2. Send Verification Email
+
+```http
+POST /api/v1/send-verification
+Content-Type: application/json
+
+{
+  "email": "bob@example.com",
+  "purpose": "register"
+}
+```
+
+`purpose` accepts `register` or `reset_password` (60-second cooldown per target).
+
+### 3. Verify Email Code
+
+```http
+POST /api/v1/verify-email
+Content-Type: application/json
+
+{
+  "email": "bob@example.com",
+  "code": "839201",
+  "purpose": "register"
+}
+```
+
+### 4. Verify via Link Token
+
+```http
+GET /api/v1/verify?token=email-verification-token-string
+```
+
+---
+
+## Password Recovery
+
+### 1. Request Reset
+
+```http
+POST /api/v1/forgot-password
+Content-Type: application/json
+
+{
+  "email": "alice@example.com"
+}
+```
+
+Always returns success to prevent user email enumeration.
+
+### 2. Reset Password
+
+With 6-digit code:
+
+```http
+POST /api/v1/reset-password
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "code": "839201",
+  "new_password": "NewStrongPassword456!"
+}
+```
+
+Or with link token:
+
+```http
+POST /api/v1/reset-password
+Content-Type: application/json
+
+{
+  "token": "reset-token-string",
+  "new_password": "NewStrongPassword456!"
+}
+```
+
+---
+
+## Two-Factor Authentication (TOTP)
+
+### 1. Setup
+
+```http
+POST /api/v1/totp/setup
+Authorization: Bearer YOUR_TOKEN
+```
+
+Returns base64 QR code and 10 emergency backup codes.
+
+### 2. Enable
+
+```http
+POST /api/v1/totp/enable
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "code": "123456"
+}
+```
+
+### 3. Disable
+
+```http
+POST /api/v1/totp/disable
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "password": "CurrentPassword123!",
+  "code": "123456",
+  "is_backup_code": false
+}
+```
+
+### 4. Status
+
+```http
+GET /api/v1/totp/status
+Authorization: Bearer YOUR_TOKEN
+```
+
+---
+
+## Error Codes
+
+| Code | Identifier | Description |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | Authentication missing or invalid |
+| `2001` | INVALID_TOKEN | Temporary or reset token invalid |
+| `2002` | TOKEN_EXPIRED | Token has expired |
+| `2003` | INVALID_CREDENTIALS | Incorrect username or password |
+| `2004` | INACTIVE_USER | User deactivated or pending approval |
+| `5000` | REGISTRATION_DISABLED | Open registration is disabled |
+| `5004` | EMAIL_NOT_VERIFIED | Email verification required prior to login |
+| `5005` | VERIFICATION_CODE_INVALID | Verification code is incorrect |
+| `5006` | VERIFICATION_CODE_EXPIRED | Verification code has expired |
+| `5008` | EMAIL_SEND_TOO_FREQUENT | Email rate limited (60-second cooldown) |
+| `5300` | ACCOUNT_LOCKED | Account locked due to repeated failed logins |
+| `5302` | CAPTCHA_REQUIRED | Captcha verification is required |
+| `5303` | CAPTCHA_INVALID | Captcha proof failed or expired |
+| `5310` | TOTP_REQUIRED | Two-factor authentication code required |
+| `5311` | TOTP_INVALID | Invalid TOTP code or backup code |
+| `5312` | TOTP_RATE_LIMITED | Too many failed TOTP attempts |
+| `5314` | TOTP_ALREADY_ENABLED | 2FA is already enabled on this account |
+| `6306` | PASSWORD_LOGIN_DISABLED | Password login disabled; SSO is enforced |

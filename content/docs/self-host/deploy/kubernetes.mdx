@@ -47,6 +47,8 @@ kubectl -n clouisle scale deployment api --replicas=3
 
 `beat` 始终保持一个副本。使用 `ReadWriteOnce` 本地上传卷时，API 保持单副本；生产多副本应配置共享卷或对象存储。
 
+`worker` 默认消费 `default,agent,knowledge,workflow` 4 个队列（Helm `worker.command`），整体扩副本会同时扩展这 4 类任务。只扩容某一类时，为其单独部署一个 Worker，命令末尾只保留一个队列（如 `-Q agent`）；`sandbox` 队列由独立的 `sandbox-worker` 消费。队列与任务的对应关系见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
+
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/kubernetes-resources.svg" alt="Kubernetes 资源与 Ingress" />
   <figcaption>Kubernetes 资源与 Ingress</figcaption>

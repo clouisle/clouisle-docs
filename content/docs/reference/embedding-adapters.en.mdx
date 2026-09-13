@@ -1,0 +1,87 @@
+---
+title: Embedding Adapters & Vector Dimensions
+description: Reference for embedding adapter dispatch, upstream token metering, dynamic dimension detection, and Qdrant collection mapping
+icon: Cpu
+---
+
+The text embedding subsystem in Clouisle powers Knowledge Base retrieval-augmented generation (RAG) and long-term conversation memory. The architecture features a layered adapter pattern supporting multi-provider interoperability, dynamic runtime dimension detection, and isolated multi-dimension vector storage.
+
+## Adapter Dispatch Architecture
+
+Embedding models are orchestrated centrally under `backend/app/llm/adapters/embedding/`. Callers interact with a unified interface while the factory automatically dispatches to the optimal adapter based on the model's `provider`:
+
+| Adapter Class | Matched Providers | Mechanism | Token Metering Strategy |
+| --- | --- | --- | --- |
+| **`OpenAICompatibleEmbeddingAdapter`** | `openai`, `openai_responses`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `custom` | Issues direct HTTP POST requests to the `/embeddings` endpoint of the resolved Base URL (standard OpenAI protocol) | Prefers `usage.total_tokens` returned by the upstream API; falls back to local `tiktoken` tokenization if omitted |
+| **`FallbackEmbeddingAdapter`** | `google`, `azure_openai`, and other providers | Invokes specialized LangChain wrappers (e.g. `GoogleGenerativeAIEmbeddings`, `AzureOpenAIEmbeddings`) via `aembed_documents` | Returns an empty `Usage` object; outer `team_embedding` counts tokens locally using `tiktoken` |
+
+<Callout type="warn" title="Anthropic Limitation">
+Anthropic does not offer a standalone text embedding API. In Clouisle, attempting to use an Anthropic model with `model_type: embedding` will raise `ValueError: Unsupported provider for embedding: anthropic` at runtime.
+</Callout>
+
+### Fault Tolerance & Fallback
+
+When making direct HTTP calls, `OpenAICompatibleEmbeddingAdapter`:
+1. Enforces a request timeout of `60.0` seconds (`DEFAULT_EMBEDDING_REQUEST_TIMEOUT`) and a maximum of `2` retries.
+2. If direct HTTP calls fail due to transient network issues, schema mismatches, or non-200 responses, the adapter catches the exception and transparently falls back to LangChain's underlying `OpenAIEmbeddings` instance.
+
+---
+
+## Quota Checks & Token Metering Pipeline
+
+When a workflow node or knowledge base indexing triggers `team_embedding(team_id, texts, model_id)`, the system executes a strict three-stage pipeline:
+
+1. **Pre-execution Quota Gate**:
+   - Confirms that the team has an active grant for the embedding model.
+   - Calls `usage_tracker.check_quota_with_model()` to verify daily and monthly token and request ceilings, rejecting over-quota calls with `LLMQuotaExceededError` (error code `6103`).
+2. **Vector Generation & Token Metering**:
+   - The adapter generates embeddings for the input texts.
+   - If upstream reports `usage.total_tokens`, that number is used directly; otherwise, `count_tokens(text, model_id, provider)` provides local `tiktoken` counts (minimum 1 token).
+3. **Post-execution Ledger Recording**:
+   - Recorded token counts are written to the team usage ledger (`team_model_usages` table) for real-time daily and monthly tracking.
+
+---
+
+## Dynamic Dimension Detection & Immutability
+
+Different embedding models yield vectors with different dimensionalities (e.g., OpenAI `text-embedding-3-small` is 1536d, `text-embedding-3-large` is 3072d, and BGE models commonly output 768d or 1024d). Clouisle handles dimension alignment dynamically:
+
+### 1. Dimension Lifecycle
+- **Creation**: An administrator creates a Knowledge Base and selects an `embedding_model_id`. The initial database column `embedding_dimension` remains `null`.
+- **First-Document Binding**: When the first document chunk is processed, the system generates vectors and measures their length via `len(embedding[0])`.
+- **Dimension Lock**: `set_kb_embedding_dimension(kb_id, dimension)` commits the measured dimension permanently into the `knowledge_bases` table.
+
+### 2. Immutability Constraints
+- **Locked Model**: Once a Knowledge Base is created, its `embedding_model_id` is **permanently immutable**. Updates via `PATCH /knowledge-bases/{id}` reject or ignore any attempts to alter `embedding_model_id`.
+- **Dimension Enforcement**: Any subsequent chunks undergo validation via `_validate_embeddings`. If the returned dimension disagrees with the locked `embedding_dimension`, the system aborts indexing with a `DimensionMismatchError`.
+
+---
+
+## Qdrant Multi-Dimension Collection Isolation
+
+Clouisle uses Qdrant as its default vector database. To support heterogeneous models concurrently, collections are partitioned by dimension:
+
+```
+Qdrant Cluster (http://localhost:6333)
+├── kb_dim_768   (e.g., BGE-base)
+├── kb_dim_1024  (e.g., BGE-large)
+├── kb_dim_1536  (e.g., text-embedding-3-small)
+└── kb_dim_3072  (e.g., text-embedding-3-large)
+```
+
+### Collection & Indexing Rules
+
+1. **Naming Convention**: `${QDRANT_COLLECTION_PREFIX}_${dimension}` (default prefix is `kb_dim`, producing `kb_dim_1536`).
+2. **Distance Metric**: Defaults to `Cosine` (configurable via environment variables to `Dot` or `Euclid`).
+3. **Automatic Provisioning**: When vectors of a new dimension are first stored, the system provisions the Qdrant collection and creates payload indices on `kb_id` and `document_id` for fast scoped filtering.
+
+---
+
+## Batching Specifications & Timeouts
+
+| Configuration Parameter | Setting | Description |
+| --- | --- | --- |
+| **Indexing Chunk Batch Size** | `25` (default) | `store_chunks_with_progress` embeds, stores, and updates progress in 25-chunk batches |
+| **Adapter Request Timeout** | `60.0`s | `DEFAULT_EMBEDDING_REQUEST_TIMEOUT` used across HTTPX and LangChain clients |
+| **Vector Store Operation Timeout** | `120.0`s | `EMBEDDING_REQUEST_TIMEOUT_SECONDS` governing end-to-end vector queries and bulk inserts |
+| **Adapter Maximum Retries** | `2` | `DEFAULT_EMBEDDING_MAX_RETRIES` |

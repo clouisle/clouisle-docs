@@ -32,13 +32,91 @@ icon: Settings
 
 主题支持页面、卡片、边框、侧边栏、顶部导航、强调色、弱化色和图表色。颜色使用十六进制格式，例如 `#3b82f6` 或带透明度的 `#3b82f680`。
 
-## 安全与运维字段
+## 安全与合规设置
 
-安全设置还包括密码最小长度、复杂度、过期与历史、会话超时（默认 `30` 天，`session_timeout_days`）、单一会话、最大登录尝试、锁定时长、验证码和 TOTP。存储设置支持本地文件系统和对象存储；审计日志支持保留天数与归档路径。
+安全设置由管理员在系统设置面板管理，控制认证策略、登录锁定、密码规则以及网络出站防护。
 
-## 通知渠道
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `model_endpoint_allowlist` | json (array) | 预置 19 个官方 Origin | 模型端点 Origin 白名单，按协议+主机+端口精确比对（忽略路径），最多 200 项 |
+| `ssrf_allowed_targets` | json (array) | `[]` | SSRF 出站白名单豁免列表，最多 200 项；支持单 IP、CIDR 网段、通配域名（`*.corp.internal`）或精确主机名 |
+| `min_password_length` | int | `8` | 密码最短字符数 |
+| `require_uppercase` | bool | `true` | 密码是否必须包含大写字母（`A-Z`） |
+| `require_number` | bool | `true` | 密码是否必须包含数字（`0-9`） |
+| `require_special_char` | bool | `false` | 密码是否必须包含特殊符号（包含标点符号与尖括号等） |
+| `session_timeout_days` | int | `30` | 登录会话有效天数 |
+| `single_session` | bool | `false` | 是否开启单一会话（同一用户后登录会踢出先前会话） |
+| `max_login_attempts` | int | `5` | 触发账户锁定的连续登录失败次数 |
+| `lockout_duration_minutes` | int | `15` | 账户锁定时长（分钟） |
+| `enable_captcha` | bool | `false` | 登录是否启用点击人机验证码 |
+| `require_totp` | bool | `false` | 是否强制全员绑定 TOTP 双因素认证（未绑定用户登录时强制重定向至绑定流程） |
+| `password_expiration_enabled` | bool | `false` | 是否启用密码定期过期策略 |
+| `password_expiration_days` | int | `90` | 密码有效天数 |
+| `password_expiration_warning_days` | int | `7` | 到期前提前提醒天数 |
+| `password_history_count` | int | `5` | 禁止重复使用的历史密码次数 |
+| `password_min_age_days` | int | `0` | 密码修改后的最小保留天数（避免短时间内连续修改刷掉历史记录） |
+| `force_password_change_first_login` | bool | `false` | 新用户首次登录是否强制修改初始密码 |
 
-邮件使用 SMTP 主机、端口、加密、用户名、密码、发件人名称和地址；钉钉、企业微信、飞书、Slack 支持 Webhook 或企业应用字段；通用 Webhook 支持自定义请求头、正文模板和 HMAC 密钥。
+### 出站网络与 SSRF 防护
+
+Clouisle 在所有出站网络调用链路（HTTP 请求工作流节点、知识库文档 URL 导入与预览、数据库连接测试等）均执行强制安全校验：
+
+1. **默认封禁**：所有回环地址（`127.0.0.0/8`、`::1`）、私有网络（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`fc00::/7`）、链路本地地址（`169.254.0.0/16`、`fe80::/10`）、组播（`224.0.0.0/4`）、未指定地址（`0.0.0.0`）、以及保留域名（`localhost`、`local`、`metadata.google.internal`）。
+2. **不可豁免的绝对拦截**：云元数据服务（`169.254.169.254`、`169.254.0.0/16`、`metadata.google.internal`）与全网通配（`0.0.0.0/0`、`::/0`、`*`）即便写入白名单也会被系统严格拒绝。
+3. **白名单豁免**：如需允许调用内网或自建服务，由管理员在 `ssrf_allowed_targets` 中添加目标。支持语法：
+   - 具体 IP：如 `192.168.1.100`
+   - CIDR 网段：如 `10.50.0.0/16`（前缀长度不得为 0，不能重叠元数据网段）
+   - 通配子域名：如 `*.corp.internal`（同时匹配 `corp.internal` 与其所有子域）
+   - 精确域名：如 `api.internal.local`（须包含至少一个点，且首尾不得有点）
+
+### 模型端点安全策略
+
+所有大模型服务商的请求地址通过 `model_endpoint_allowlist` 约束。系统比对完整的 Origin（`https://api.openai.com`、`http://localhost:11434`），忽略路径、查询参数和凭据，非默认端口会严格参与比对。
+
+## 记忆管理与检索设置
+
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | bool | `false` | 是否开启后台异步对话记忆提取 |
+| `memory_extraction_model_id` | string | `""` | 异步记忆提取专用模型 ID（留空使用系统默认对话模型） |
+| `memory_extraction_cooldown_seconds` | int | `180` | 记忆提取冷却窗口（秒），避免频繁调用提取任务 |
+| `memory_extraction_max_pending_turns` | int | `6` | 未提取会话轮次上限，达到后立即触发提取 |
+| `retrieval_hybrid_mode` | string | `"rollout"` | 混合检索灰度模式：`rollout`、`enabled` 或 `disabled` |
+| `retrieval_hybrid_team_ids` | json (array) | `[]` | 显式纳入混合检索灰度测试的团队 ID 列表 |
+| `retrieval_hybrid_percentage` | int | `100` | 确定性混合检索灰度百分比 |
+
+## 存储与审计设置
+
+| 配置键 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `upload_storage_backend` | string | `"local"` | 文件存储后端：`"local"`（本地文件）或 `"object"`（S3 兼容对象存储） |
+| `kb_document_max_upload_size_mb` | int | `50` | 知识库单文件最大上传大小（MB），有效范围 `1-1024` |
+| `object_storage_endpoint` | string | `""` | S3 兼容对象存储接入点（如 `s3.us-west-1.amazonaws.com`） |
+| `object_storage_bucket` | string | `""` | 存储桶名称 |
+| `object_storage_region` | string | `""` | 存储桶所在地域 |
+| `object_storage_access_key` | string | `""` | 对象存储 Access Key |
+| `object_storage_secret_key` | string | `""` | 对象存储 Secret Key（密文存储） |
+| `object_storage_force_path_style` | bool | `true` | 是否强制使用 Path-Style S3 URL |
+| `object_storage_secure` | bool | `true` | 是否使用 HTTPS 协议 |
+| `audit_log_retention_days` | int | `365` | 审计日志保留天数（有效范围 `30-3650`） |
+| `audit_log_archive_path` | string | `"/var/log/clouisle/audit_archives"` | 归档文件本地或挂载存储路径 |
+| `audit_alert_enabled` | bool | `true` | 是否启用审计告警检测 |
+| `audit_alert_webhook` | string | `""` | 审计告警 Webhook 接收地址 |
+| `audit_alert_failed_login_threshold` | int | `5` | 触发告警的连续登录失败阈值 |
+| `audit_alert_failed_login_window` | int | `5` | 登录失败检测时间窗口（分钟） |
+| `audit_alert_bulk_deletion_threshold` | int | `10` | 批量删除告警阈值 |
+
+## 通知渠道与自动化通知
+
+支持邮件（SMTP）、钉钉（DingTalk）、企业微信（WeChat Work）、飞书（Feishu）、Slack 以及通用 Webhook 渠道。
+
+管理员可通过 `auto_notification_config`（JSON 对象）统一定义全局通知渠道和开启的事件类型。系统支持监听并自动推送以下业务事件：
+
+- 团队事件：`team.member_added`、`team.member_removed`、`team.role_changed`、`team.ownership_transferred`、`team.model_granted`、`team.model_revoked`
+- 用户事件：`user.activated`、`user.deactivated`、`user.password_reset`、`user.pending_approval`
+- 知识库事件：`kb.doc_indexed`、`kb.doc_failed`
+- 工作流事件：`workflow.run_failed`、`workflow.pause_pending`
+- 凭证与安全：`apikey.expiring`、`apikey.expired`、`security.login_anomaly`、`security.account_locked`、`security.password_changed`
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/site-settings-reference.png" alt="站点设置字段总览" />

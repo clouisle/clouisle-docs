@@ -34,6 +34,7 @@ icon: ShieldCheck
 | `admin:settings:update` | 修改站点设置 |
 | `admin:sso:read` | 查看 SSO 提供商与配置 |
 | `admin:sso:update` | 管理 SSO 提供商与用户 SSO 连接 |
+| `admin:memory:update/delete` | 编辑或删除管理台记忆记录 |
 | `audit:read` | 查看审计日志 |
 | `audit:export` | 导出审计日志 |
 
@@ -49,6 +50,26 @@ icon: ShieldCheck
 | `skill:read/create/update/delete/execute` | Skill 管理 |
 | `apikey:read/create/update/delete` | API Key 管理 |
 | `conversation:read/delete` | 会话管理 |
+| `memory:read/create/update/delete` | 团队作用域记忆管理 |
+
+## 内置角色矩阵
+
+后端在系统启动时初始化 4 个全局内置角色，各角色拥有的默认权限如下：
+
+| 角色名称 | 角色类型 | 核心权限特征 | 典型适用人员 |
+| --- | --- | --- | --- |
+| **Super Admin** | 全局内置 | 拥有通配权限码 `*`，完全绕过权限限制，可执行系统配置、角色管理、审计导出等所有操作 | 运维负责人、系统所有者 |
+| **Admin** | 全局内置 | 包含 `admin:dashboard:access` 与所有资源的管理类与普通操作权限，但不包含系统角色/权限自身的增删改、以及修改全局站点设置 | 工作空间管理员、团队技术主管 |
+| **Member** | 全局内置 | 无 `admin:dashboard:access`；具备团队内 Agent、工作流、知识库、工具、Skill 的创建/编辑/运行完整协作权限 | 研发人员、业务编排人员 |
+| **Viewer** | 全局内置 | 只读角色；具备团队内已发布 Agent 和工作流的查看与对话/运行权限，以及工具/Skill 的读取与执行 | 业务审计人员、观察员 |
+
+### 团队成员身份映射
+
+团队内成员角色（`owner`、`admin`、`member`、`viewer`）采用作用域映射机制：
+- `owner` 与 `admin` 对应团队作用域下的 `Admin` 角色
+- `member` 对应团队作用域下的 `Member` 角色
+- `viewer` 对应团队作用域下的 `Viewer` 角色
+- 团队内角色不会隐式赋予全局管理台访问权（`admin:dashboard:access`）
 
 ## 侧边栏菜单映射
 

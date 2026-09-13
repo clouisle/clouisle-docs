@@ -138,23 +138,25 @@ Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排�
 
 ## 监控与统计
 
-通过统计端点 `GET /api/v1/agents/{agent_id}/stats` 获取 Agent 在指定时间段内的指标（`period`: `24h`、`7d`、`30d`、`all`）：
+每个 Agent 有独立的**监控**页（`/app/apps/{agent_id}/monitor`），在 Agent 侧边栏选择**监控**打开。页面按 `24h`、`7d`（默认）、`30d` 展示概览卡片、使用趋势、工具调用分布、**执行健康度**、**首 Token 延迟**和**用户干预**。
+
+<Callout type="info">
+  图表口径、成功率算法与限制见 [Agent 监控看板](./monitor)。
+</Callout>
+
+底层数据来自三个只读端点（`GET /api/v1/agents/{agent_id}/stats*`，`period`: `24h`、`7d`、`30d`、`all`）：
 
 | 指标 | 端点 | 说明 |
 | --- | --- | --- |
 | 会话与消息数 | `/stats` | 总会话数、总消息数、活跃用户数 |
 | Token 用量 | `/stats` | `prompt_tokens`、`completion_tokens`、`total_tokens` |
-| 平均响应时间 | `/stats` | 端到端平均耗时 |
+| 平均响应时间与首 Token 延迟 | `/stats` | 端到端平均耗时；首 Token 的 `p50`/`p95`/`avg` |
+| 执行健康度与用户干预 | `/stats` | 运行结果分布、成功率与干预次数 |
 | 工具调用 | `/stats/tool-usage` | 各工具调用次数统计 |
 | 使用趋势 | `/stats/trends` | 按时间聚合的使用量变化 |
-| 最近会话 | `/stats/recent-conversations` | 最近的对话列表 |
-
-<Callout type="info">
-  统计指标在 Agent 列表/详情中暴露，没有单独的**统计**标签页。
-</Callout>
 
 <Callout type="warn">
-  未实现/路线图：逐 Agent 成本拆分、响应时间百分位数（p50/p95/p99）、统计导出（CSV/PDF）、定时使用报告。统计端点仅返回上述指标。
+  未实现/路线图：逐 Agent 成本拆分、首 Token 之外的请求级响应时间百分位、统计导出（CSV/PDF）、定时使用报告。运维层面也没有 Prometheus `/metrics` 端点。
 </Callout>
 
 ## API 端点
@@ -257,5 +259,5 @@ const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { peri
 | Agent 模板库 | 未实现 | 使用复制（`POST .../duplicate`） |
 | 批量编辑 | 未实现 | 单个 Agent 通过 `PUT` 更新 |
 | 归档/恢复 | 未实现 | 取消发布或删除 |
-| 成本拆分/百分位数 | 未实现 | 仅基础统计 |
+| 成本拆分/请求级百分位 | 未实现 | 监控页提供首 Token 的 `p50`/`p95` |
 | 导入/导出 | 未实现 | 无 |

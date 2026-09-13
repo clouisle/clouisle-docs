@@ -1,0 +1,142 @@
+---
+title: Prompt Generation & Optimization API
+description: AI-powered streaming endpoints for generating and iteratively optimizing Agent system prompts
+icon: WandSparkles
+---
+
+The Prompt API utilizes large language models to generate structured system prompts for Agents and provides real-time streaming optimization based on human feedback. The base path is `/api/v1/prompts`.
+
+## Endpoint Overview
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| POST | `/api/v1/prompts/generate` | Generate structured system prompts from descriptions and context | Bearer JWT |
+| POST | `/api/v1/prompts/optimize` | Iteratively refine an existing prompt based on user feedback | Bearer JWT |
+
+<Callout type="info">
+  Prompt generation and optimization both rely on the system default chat model (`model_type="chat"` and `is_default=true`). If no default model is active, the endpoints yield a `MODEL_NOT_FOUND` error.
+</Callout>
+
+---
+
+## 1. Generate Prompt
+
+Generates a structured system prompt detailing role definition, behavior guidelines, tool and knowledge base usage instructions, and safety boundaries via SSE.
+
+```http
+POST /api/v1/prompts/generate HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "description": "An e-commerce after-sales support assistant handling returns and refunds",
+  "context": {
+    "agent_name": "Support Bot",
+    "agent_description": "Assists users with returns and queries order statuses",
+    "rag_mode": "hybrid",
+    "capabilities": {
+      "enable_attachments": true
+    },
+    "tools": [
+      {
+        "name": "check_order_status",
+        "display_name": "Check Order",
+        "description": "Lookup shipping and fulfillment progress by order ID"
+      }
+    ],
+    "variables": [
+      {
+        "name": "user_tier",
+        "type": "string",
+        "label": "Membership Tier"
+      }
+    ]
+  },
+  "style": {
+    "tone": "friendly",
+    "focus": "task-oriented",
+    "include_cot": true,
+    "include_constraints": true
+  },
+  "language": "en"
+}
+```
+
+### Request Body Fields
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `description` | string | Yes | - | Core requirements and expectations for the Agent |
+| `context` | object | No | `null` | Agent context metadata (name, description, tools, knowledge bases, variables, capabilities) |
+| `style` | object | No | `null` | Tone and generation style controls |
+| `style.tone` | string | No | `"professional"` | Tone: `professional`, `friendly`, `concise`, or `detailed` |
+| `style.focus` | string | No | `"balanced"` | Focus: `task-oriented`, `conversational`, or `balanced` |
+| `style.include_cot` | boolean | No | `false` | Include Chain-of-Thought instructions for explicit reasoning steps |
+| `style.include_constraints` | boolean | No | `true` | Include explicit constraints and safety boundaries |
+| `language` | string | No | `"zh"` | Target language of the generated prompt: `zh` or `en` |
+
+### SSE Response Format
+
+Returns a `text/event-stream` response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no
+
+event: start
+data: {"model": "gpt-4o"}
+
+event: content_delta
+data: {"delta": "You are a professional"}
+
+event: content_delta
+data: {"delta": " customer support assistant."}
+
+event: complete
+data: {"total_length": 860}
+```
+
+---
+
+## 2. Optimize Prompt
+
+Iteratively refines an existing prompt given feedback instructions.
+
+<Callout type="warn">
+  Notice: `current_prompt` and `feedback` are submitted as **Query Parameters**, not within a JSON body.
+</Callout>
+
+```http
+POST /api/v1/prompts/optimize?current_prompt=Existing+prompt+text...&feedback=Make+the+tone+more+empathetic HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `current_prompt` | string | Yes | The prompt content to be revised |
+| `feedback` | string | Yes | Feedback, revision notes, or additional constraints |
+
+### Stream Event Types
+
+| Event (`event`) | Data Payload (`data`) | Description |
+| --- | --- | --- |
+| `start` | `{"model": "string"}` | Emitted when generation starts, identifying the LLM model |
+| `content_delta` | `{"delta": "string"}` | Streaming chunk of text |
+| `complete` | `{"total_length": number}` | Emitted when generation finishes, with total character length |
+| `error` | `{"code": number, "msg": "string"}` | Emitted on failure (e.g. `code: 4004` if no chat model is configured) |
+
+---
+
+## Error Codes
+
+| Code | Identifier | Description |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | Bearer token missing or invalid |
+| `2004` | INACTIVE_USER | User account disabled or pending approval |
+| `4004` | MODEL_NOT_FOUND | Default chat model is unavailable (`no_chat_model_available`) |
+| `9999` | UNKNOWN_ERROR | Unexpected generation failure |

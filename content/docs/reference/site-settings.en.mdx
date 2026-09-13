@@ -32,13 +32,91 @@ Public settings are provided by the backend `PublicSiteSettingsResponse`. The fo
 
 The theme supports page, card, border, sidebar, top navigation, accent, muted, and chart colors. Colors use hex format, for example `#3b82f6` or `#3b82f680` with transparency.
 
-## Security & Operations Fields
+## Security & Compliance Settings
 
-Security settings also include password minimum length, complexity, expiration, and history, session timeout (default `30` days, `session_timeout_days`), single session, maximum login attempts, lockout duration, captcha, and TOTP. Storage settings support the local file system and object storage; audit logs support retention days and archive paths.
+Security settings are managed by administrators under system settings, governing authentication policies, account lockout, password complexity, and outbound network defenses.
 
-## Notification Channels
+| Setting Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model_endpoint_allowlist` | json (array) | 19 pre-configured official Origins | Model endpoint Origin allowlist, strictly matched by scheme + host + port (path ignored), up to 200 entries |
+| `ssrf_allowed_targets` | json (array) | `[]` | SSRF outbound exemption allowlist, up to 200 entries; supports single IP, CIDR subnet, wildcard subdomain (`*.corp.internal`), or exact hostname |
+| `min_password_length` | int | `8` | Minimum password length |
+| `require_uppercase` | bool | `true` | Require uppercase letters (`A-Z`) in password |
+| `require_number` | bool | `true` | Require digits (`0-9`) in password |
+| `require_special_char` | bool | `false` | Require special characters (punctuation and bracket symbols) in password |
+| `session_timeout_days` | int | `30` | Login session expiration in days |
+| `single_session` | bool | `false` | Enable single session enforcement (subsequent login terminates previous session) |
+| `max_login_attempts` | int | `5` | Maximum failed login attempts before account lockout |
+| `lockout_duration_minutes` | int | `15` | Account lockout duration in minutes |
+| `enable_captcha` | bool | `false` | Enable human click-verification captcha on login |
+| `require_totp` | bool | `false` | Require mandatory TOTP two-factor authentication for all users |
+| `password_expiration_enabled` | bool | `false` | Enable periodic password expiration policy |
+| `password_expiration_days` | int | `90` | Password validity duration in days |
+| `password_expiration_warning_days` | int | `7` | Days in advance to warn users before expiration |
+| `password_history_count` | int | `5` | Number of previous passwords prevented from reuse |
+| `password_min_age_days` | int | `0` | Minimum password age in days before allowing another change |
+| `force_password_change_first_login` | bool | `false` | Force users to change default password on first login |
 
-Email uses SMTP host, port, encryption, username, password, sender name, and address; DingTalk, WeCom, Feishu, and Slack support Webhook or enterprise app fields; generic Webhooks support custom headers, body templates, and HMAC secrets.
+### Outbound Network & SSRF Defenses
+
+Clouisle enforces strict security validation on all outbound network execution paths (HTTP request workflow nodes, knowledge base document URL import and preview, database tool connection tests):
+
+1. **Default Blocks**: Loopback addresses (`127.0.0.0/8`, `::1`), private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), link-local addresses (`169.254.0.0/16`, `fe80::/10`), multicast (`224.0.0.0/4`), unspecified addresses (`0.0.0.0`), and reserved domain names (`localhost`, `local`, `metadata.google.internal`).
+2. **Non-bypassable Critical Blocks**: Cloud metadata endpoints (`169.254.169.254`, `169.254.0.0/16`, `metadata.google.internal`) and universal wildcards (`0.0.0.0/0`, `::/0`, `*`) are strictly blocked even if added to the allowlist.
+3. **Allowlist Exemptions**: To connect to internal microservices or private databases, administrators add trusted targets to `ssrf_allowed_targets`. Supported formats:
+   - Specific IP: e.g. `192.168.1.100`
+   - CIDR subnet: e.g. `10.50.0.0/16` (prefix length cannot be 0, cannot overlap metadata networks)
+   - Wildcard subdomain: e.g. `*.corp.internal` (matches `corp.internal` and all its subdomains)
+   - Exact hostname: e.g. `api.internal.local` (must contain at least one dot, cannot start or end with dot)
+
+### Model Endpoint Security Policy
+
+All upstream LLM API requests are gated by `model_endpoint_allowlist`. The system matches against the full Origin (`https://api.openai.com`, `http://localhost:11434`), ignoring paths, query parameters, and credentials. Non-standard ports must match explicitly.
+
+## Memory Management & Retrieval Settings
+
+| Setting Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | bool | `false` | Enable asynchronous background memory extraction from chat conversations |
+| `memory_extraction_model_id` | string | `""` | Dedicated model ID for memory extraction (empty for system fallback) |
+| `memory_extraction_cooldown_seconds` | int | `180` | Cooldown window in seconds before background extraction (valid range `10-3600`) |
+| `memory_extraction_max_pending_turns` | int | `6` | Maximum pending unextracted conversation turns before immediate trigger (`1-50`) |
+| `retrieval_hybrid_mode` | string | `"rollout"` | Hybrid retrieval rollout mode: `rollout`, `enabled`, or `disabled` |
+| `retrieval_hybrid_team_ids` | json (array) | `[]` | Team IDs explicitly included in hybrid retrieval rollout |
+| `retrieval_hybrid_percentage` | int | `100` | Deterministic hybrid retrieval rollout percentage |
+
+## Storage & Audit Settings
+
+| Setting Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `upload_storage_backend` | string | `"local"` | File storage backend: `"local"` (local filesystem) or `"object"` (S3-compatible object storage) |
+| `kb_document_max_upload_size_mb` | int | `50` | Maximum file upload size in MB for knowledge base documents (`1-1024`) |
+| `object_storage_endpoint` | string | `""` | S3-compatible endpoint URL (e.g. `s3.us-west-1.amazonaws.com`) |
+| `object_storage_bucket` | string | `""` | Bucket name |
+| `object_storage_region` | string | `""` | Bucket region |
+| `object_storage_access_key` | string | `""` | Access Key |
+| `object_storage_secret_key` | string | `""` | Secret Key (stored securely) |
+| `object_storage_force_path_style` | bool | `true` | Use path-style S3 URLs |
+| `object_storage_secure` | bool | `true` | Use HTTPS protocol for object storage endpoint |
+| `audit_log_retention_days` | int | `365` | Audit log retention period in days (valid range `30-3650`) |
+| `audit_log_archive_path` | string | `"/var/log/clouisle/audit_archives"` | Local or mounted archive file path |
+| `audit_alert_enabled` | bool | `true` | Enable security alerts on audit logs |
+| `audit_alert_webhook` | string | `""` | Webhook URL for audit alerts |
+| `audit_alert_failed_login_threshold` | int | `5` | Failed login threshold before triggering security alert |
+| `audit_alert_failed_login_window` | int | `5` | Time window in minutes for failed login detection |
+| `audit_alert_bulk_deletion_threshold` | int | `10` | Bulk deletion threshold before triggering alert |
+
+## Notification Channels & Automated Notifications
+
+Supported channels: Email (SMTP), DingTalk, WeChat Work, Feishu, Slack, and generic Webhooks.
+
+Administrators configure global notification channels and enabled event types via `auto_notification_config` (JSON object). The system automatically tracks and dispatches:
+
+- Team events: `team.member_added`, `team.member_removed`, `team.role_changed`, `team.ownership_transferred`, `team.model_granted`, `team.model_revoked`
+- User events: `user.activated`, `user.deactivated`, `user.password_reset`, `user.pending_approval`
+- Knowledge base events: `kb.doc_indexed`, `kb.doc_failed`
+- Workflow events: `workflow.run_failed`, `workflow.pause_pending`
+- Credentials and security: `apikey.expiring`, `apikey.expired`, `security.login_anomaly`, `security.account_locked`, `security.password_changed`
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/site-settings-reference.png" alt="Site settings fields overview" />

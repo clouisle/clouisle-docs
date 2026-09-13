@@ -30,6 +30,10 @@ The database only contains metadata. Original files live in upload storage and v
 
 ## Retrieval and tasks
 
+### How do I scale one class of task independently?
+
+The supplied worker consumes `default`, `agent`, `knowledge`, and `workflow` together, so scaling it increases throughput for all four. To grow AgentRun execution alone, run an extra worker subscribed to a single queue (for example `-Q agent`); the `sandbox` queue is consumed by the dedicated `sandbox-worker`. See [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
+
 ### Why can't I search a document after a successful upload?
 
 Upload and processing are two phases. Wait for the document to enter `completed`, confirm embedding succeeded and Qdrant is available, then check the Knowledge Base associated with the Agent.
@@ -39,6 +43,10 @@ Upload and processing are two phases. Wait for the document to enter `completed`
 Hybrid retrieval's `dense_weight` and `lexical_weight` cannot both be `0`. The full-text channel also requires PostgreSQL's `pg_search`.
 
 ## Security
+
+### Why is an intranet address rejected?
+
+Custom HTTP tools, workflow HTTP nodes, and Knowledge Base URL scraping block private and loopback addresses by default. Add intranet IPs, CIDRs, or domains one per line under **Site Settings** > **Security** > **Outbound Network Allowlist**. Cloud metadata, multicast, `0.0.0.0`, universal wildcards, and `localhost` are permanently blocked and cannot be allowed; local inference services go through the separate Model Endpoint Allowlist. See [Troubleshooting → HTTP Tool or Intranet Requests Blocked](./operations/troubleshooting.mdx#outbound-allowlist).
 
 ### Can I commit `.env` to the repository?
 

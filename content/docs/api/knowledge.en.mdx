@@ -39,6 +39,9 @@ Knowledge base resource endpoints have a base path of `/api/v1/knowledge-bases`.
 | GET/POST/PUT/DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | Chunk CRUD |
 | POST | `/knowledge-bases/{kb_id}/search` | Single retrieval |
 | POST | `/knowledge-bases/{kb_id}/search/batch` | Multi-config comparison retrieval |
+| POST | `/knowledge-bases/{kb_id}/share` | Share the knowledge base with another team |
+| GET | `/knowledge-bases/{kb_id}/shares` | List knowledge base shares |
+| DELETE | `/knowledge-bases/{kb_id}/share/{team_id}` | Revoke a team's share |
 
 ## Knowledge Base Management
 
@@ -313,6 +316,41 @@ POST /api/v1/knowledge-bases/{kb_id}/search/batch
 ```
 
 Request body is an array of retrieval configs, each executed independently and returned for parameter comparison.
+
+## Cross-Team Sharing
+
+Share a knowledge base with other teams in the workspace with read-only access.
+
+<Callout type="info">
+  Creating or modifying a share requires `owner` or `admin` role within the knowledge base's owner team; otherwise the request returns `403` with `TEAM_ADMIN_REQUIRED`. Superusers and admin-scoped platform calls bypass this team-role requirement.
+</Callout>
+
+### Share Knowledge Base
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/share
+```
+
+```json
+{
+  "team_id": "target-team-uuid",
+  "permission": "read_only"
+}
+```
+
+Returns a `KnowledgeBaseShareOut` record with `id`, `knowledge_base_id`, `knowledge_base_name`, `shared_with_team_id`, `shared_with_team_name`, `permission` (currently always `read_only`), `shared_by_name`, and `shared_at`.
+
+### List Knowledge Base Shares
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/shares
+```
+
+### Remove Knowledge Base Share
+
+```
+DELETE /api/v1/knowledge-bases/{kb_id}/share/{team_id}
+```
 
 ## Knowledge Base Statistics
 

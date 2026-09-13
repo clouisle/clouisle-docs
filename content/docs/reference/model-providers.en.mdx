@@ -1,35 +1,116 @@
 ---
 title: Model Providers Reference
-description: Look up provider identifiers, model types, credentials, and capability fields
+description: Look up provider identifiers, model types, credentials, default endpoints, embedding adapters, and endpoint security policy
 icon: Network
 ---
 
-## Provider Identifiers
+Clouisle unifies multimodal model access through a provider abstraction layer covering chat, embedding, rerank, speech (TTS/STT), and image/video generation.
 
-Current enum values: `openai`, `openai_responses`, `anthropic`, `google`, `azure_openai`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `runway`, `pika`, `luma`, `kling`, `stability`, `midjourney`, `custom`.
+## Provider Identifier Enumeration
 
-## Model Types
+The system defines 22 model provider identifiers (`ModelProvider`). The table lists each provider's backend default endpoint; when no custom `base_url` is set, the runtime resolves request addresses from these defaults.
 
-`chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, `text_to_video`.
+| Provider Identifier (`provider`) | Display Name | Default API Base URL |
+| --- | --- | --- |
+| `openai` | OpenAI | `https://api.openai.com/v1` |
+| `openai_responses` | OpenAI Responses | `https://api.openai.com/v1` |
+| `anthropic` | Anthropic | `https://api.anthropic.com` |
+| `google` | Google AI | `https://generativelanguage.googleapis.com/v1beta` |
+| `azure_openai` | Azure OpenAI | None (endpoint must be configured) |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` |
+| `moonshot` | Moonshot | `https://api.moonshot.cn/v1` |
+| `zhipu` | Zhipu AI | `https://open.bigmodel.cn/api/paas/v4` |
+| `qwen` | Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `baichuan` | Baichuan | `https://api.baichuan-ai.com/v1` |
+| `minimax` | MiniMax | `https://api.minimax.chat/v1` |
+| `volcengine` | Volcengine | `https://ark.cn-beijing.volces.com/api/v3` |
+| `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` |
+| `xai` | xAI (Grok) | `https://api.x.ai/v1` |
+| `ollama` | Ollama | `http://localhost:11434` |
+| `runway` | Runway | `https://api.dev.runwayml.com` |
+| `pika` | Pika | `https://api.pika.art/v1` |
+| `luma` | Luma AI | `https://api.lumalabs.ai/dream-machine/v1` |
+| `kling` | Kling | `https://api.klingai.com` |
+| `stability` | Stability AI | `https://api.stability.ai` |
+| `midjourney` | Midjourney | None (proxy required) |
+| `custom` | OpenAI Compatible | None (supplied by the integrator) |
 
-## Model Fields
+<Callout type="info">
+For `volcengine`, some model types have dedicated default endpoints that take precedence over the general endpoint above:
+- TTS: `https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse`
+- Audio Generation: `https://openspeech.bytedance.com/api/v3/tts/create`
+</Callout>
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `name` | string | Required | Display name, `1-100` characters |
-| `provider` | enum | Required | Provider identifier |
-| `model_id` | string | Required | Upstream model ID, `1-100` characters |
-| `model_type` | enum | Required | Model type |
-| `provider_display_name` | string/null | null | Provider name shown to users |
-| `base_url` | string/null | null | Custom API URL, at most `512` |
-| `api_key` | string/null | null | Can be empty for local providers; encrypted server-side |
-| `context_length` | integer/null | null | Must be `>=1` |
-| `max_output_tokens` | integer/null | null | Must be `>=1` |
-| `input_price` / `output_price` | decimal/null | null | Price per million Tokens, non-negative, up to 6 decimal places |
-| `default_params` | object/null | null | Default inference parameters |
-| `capabilities` | object/null | null | Capability flags such as vision, function calling, streaming |
-| `is_enabled` | boolean | true | Whether the model can be authorized/used |
-| `is_default` | boolean | false | Whether it is the default model of this type |
-| `sort_order` | integer | 0 | List sort order |
+---
 
-Connection tests return `success`, `message`, and optional `latency_ms`. When discovering models, credentials are only used for requests and are not saved automatically.
+## Model Type Classification (`ModelType`)
+
+`model_type` describes a model's capability class and is independent of the provider; a given provider typically supports only some of these types.
+
+| Model Type (`model_type`) | Description |
+| --- | --- |
+| `chat` | Chat and text completion LLMs (streaming and function calling supported) |
+| `embedding` | Text embedding models (used for knowledge base RAG and memory retrieval) |
+| `rerank` | Rerank models that rescore initially retrieved text chunks |
+| `tts` | Text-to-Speech |
+| `stt` | Speech-to-Text |
+| `audio_generation` | Prompt-to-audio generation |
+| `text_to_image` | Text-to-image generation |
+| `text_to_video` | Text-to-video generation |
+
+---
+
+## Embedding Provider Support
+
+`model_type: embedding` is not valid for every provider identifier. The backend embedding adapter dispatches providers across three paths:
+
+| Adapter Path | Covered Providers | Behavior |
+| --- | --- | --- |
+| `OpenAICompatibleEmbeddingAdapter` | `openai`, `openai_responses`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `custom` | Calls the OpenAI-compatible `/embeddings` endpoint directly and captures upstream `usage` |
+| `FallbackEmbeddingAdapter` | `google`, `azure_openai`, and other providers not listed above | Generates vectors via LangChain Embeddings; `usage` is empty |
+| Unsupported | `anthropic` | No embedding adapter exists; creating a `model_type: embedding` model with `provider: anthropic` raises `Unsupported provider for embedding` at runtime |
+
+For the detailed embedding mechanics (fallback strategy, token metering, dynamic dimensions, and Qdrant collection partitioning), see [Embedding Adapters & Vector Dimensions](/reference/embedding-adapters).
+
+---
+
+## Model Definition Fields
+
+| Field | Type | Required | Default | Description & Validation |
+| --- | --- | --- | --- | --- |
+| `name` | string | Yes | None | Display name, `1-100` characters |
+| `provider` | enum | Yes | None | Provider identifier (the 22 enum values above) |
+| `model_id` | string | Yes | None | Upstream model ID, `1-100` characters |
+| `model_type` | enum | Yes | None | Model type (the 8 types above) |
+| `provider_display_name` | string/null | No | `null` | Provider name shown to end users |
+| `base_url` | string/null | No | `null` | Custom API URL (at most 512 characters), constrained by the endpoint allowlist policy |
+| `api_key` | string/null | No | `null` | Access key (may be empty for local providers such as Ollama); encrypted server-side |
+| `context_length` | integer/null | No | `null` | Maximum context length (must be `>= 1`) |
+| `max_output_tokens` | integer/null | No | `null` | Maximum output tokens (must be `>= 1`) |
+| `input_price` | decimal/null | No | `null` | Price per million input tokens (non-negative, up to 6 decimals) |
+| `output_price` | decimal/null | No | `null` | Price per million output tokens (non-negative, up to 6 decimals) |
+| `default_params` | object/null | No | `null` | Default inference parameters (such as `temperature`, `top_p`) |
+| `capabilities` | object/null | No | `null` | Capability flags: `vision`, `function_calling`, `streaming`, etc. |
+| `is_enabled` | boolean | No | `true` | Whether the model is globally enabled |
+| `is_default` | boolean | No | `false` | Whether it is the default model of its type |
+| `sort_order` | integer | No | `0` | Sort weight, ascending |
+
+---
+
+## Model Endpoint Security & Connectivity Testing
+
+### Endpoint Allowlist Policy (`model_endpoint_allowlist`)
+
+All outbound requests to model providers are strictly validated against the system endpoint allowlist:
+- The system ships with 19 pre-configured official provider Origins (such as `https://api.openai.com`, `https://api.deepseek.com`).
+- If an administrator configures a custom private Base URL (for example self-hosted vLLM or a private Ollama node), its full Origin (`scheme + host + port`) must be explicitly registered under **Site Settings > Model Endpoint Allowlist**.
+- Validation ignores request paths, query parameters, and credentials, but non-standard ports (such as `:11434`) are matched strictly.
+
+### Connectivity Test Endpoint
+
+When adding or saving a model in the admin console, a test endpoint verifies connectivity:
+- The test performs a lightweight upstream call using the credentials the administrator submits at that moment; credentials are not saved automatically during the test.
+- The response contains:
+  - `success` (bool): whether connectivity succeeded
+  - `message` (string): success information or upstream error detail
+  - `latency_ms` (float/null): network and response round-trip time in milliseconds

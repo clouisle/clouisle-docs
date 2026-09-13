@@ -1,0 +1,100 @@
+---
+title: 系统可观测性与健康监控
+description: 查阅管理后台可观测性指标、健康阈值、聚合限流与排障端点
+icon: Activity
+---
+
+Clouisle 提供面向平台管理员（需 `admin:dashboard:access` 全局权限）的集中式系统可观测性与健康监控服务。所有监控路由挂载在 `/api/v1/admin/observability` 下，响应结果默认在 Redis 中缓存 `30` 秒（命名空间 `admin:observability:v1`）。
+
+## 时间范围与分桶规则
+
+大部分指标接口均接受 `time_range` 查询参数：
+- 支持取值：`7d`、`30d`（默认）、`90d`、`all`（所有历史记录）。非法参数自动降级为 `30d`。
+- 趋势粒度（`granularity`）：支持 `hour`（小时）或 `day`（天）。若未指定，`7d` 默认按 `hour` 分桶，其余范围默认按 `day` 分桶。
+
+## 监控指标分类
+
+### 1. 运行总览（Overview）
+
+端点：`GET /api/v1/admin/observability/overview`
+
+| 指标字段 | 类型 | 说明与口径 |
+| --- | --- | --- |
+| `totals.agent_requests` | integer | 统计周期内 Agent 最终助手消息总数（Canonical assistant-final messages） |
+| `totals.workflow_runs` | integer | 统计周期内工作流运行实例总数 |
+| `totals.total_requests` | integer | Agent 请求与工作流运行次数之和 |
+| `totals.total_tokens` | integer | 消耗的 Token 累计总量 |
+| `rates.agent_success_rate` | number (0-100) | Agent 成功率（`round_status == 'completed'` 占比） |
+| `rates.workflow_success_rate` | number (0-100) | 工作流运行成功率（`status == 'success'` 占比） |
+| `rates.overall_success_rate` | number (0-100) | 综合执行成功率 |
+| `rates.timeout_rate` | number (0-100) | 综合异常/超时率（工作流 `status == 'timeout'` 与 Agent `round_status == 'error'` 占比） |
+| `latency.p50_ms / p90_ms / p95_ms / p99_ms` | number | 执行总耗时分位数（Agent `duration_ms` 与工作流 `total_duration_ms` 连续百分位） |
+| `ttft.p50_ms / p90_ms / p95_ms / p99_ms` | number | 首字延迟（Time to First Token）分位数，仅统计 Agent 交互的 `first_token_ms` |
+| `throughput.current_qps` | number | 最近 60 秒内产生的请求事件数除以 60 |
+| `throughput.peak_hourly_requests` | integer | 统计周期内单个自然小时的最高请求峰值 |
+
+### 2. 实体性能（Agents & Workflows）
+
+端点：
+- Agent 列表：`GET /api/v1/admin/observability/agents`（支持按 `requests`、`p50`、`p90`、`p95`、`p99`、`timeout_rate`、`success_rate`、`tokens` 排序）
+- Agent 详情与趋势：`GET /api/v1/admin/observability/agent/{agent_id}`
+- 工作流列表：`GET /api/v1/admin/observability/workflows`（额外支持按 `runs`、`failed_nodes` 排序）
+- 工作流详情与节点瓶颈：`GET /api/v1/admin/observability/workflow/{workflow_id}`
+
+工作流详情接口还会返回执行频次最高的前 20 种节点类型统计（`execution_count`、`failed_count`、`avg_duration_ms`），便于快速定位是哪个节点（如 `http_request` 或 `llm`）导致了流水线阻塞。
+
+### 3. 超时与失败排障（Timeouts）
+
+端点：`GET /api/v1/admin/observability/timeouts`（支持 `source=all|agent|workflow`）
+
+- 工作流超时记录：记录 `status = 'timeout'` 的运行，类型标记为 `workflow`。
+- Agent 异常记录：捕获 `round_status = 'error'` 的助手交互。由于历史消息未分离具体错误细分，类型标注为 `unknown`，响应中会显式返回 `agent_timeout_type_available: false`。
+
+### 4. 吞吐量与 Token 消耗（Throughput & Tokens）
+
+- `GET /api/v1/admin/observability/throughput`：返回当前实时 `qps`、`running_workflows` 以及按时间桶聚合的请求折线数据。
+- `GET /api/v1/admin/observability/tokens`：按来源（`agent`、`workflow`、`other`）以及按模型名称（`by_model`）汇总 Token 消耗。对 `7d` 与 `30d` 还会与团队模型配额计数器比对取大值，防止因事件未记录导致的用量漏计。
+
+## 系统硬件健康与运行阈值
+
+端点：`GET /api/v1/admin/observability/system/health`
+
+系统每秒收集硬件指标，并在 Redis 列表中保留最近 120 个健康快照（有效期 24 小时，通过 `GET .../system/trend` 可获取快照趋势）。健康状态阈值与指标如下：
+
+| 监控项 | 告警状态与阈值 | 核心字段 |
+| --- | --- | --- |
+| **CPU** | `usage_percent >= 70%` 告警（warning）；`>= 90%` 严重（danger） | `status`、`usage_percent`、`cores`、`architecture` |
+| **内存 (Memory)** | `usage_percent >= 80%` 告警（warning）；`>= 90%` 严重（danger） | `status`、`usage_percent`、`used_bytes`、`total_bytes` |
+| **磁盘 (Disk)** | `usage_percent >= 80%` 告警（warning）；`>= 90%` 严重（danger） | `status`、`usage_percent`、`used_bytes`、`total_bytes` |
+| **数据库连接** | 基于 PostgreSQL `pg_stat_activity` 与 `max_connections` 计算使用比率 | `status`、`active_connections`、`max_connections` |
+| **Redis 状态** | 监控连通性与缓存效率 | `status`、`used_memory`、`connected_clients`、`ops_per_sec`、`hit_rate` |
+| **异步队列 (Workers)** | 监控 Celery 节点与 5 个核心业务队列积压 | 见下方 Worker 状态详解 |
+
+### Celery Worker 与核心队列
+
+端点：`GET /api/v1/admin/observability/system/workers`
+
+Clouisle 拥有 5 个固定业务调度队列：
+- `default`：系统通用任务与邮件发送
+- `knowledge`：知识库文档解析、分块提取与向量化索引
+- `workflow`：工作流异步执行与长耗时任务调度
+- `agent`：后台 Agent 思考与异步推理任务
+- `sandbox`：代码节点沙箱运行任务
+
+队列监控每批扫描 500 条消息，单个队列上限扫描 5000 条。若队列积压超过 5000，超出部分统一标记为 `unscanned:{queue}`。
+
+### 慢查询诊断（Slow Queries）
+
+端点：`GET /api/v1/admin/observability/system/slow-queries`
+
+- 默认执行阈值 `threshold_ms=1000`（即超过 1 秒的 SQL 查询），分页返回执行耗时、调用次数和返回行数。
+- **前置依赖**：PostgreSQL 必须开启 `pg_stat_statements` 扩展；若未开启或不支持，接口返回 `available: false` 及具体原因。
+
+## 数据库并发聚合限制（DB Aggregate Concurrency）
+
+在统计和可观测性分析中，多个聚合查询常通过 `asyncio.gather` 并发下发给数据库。若不加以约束，高并发请求将迅速耗尽连接池，导致常规 API 挂起。
+
+Clouisle 通过全局信号量机制执行并发限制：
+- **核心环境变量**：`DB_AGGREGATE_CONCURRENCY`（默认值为 `4`，类型为大于 0 的整数）。
+- **工作机制**：在进程级别维护单一的 `asyncio.Semaphore`，针对每次聚合查询使用 `run_bounded()` 包装。
+- **架构考量**：Tortoise 共享连接池默认 `maxsize=5`，PostgreSQL 默认最大连接数 `max_connections=100`。在多进程（如 Gunicorn / Uvicorn 运行 17 个 Worker 进程）部署下，将单个聚合并发限制为 `4`，能确保任意时刻聚合分析都不会打满数据库连接。

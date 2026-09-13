@@ -6,6 +6,15 @@ icon: Database
 
 Knowledge Base settings affect both document processing and runtime retrieval. After creation, the embedding model and vector dimensions should stay stable.
 
+## Embedding Model & Dimensions
+
+| Field | Type | Default | Limit/Description |
+| --- | --- | --- | --- |
+| `embedding_model_id` | UUID/null | `null` | Embedding model bound to the Knowledge Base; immutable after creation |
+| `embedding_dimension` | integer/null | `null` | Detected and locked on first vectorization; later vectors must match exactly |
+
+When a Knowledge Base is created, `embedding_dimension` is empty; the system writes the measured dimension after vectorizing the first batch of document chunks. Afterwards, updating `embedding_model_id` is rejected, and submitting vectors with a mismatched dimension raises `DimensionMismatchError`. For provider coverage and Qdrant multi-dimension collection mapping, see [Embedding Adapters & Vector Dimensions](/reference/embedding-adapters).
+
 ## Chunking & Rerank
 
 | Field | Type | Default | Limit |

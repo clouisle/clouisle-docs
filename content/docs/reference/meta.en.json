@@ -8,10 +8,13 @@
     "agent-config",
     "workflow-nodes",
     "knowledge-settings",
+    "embedding-adapters",
     "model-providers",
     "site-settings",
     "api-keys",
     "permissions",
+    "rate-limits",
+    "observability",
     "statuses-errors"
   ]
 }

@@ -1,0 +1,87 @@
+---
+title: Embedding 适配器与向量维度
+description: 查阅 Embedding 适配器分派、上游 Token 计量、动态维度检测与 Qdrant 集合映射
+icon: Cpu
+---
+
+Clouisle 的文本嵌入（Embedding）体系为知识库检索增强（RAG）和会话长期记忆提供向量化基础。系统采用分层适配器架构，支持多供应商无缝接入、运行时动态维度检测与多维度向量隔离存储。
+
+## 适配器分派架构
+
+Embedding 模型通过 `backend/app/llm/adapters/embedding/` 统一调度。调用方无需关心上游协议差异，适配器工厂依据模型的 `provider` 自动分派到最佳实现：
+
+| 适配器类 | 匹配供应商 | 工作机制 | Token 计量策略 |
+| --- | --- | --- | --- |
+| **`OpenAICompatibleEmbeddingAdapter`** | `openai`、`openai_responses`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`custom` | 直接通过 HTTP POST 请求目标 Base URL 的 `/embeddings` 端点（标准 OpenAI 协议） | 优先读取响应体中的 `usage.total_tokens`；若供应商未返回，降级使用 `tiktoken` 准确分词计数 |
+| **`FallbackEmbeddingAdapter`** | `google`、`azure_openai` 等其他供应商 | 调用 LangChain 专用封装（如 `GoogleGenerativeAIEmbeddings`、`AzureOpenAIEmbeddings`）通过 `aembed_documents` 获取向量 | 适配器返回空的 `Usage`，由外层 `team_embedding` 统一调用本地 `tiktoken` 计算实际 Token 消耗 |
+
+<Callout type="warn" title="Anthropic 限制">
+Anthropic 官方不提供独立的 Text Embedding API。在 Clouisle 中为 Anthropic 供应商配置 `embedding` 类型模型会在运行时抛出 `ValueError: Unsupported provider for embedding: anthropic` 错误。
+</Callout>
+
+### 容错与降级机制
+
+`OpenAICompatibleEmbeddingAdapter` 在发起直接 HTTP 调用时：
+1. 请求超时时间固定为 `60.0` 秒（`DEFAULT_EMBEDDING_REQUEST_TIMEOUT`），最大重试次数为 `2` 次。
+2. 若直接 HTTP 请求因网络波动、协议微小差异或非 200 响应失败，适配器会自动在 `except` 块中捕获异常，并无缝降级到底层 LangChain `OpenAIEmbeddings` 实例执行补救重试。
+
+---
+
+## 团队配额检查与 Token 计量链路
+
+当工作流或知识库索引触发 `team_embedding(team_id, texts, model_id)` 时，系统执行严格的三步链路：
+
+1. **授权与配额前置拦截**：
+   - 检验团队是否拥有该模型的有效使用授权。
+   - 调用 `usage_tracker.check_quota_with_model()` 核查团队每日与月度的 Token 和请求配额，超额即时抛出 `LLMQuotaExceededError`（业务错误码 `6103`）。
+2. **生成向量与 Token 统计**：
+   - 适配器执行文本嵌入。
+   - 若上游返回了 `usage.total_tokens`，直接采纳；否则调用 `count_tokens(text, model_id, provider)` 进行本地 `tiktoken` 兜底统计（至少计为 1 Token）。
+3. **后置用量扣减与入库**：
+   - 将确切的 Token 消耗异步计入团队使用量账本（`team_model_usages` 表），支持按日与按月实时追踪。
+
+---
+
+## 动态维度检测与不可变性
+
+不同的 Embedding 模型产出的向量维度各异（如 OpenAI `text-embedding-3-small` 为 1536 维，`text-embedding-3-large` 为 3072 维，开源 BGE 模型常见 768 或 1024 维）。Clouisle 支持**全自动动态维度适配**：
+
+### 1. 维度自适应生命周期
+- **创建知识库**：管理员创建知识库时指定 `embedding_model_id`，此时知识库数据库记录的 `embedding_dimension` 允许为 `null`。
+- **首次索引绑定**：当知识库处理第一批文档切片时，系统调用模型生成第一批向量并测量其长度 `len(embedding[0])`。
+- **固化维度**：系统调用 `set_kb_embedding_dimension(kb_id, dimension)` 将该维度持久化到 `knowledge_bases` 表。
+
+### 2. 维度与模型的不可变性约束
+- **模型不可变**：知识库一旦创建，`embedding_model_id` 即被**永久锁定**。更新知识库接口（`PATCH /knowledge-bases/{id}`）检测到变更 `embedding_model_id` 时会直接忽略或拒绝。
+- **维度严格匹配**：后续导入的任何文档切片向量，均须经过 `_validate_embeddings` 校验。若向量维度与知识库已固化的 `embedding_dimension` 不一致，系统抛出 `DimensionMismatchError` 并阻断入库。
+
+---
+
+## Qdrant 多维度集合隔离架构
+
+Clouisle 的向量数据库默认采用 Qdrant。为支持多模型共存，系统根据向量维度对集合进行水平分区：
+
+```
+Qdrant 实例 (http://localhost:6333)
+├── kb_dim_768   (针对 768 维模型，如 BGE-base)
+├── kb_dim_1024  (针对 1024 维模型，如 BGE-large)
+├── kb_dim_1536  (针对 1536 维模型，如 text-embedding-3-small)
+└── kb_dim_3072  (针对 3072 维模型，如 text-embedding-3-large)
+```
+
+### 集合与索引规则
+
+1. **集合命名规范**：`${QDRANT_COLLECTION_PREFIX}_${dimension}`（默认前缀为 `kb_dim`，即 `kb_dim_1536`）。
+2. **距离度量**：默认为余弦相似度 `Cosine`（支持在环境变量中配置 `Dot` 或 `Euclid`）。
+3. **自动建表**：首次向某维度写入向量时，系统自动在 Qdrant 中创建对应集合，并自动为 `kb_id` 和 `document_id` 建立有效载荷索引（Payload Index），确保基于知识库 ID 的检索过滤拥有最高性能。
+
+---
+
+## 批处理规格与超时参数
+
+| 参数项 | 设定值 | 说明 |
+| --- | --- | --- |
+| **文档向量化切片批次** | `25`（默认） | `store_chunks_with_progress` 每批处理 25 个文档切片，逐批生成嵌入、持久化并更新进度 |
+| **适配器单次请求超时** | `60.0` 秒 | `DEFAULT_EMBEDDING_REQUEST_TIMEOUT`，用于 HTTPX 与 LangChain 客户端请求 |
+| **向量存储操作超时** | `120.0` 秒 | `EMBEDDING_REQUEST_TIMEOUT_SECONDS`，用于包含重试在内的端到端入库或密集查询 |
+| **适配器最大重试次数** | `2` 次 | `DEFAULT_EMBEDDING_MAX_RETRIES` |

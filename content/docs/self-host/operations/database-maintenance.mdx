@@ -1,0 +1,137 @@
+---
+title: 数据库维护与索引调优
+description: 运维窗口下并发创建覆盖索引、清理无效索引并调优聚合查询并发
+icon: Database
+---
+
+Clouisle 后端将仪表盘用量、Agent 会话与工作流运行统计下推至 PostgreSQL（`backend/app/services/stats_sql.py`）。为了在海量对话与执行记录下保持毫秒级响应，需要部署覆盖索引（Covering Index）并配合连接池并发控制。
+
+## 为什么索引不在启动迁移中自动执行
+
+`backend/app/core/init_data.py` 在执行启动 DDL 迁移时配置了严格的安全保护：设置 `lock_timeout = '2s'` 并包装在 3 秒的超时控制内。这是为了防止启动时的长耗时 DDL 阻塞服务就绪。
+
+在已有大量数据的 `messages` 或 `workflow_runs` 表上，构建索引通常耗时数分钟。普通的 `CREATE INDEX` 会持有排他锁并阻塞线上写入；而安全的非阻塞形式 `CREATE INDEX CONCURRENTLY` **不能在事务块中运行**，因此无法纳入应用自动迁移流程，必须由运维工程师在维护窗口中手动执行。
+
+## 推荐创建的覆盖索引
+
+在 PostgreSQL 客户端以数据库所有者或超级用户身份连接数据库，**逐条单独执行**以下语句：
+
+```sql
+-- 1. 对话聚合与活跃用户统计
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_agent_created_user
+    ON conversations (agent_id, created_at) INCLUDE (user_id);
+
+-- 2. 对话历史查询（按 Agent 与用户过滤并按更新时间倒序）
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_agent_user_updated_at
+    ON conversations (agent_id, user_id, updated_at DESC);
+
+-- 3. 消息角色与时间统计（按角色计数、Token 汇总、首字延迟分位数）
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_conversation_role_created_at
+    ON messages (conversation_id, role, created_at);
+
+-- 4. 工作流运行概览与趋势分桶（单索引覆盖两项查询）
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_workflow_runs_workflow_created_covering
+    ON workflow_runs (workflow_id, created_at)
+    INCLUDE (status, total_duration_ms);
+
+-- 5. Agent 执行健康与干预统计
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_runs_agent_updated_at
+    ON agent_runs (agent_id, updated_at);
+```
+
+### 索引用途对照
+
+| 索引名称 | 覆盖的服务与查询 | 优化目标 |
+| --- | --- | --- |
+| `idx_conversations_agent_created_user` | Agent 对话总览、活跃用户去重统计、趋势分桶 | 将全表/全分区扫描转为仅索引扫描（Index Only Scan） |
+| `idx_conversations_agent_user_updated_at` | `GET /agents/{agent_id}/conversations` 列表分页 | 消除按 `updated_at DESC` 排序产生的文件排序（filesort） |
+| `idx_messages_conversation_role_created_at` | 消息角色分布、Token 聚合、首字延迟分位数 | 快速定位特定会话的角色消息，避免回表读取正文行 |
+| `idx_workflow_runs_workflow_created_covering` | 工作流运行概览（状态计数、平均耗时）与趋势分析 | 将 `created_at` 作为键列支持时间范围下推剪枝，`INCLUDE` 承载状态与耗时 |
+| `idx_agent_runs_agent_updated_at` | Agent 执行健康度、错误统计与人工干预计数 | 结合已有 `agent_run_inputs.run_id` 索引加速干预状态关联 |
+
+## 索引设计核心要点
+
+### 键列（Key）与负载列（INCLUDE）的区别
+
+`idx_workflow_runs_workflow_created_covering` 同时服务工作流概览与趋势两个接口：
+
+- 工作流概览使用 `MAX(created_at)` 聚合函数，只需要字段包含在索引中即可满足仅索引扫描。
+- 趋势分桶使用范围过滤条件 `created_at >= $2`。PostgreSQL 规则中**非键列（即仅存在于 INCLUDE 中的列）不能作为索引扫描的检索条件（Index Cond）**。
+
+将 `created_at` 设为键列后，查询计划中的过滤由全量扫描后 Filter 变为直接的 `Index Cond` 条件，缓冲区读取（Buffers）可减少 10 倍以上，且单个索引即可兼顾两类统计，无需创建重复索引。
+
+<Callout type="warn">
+  `INCLUDE` 列属于严格契约。如果后续查询需要统计其它列（例如新增错误码维度），该索引将失去覆盖能力并退化为回表读取（Bitmap Heap Scan）。
+</Callout>
+
+## 运维操作注意事项
+
+### 1. 逐条执行
+
+`CREATE INDEX CONCURRENTLY` 和后续的 `VACUUM` 无法在事务块中运行，切勿放入 `BEGIN ... COMMIT` 脚本中批量执行。
+
+### 2. 清理失败的无效索引（INVALID）
+
+如果 `CREATE INDEX CONCURRENTLY` 构建过程中断（如客户端超时或进程被终止），数据库中会遗留处于 `INVALID` 状态的索引。由于索引名称已存在，后续重跑 `IF NOT EXISTS` 会直接跳过，导致无效索引永远驻留且无法被优化器使用。
+
+在执行建索引前后，运行以下查询检查：
+
+```sql
+SELECT c.relname, i.indisvalid
+FROM pg_class c
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE NOT i.indisvalid;
+```
+
+若发现无效索引，先将其并发删除后再重新创建：
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS idx_workflow_runs_workflow_created_covering;
+-- 重新运行创建命令
+```
+
+### 3. 执行 VACUUM (ANALYZE) 刷新可见性映射图
+
+仅运行 `ANALYZE` 只能刷新优化器统计信息让仅索引扫描被选中，但要实现**零回表（Heap Fetches: 0）**，必须由 `VACUUM` 生成表的可见性映射图（Visibility Map）。建完索引后请对涉及的数据表执行清理：
+
+```sql
+VACUUM (ANALYZE) conversations;
+VACUUM (ANALYZE) messages;
+VACUUM (ANALYZE) workflow_runs;
+VACUUM (ANALYZE) agent_runs;
+```
+
+## 效果验证
+
+通过 `EXPLAIN (ANALYZE, BUFFERS)` 确认优化器已采用 `Index Only Scan` 且 `Heap Fetches` 为 0：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT COUNT(*)                                     AS total_runs,
+       COUNT(*) FILTER (WHERE status = 'success')   AS success_count,
+       COUNT(*) FILTER (WHERE status = 'failed')    AS failed_count,
+       COUNT(*) FILTER (WHERE status = 'timeout')   AS timeout_count,
+       AVG(total_duration_ms) FILTER (WHERE total_duration_ms IS NOT NULL)
+                                                    AS avg_duration_ms,
+       MAX(created_at)                              AS last_run_at
+FROM workflow_runs
+WHERE workflow_id = '00000000-0000-0000-0000-000000000000'::uuid;
+```
+
+期望输出包含 `Index Only Scan using idx_workflow_runs_workflow_created_covering`，且 `Heap Fetches: 0`。若出现 `Bitmap Index Scan` 或 `Seq Scan`，请检查语句条件是否与索引列完全匹配，或表数据量过小优化器认为全表扫描成本更低。
+
+## 并发聚合控制：DB_AGGREGATE_CONCURRENCY
+
+除了物理索引，Clouisle 在应用层设计了聚合并发限制器（`backend/app/core/db_limits.py`）。
+
+统计端点通常使用 `asyncio.gather` 同时发起多个独立聚合查询。如果没有并发上限，单个大屏请求就会瞬间占满 Tortoise ORM 连接池（默认 `maxsize=5`），导致后续查询发生连接等待或超时。
+
+```bash
+# 环境变量，默认为 4，必须 > 0
+DB_AGGREGATE_CONCURRENCY=4
+```
+
+- **工作机制**：进程级共享的异步信号量（`asyncio.Semaphore`）。单个请求中并发派发的每个聚合协程均需获取一张许可证。
+- **调优建议**：
+  - PostgreSQL 默认 `max_connections` 为 100，标准部署下多进程架构（API 4 进程 + Worker 4 进程等）总连接数已接近上限，**不要盲目增大 ORM 连接池大小**。
+  - 在高并发或大屏刷新频繁的部署环境中，保持 `DB_AGGREGATE_CONCURRENCY=4` 或调整为 `2~3`，配合覆盖索引快速完成查询并归还连接。

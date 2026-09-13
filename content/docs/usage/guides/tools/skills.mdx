@@ -1,28 +1,149 @@
 ---
-title: 导入与使用 Skills
-description: 把可复用技能包导入团队并绑定到应用
+title: 技能中心（Skills）
+description: 导入、管理与在 Agent 中使用可复用技能包
 icon: PackageOpen
 ---
 
-Skills 是可复用的指令、资源和执行约定。平台提供**能力** > **Skills**页；管理员还可以在管理后台审核和管理已导入包。
+Skills 是把提示词指令、运行脚本、依赖声明和执行约定封装在一起的可复用能力包。与单一 HTTP/代码工具不同，Skill 可以既包含供 Agent 阅读遵循的详细规约（`instructions` 模式），也可以在沙箱内直接运行脚本并生成产物（`script` 模式）。
+
+平台通过**能力** > **Skills**（`/app/capabilities?tab=skills`）提供技能中心；管理员可在管理后台（`/capabilities?tab=skills`）统一审核系统级与团队级技能包。
+
+<Callout type="info">
+  查看 Skills 需要 `skill:read` 权限；导入需要 `skill:create`；启用/禁用/修改需要 `skill:update`；沙箱执行测试需要 `skill:execute`；删除需要 `skill:delete`。
+</Callout>
+
+## Skill 包结构与规范
+
+每个 Skill 包以目录形式组织，核心入口为根目录下的 `SKILL.md` 文件（UTF-8 编码）。
+
+```
+my-skill/
+├── SKILL.md              # 必须：前置元数据与提示词指令
+├── scripts/
+│   └── run.py            # 可选：script 模式下执行的脚本
+└── assets/               # 可选：模板、规则或静态资源
+```
+
+### SKILL.md 格式
+
+`SKILL.md` 由 YAML Frontmatter 与 Markdown 正文组成：
+
+```markdown
+---
+name: text-summarizer
+display_name: 文本摘要增强器
+description: 提供长文本结构化摘要、要点提炼与多语言对照
+version: 1.0.0
+category: productivity
+icon: FileText
+x-clouisle:
+  execution:
+    mode: instructions
+  input_schema:
+    type: object
+    properties:
+      text:
+        type: string
+        description: 待摘要的原始文本
+    required:
+      - text
+---
+
+你是一个专业的长文本提炼专家。当用户提供长篇文档时，请按以下步骤处理：
+1. 提取 3-5 条核心结论；
+2. 输出要点表格；
+3. 保留关键数据并给出事实溯源。
+```
+
+### 执行模式
+
+| 模式 | 运行机制 | 适用场景 |
+| --- | --- | --- |
+| `instructions`（默认） | 不在沙箱执行代码。系统将 `SKILL.md` 正文中的规约注入 Agent 运行时上下文，指导模型按特定流程思考和回复。 | 写作规范、分析流程、代码审查准则、行业 SOP |
+| `script` | 在独立代码沙箱中运行 `execution.script` 指定的脚本（支持 Python / Node.js），捕获 `stdout`/`stderr` 并支持产生持久化文件产物（Artifact）。 | 复杂计算、数据统计、图表绘制、文件批量转换 |
+
+### 限制与校验规则
+
+- **Zip 上传限制**：上传文件必须为 `.zip` 格式，单文件上限 **50 MB**，解压展开后总大小上限 **50 MB**，压缩包内最多包含 **500** 个文件，单个解压文件上限 **10 MB**。
+- **禁止危险内容**：Zip 包内禁止包含符号链接（Symlink）、嵌套压缩包（Nested Archive）或跨目录逃逸路径（`../`）。
+- **字段要求**：`name`（小写字母、数字、下划线与中划线）与 `description` 为必填项。
 
 ## 导入 Skill 包
 
-1. 在**能力**页选择 **Skills** 标签。
-2. 选择**导入**，上传或选择一个 Clouisle 包。
-3. 检查包中的名称、版本、描述、资源和依赖。
-4. 导入后为当前团队启用 Skill。
-5. 在 Agent 的**工具**选择器中绑定需要的 Skill，或在工作流节点中使用它。
+平台提供**上传 Zip**与 **Git 仓库**两种导入方式：
+
+1. 前往**能力**页（`/app/capabilities`），切换至 **Skills** 标签。
+2. 点击右上角**导入 Skills**。
+3. 选择导入来源：
+   - **上传 Zip**：拖入或选择包含一个或多个 Skill 目录的 `.zip` 归档。
+   - **Git 仓库**：输入公开 HTTPS Git 仓库地址（`repo_url`），以及可选的分支、标签或提交哈希（`ref`，如 `main` 或 `v1.0.0`）。
+4. 系统自动解包并进入**扫描预览**步骤，列出包路径、Skill 名称、模式（instructions / script）与校验状态。
+5. 若存在同名冲突或重复项，界面会标红提示冲突原因。检查无误后，勾选要安装的条目并点击**安装选中项**。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/skill-import-dialog.png" alt="导入 Skill 包" />
   <figcaption>导入 Skill 包</figcaption>
 </figure>
 
-## 生命周期
+## 沙箱测试
 
-导入、启用、禁用和删除是不同操作。禁用不会删除历史引用；删除前确认没有已发布 Agent 或工作流依赖它。Skills 的版本应与包内容一起记录，生产变更先在草稿应用中验证。
+在将 Skill 绑定到生产 Agent 前，可在技能中心直接进行隔离运行测试：
+
+1. 在 Skills 列表中找到目标 Skill，点击操作列的**测试**按钮。
+2. 在弹出的测试抽屉中输入 JSON 格式的调用参数（`arguments`）。
+3. 点击**运行测试**：
+   - 若为 `instructions` 模式，直接预览将要注入给 Agent 的完整提示词与指令内容。
+   - 若为 `script` 模式，调用沙箱网关（Sandbox Gateway）创建隔离运行会话，执行脚本并实时展示运行状态、执行耗时（毫秒）、控制台标准输出（`stdout`）、标准错误（`stderr`）以及产物文件列表（Artifacts）。可直接在界面上下载产物。
+
+## 在 Agent 中绑定与调用
+
+1. 打开目标 Agent 的编排页面（`/app/apps/{agent_id}`）。
+2. 在**工具**配置区域选择**添加工具/技能**，切换至 **Skills** 类别。
+3. 勾选需要启用的 Skill。Agent 在对话与推理过程中，将根据系统提示词和任务目标自主决定是否调用该 Skill。
+4. 调试无误后点击**发布**。
+
+<Callout type="warn">
+  **引用保护机制**：若某个 Skill 已被任意 Agent 绑定引用，系统将**禁止删除**该 Skill 并提示引用冲突。删除前需先在对应 Agent 的编排中解除绑定。
+</Callout>
+
+## 作用域与权限
+
+- **系统技能（System Skills）**：`team_id` 为空，全平台所有团队可见。仅超级管理员可在管理后台创建、修改、导入或删除。
+- **团队技能（Team Skills）**：绑定到特定团队，仅该团队成员可见与使用。团队管理员及拥有 `skill:*` 权限的成员可自主管理。
+
+## API 端点
+
+```http
+# 列出团队可用技能（含系统技能）
+GET /api/v1/skills?team_id={team_id}&include_system=true
+
+# 预览 Zip / Git 导入
+POST /api/v1/skills/import/preview-zip
+POST /api/v1/skills/import/preview-git
+
+# 确认安装导入会话中的技能
+POST /api/v1/skills/import/{session_id}/install
+
+# 获取 Skill 详情 / 更新 / 删除
+GET    /api/v1/skills/{skill_id}?team_id={team_id}
+PATCH  /api/v1/skills/{skill_id}
+DELETE /api/v1/skills/{skill_id}
+
+# 沙箱运行测试
+POST /api/v1/skills/{skill_id}/test
+```
 
 ## 排查
 
-包格式无效、资源缺失、依赖不满足或权限不足时，导入会失败。保留服务端返回的错误信息和包版本，便于管理员定位。
+### 导入失败
+
+1. **Zip 文件过大**：确认压缩包大小未超过 `50MB`，解压后未超过 `50MB`。
+2. **缺少 SKILL.md**：确认目录根下存在大写的 `SKILL.md`，且为有效的 UTF-8 文本编码。
+3. **Frontmatter 格式有误**：确认 YAML 缩进无语法错误，且包含必填的 `name` 与 `description`。
+4. **Git 超时**：公共 Git 仓库拉取超时时间为 `180` 秒；确认仓库地址公开可达。
+
+### 执行报错
+
+1. 在技能中心点击**测试**，观察 `stderr` 报错日志。
+2. 对于 `script` 模式，检查脚本声明的依赖是否已在运行环境中安装。
+3. 检查输入参数是否符合 `x-clouisle.input_schema` 定义的类型要求。

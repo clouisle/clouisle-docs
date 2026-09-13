@@ -1,39 +1,247 @@
 ---
-title: Workflow Nodes Reference
-description: Look up node types, field defaults, runtime limits, and validation rules
+title: Workflow Node Reference
+description: Reference for all workflow node types, configuration fields, I/O specifications, SSRF protections, and validation rules
 icon: Workflow
 ---
 
-Workflow definitions currently use `schema_version: 2`. The following fields come from the backend node configuration schemas and the frontend editor registry.
+The Clouisle workflow engine supports native complex objects, streaming inference, conditional routing, and loop/iteration containers. Workflow definitions use `schema_version: 2`, where graph structures consist of `nodes` and `edges` (built on React Flow).
 
-## Node Fields
+## Node Categories & Catalog
 
-| Node | Core fields | Default/Limit |
-| --- | --- | --- |
-| LLM | `model_id`, `prompt`, `temperature`, `max_tokens`, `top_p` | `temperature=0.7`, range `0-2`; `top_p` range `0-1` |
-| Agent | `agent_id`, `message` | Agent must exist and be accessible |
-| Knowledge Base Retrieval | `knowledge_base_id`, `query`, `top_k`, `score_threshold` | Top K default `5`, `1-100`; threshold default `0.3`, `0-1` |
-| Conditional Branch | `expression`, `true_output`, `false_output` | The two outputs default to `true`/`false` |
-| Loop | `array_expression`, `item_variable`, `index_variable`, `max_iterations` | item=`item`, index=`index`, max `100`, `1-1000` |
-| Code Execution | `language`, `code`, `timeout_seconds` | Python/JavaScript; default `30s`, `1-300s` |
-| HTTP Request | `method`, `url`, `headers`, `body`, `timeout_seconds` | GET default; timeout default `30s`, `1-300s` |
-| Tool | `tool_id`, `arguments` | Arguments mapped by expressions |
-| Sub-workflow | `workflow_id`, input/output mapping, timeout, failure policy | Timeout default `300s`; `fail_on_error=true` |
-| Delay | `seconds` | `0-3600` |
+The current node builder offers 18 regular canvas nodes. The backend registry additionally contains 24 executable node types, including internal entry nodes such as `user_input`, `trigger`, `iteration_start`, and `loop_start`. Contextual menus within containers remove `iteration`, `loop`, and `pause`, and add a visual exit marker. The canvas also retains frontend aliases or visual markers such as `start`, `iteration_exit`, `loop_exit`, and `comment`; not all map to independent executors. The table lists regular nodes, runtime nodes, and visual helper markers together:
 
-## Editor Nodes
+| Category | Type Identifier (`type`) | Label | Primary Purpose |
+| --- | --- | --- | --- |
+| **Model** | `llm` | LLM | Invoke large language models for text generation and reasoning |
+| | `media_generation` | Media Generation | Call team-authorized image or video generation models |
+| **Logic** | `condition` | Condition Branch | Multi-branch IF/ELSE routing logic |
+| | `question_classifier` | Question Classifier | Classify user intent dynamically using LLMs |
+| | `iteration` | Iteration Container | Iterate over array variables sequentially |
+| | `loop` | Loop Container | Execute child nodes repeatedly until conditions are met or maximum count is reached |
+| | `pause` | Pause | Suspend workflow execution pending human approval or variable inputs |
+| **Transform** | `code` | Code Execution | Execute Python or JavaScript snippets in a secure sandbox |
+| | `template` | Template Transform | Format and assemble text using Jinja2 templates |
+| | `file_to_url` | File to URL | Convert temporary file/image variables to persistent access URLs |
+| | `variable_aggregator` | Variable Aggregator | Aggregate dispersed variables into an object, array, or concatenated text |
+| | `variable_assignment` | Variable Assignment | Assign or update conversation context variables |
+| | `parameter_extractor` | Parameter Extractor | Extract structured arguments via LLM, Regex, or JSON Path |
+| **Extension** | `sub_workflow` | Sub-workflow | Invoke other published workflows within the workspace |
+| | `agent` | Agent | Call a published Agent for autonomous goal execution |
+| | `tool` | Tool | Invoke built-in tools, custom HTTP tools, or MCP services |
+| | `http_request` | HTTP Request | Perform external HTTP/HTTPS API calls (restricted by SSRF policies) |
+| | `knowledge_retrieval` | Knowledge Retrieval | Search a bound knowledge base and retrieve chunk contexts |
+| | `document_extractor` | Document Extractor | Extract plain text or Markdown from uploaded PDF/DOCX files |
+| | `answer` | Output | Assemble final results and support streaming output to clients |
+| **Entry & Lifecycle** | `user_input` | Start | Define human-initiated input parameters and system variables (frontend canvas alias `start`) |
+| | `trigger` | Trigger | Webhook, scheduled cron, or event-driven entry points |
+| | `iteration_start` / `loop_start` | Container Start | Internal virtual entry executor node passing parent container context |
+| | `iteration_exit` / `loop_exit` | Container Exit | Internal visual exit marker on the canvas (no backend executor; child nodes are orchestrated by `parentId`) |
+| | `comment` | Comment | Static canvas sticker, ignored during runtime execution |
 
-The current UI also registers user input, trigger, media generation, iteration container, iteration start/end, loop start/end, template transform, file-to-URL, variable aggregation, variable assignment, parameter extraction, question classification, output, and comment nodes.
+---
 
-## Validation
+## Detailed Node Configuration Reference
 
-Pre-publish checks reject nonexistent variable references, empty prompts, unselected models/tools/knowledge bases, missing input sources, missing output nodes, incomplete branches, and incomplete containers. The start node cannot be deleted.
+### 1. LLM Node (`llm`)
 
-## Data Format
+Configuration container: `node.data.llmConfig` or `node.data.config`.
 
-`nodes` and `edges` use the React Flow structure; `viewport` defaults to `{x: 0, y: 0, zoom: 1}`. Version 2 supports native objects and arrays, and nodes can save inferred schemas and output type specifications.
+| Field | Type | Default | Description & Constraints |
+| --- | --- | --- | --- |
+| `modelId` | UUID string | Required | Team-authorized chat model ID (`team_models.id`) |
+| `systemPrompt` | string | `""` | System prompt supporting `{{node.var}}` template variables |
+| `userPrompt` | string | `""` | User prompt supporting template variable interpolation |
+| `temperature` | float | `0.7` | Sampling temperature passed to the model |
+| `maxTokens` | int | `2048` | Maximum generated token count passed to the model |
+| `topP` | float | `1.0` | Nucleus sampling threshold passed to the model |
+| `streaming` | bool | `false` | Enable token streaming; downstream Output nodes can relay streams directly |
+| `responseFormat` | string | `"text"` | Output format: `"text"`, `"json"` (json_object), or `"json_schema"` |
+| `jsonSchema` | string (JSON) | `null` | Strict JSON schema definition required when format is `json_schema` |
+| `inputs` | array | `[]` | Parameter mapping list bound to this node |
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-node-reference.png" alt="Node configuration reference" />
-  <figcaption>Node configuration reference</figcaption>
-</figure>
+Outputs:
+- `response` (string): Generated response text (a lazy streaming proxy when streaming is true)
+- `reasoning` (string): Chain-of-thought reasoning process (e.g., DeepSeek R1 reasoning trace)
+- `usage` (object): Token metrics including `prompt_tokens`, `completion_tokens`, and `total_tokens`
+
+---
+
+### 2. Media Generation Node (`media_generation`)
+
+Configuration container: `node.data.mediaGenerationConfig` or `node.data.config`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mode` | string | `"image"` | Media mode: `"image"` or `"video"` |
+| `modelId` | UUID string | Required | Team-authorized image/video model ID |
+| `prompt` | string | Required | Positive prompt supporting variable interpolation |
+| `negativePrompt` | string | `null` | Negative prompt (image generation only) |
+| `width` / `height` | int/null | `null` | Image dimensions; when omitted, determined by upstream model or tool settings |
+| `numImages` | int | `1` | Number of images; the model or tool configuration determines the upper bound |
+| `referenceImageVariable` | string | `null` | Reference image variable for image-to-image workflows |
+| `duration` | float/null | `null` | Video duration; when omitted, the tool configuration supplies its default |
+| `aspectRatio` | string/null | `null` | Video aspect ratio; when omitted, the tool configuration supplies its default |
+| `motionIntensity` | float/null | `null` | Video motion intensity |
+
+Outputs:
+- `result`: Generated media URL. Returns an array of URL strings for images, or a single URL string for video.
+
+---
+
+### 3. Condition Branch Node (`condition`)
+
+Configuration container: `node.data.conditionConfig` or `node.data.config`.
+
+Evaluates tree-structured condition groups. Each condition consists of `variable` (variable reference), `operator` (comparison operator), and `value` (target value).
+
+Supported Operators:
+- Equality: `equals`, `not_equals`
+- Text Patterns: `contains`, `not_contains`, `starts_with`, `ends_with`, `regex_match`
+- Numeric Comparison: `greater_than` (`>`), `less_than` (`<`), `greater_or_equal` (`>=`), `less_or_equal` (`<=`)
+- Null & Empty States: `is_empty`, `is_not_empty`, `is_null`, `is_not_null`
+
+---
+
+### 4. HTTP Request Node (`http_request`)
+
+Configuration container: `node.data.config`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `method` | string | `"GET"` | HTTP method: `GET`, `POST`, `PUT`, `DELETE`, etc. |
+| `url` | string | Required | Destination URL supporting dynamic template variables |
+| `headers` | object | `{}` | Key-value request headers supporting template variables |
+| `body` | any | `null` | Request payload (supports JSON objects or text interpolation) |
+| `timeout` | int | `30` | Request timeout in seconds; the executor default is `30` and this node layer has no additional range validation |
+
+<Callout type="warn" title="SSRF Protection Guardrails (YUN-150)">
+All outbound targets from HTTP Request nodes are strictly validated through `validate_external_http_url` after DNS resolution:
+- Private RFC 1918 subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), loopback (`127.0.0.1`, `localhost`), and cloud metadata (`169.254.169.254`) are blocked by default.
+- Internal requests are only permitted if the target IP/CIDR/domain is explicitly allowlisted in **Site Settings > SSRF Outbound Targets** (`ssrf_allowed_targets`) (e.g., allowlisting `localhost`/`local` or specific enterprise subnets).
+- Critical non-bypassable ranges (`169.254.0.0/16`, `224.0.0.0/4`, `0.0.0.0/32`) and Google Cloud metadata (`metadata.google.internal`) cannot be bypassed or accepted in allowlist configuration and remain permanently blocked.
+</Callout>
+
+Outputs:
+- `statusCode` (int): HTTP response status code (e.g., `200`, `404`)
+- `body` (any): Parsed JSON object, or raw string if response is not valid JSON
+- `headers` (object): Key-value response headers
+
+---
+
+### 5. Knowledge Retrieval Node (`knowledge_retrieval`)
+
+Configuration container: `node.data.knowledgeRetrievalConfig`.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `knowledgeBaseId` | UUID string | Required | Target knowledge base identifier |
+| `querySource` | string | `"variable"` | Query source: `"variable"` or `"constant"` |
+| `queryVariableRef` | string | `""` | Variable reference used when `querySource` is `"variable"` |
+| `queryConstantValue` | string | `""` | Fixed query text used when `querySource` is `"constant"` |
+| `searchMode` | string | `"hybrid"` | Search mode: `"hybrid"`, `"vector"`, or `"fulltext"` |
+| `topK` | int | `5` | Maximum number of chunks to return |
+| `threshold` | float | `0.0` | Similarity score cutoff threshold |
+| `outputVariable` | string | `"results"` | Custom output variable name for retrieved chunks |
+
+Outputs:
+- `results` (array): Array of chunk objects containing `content`, `score`, `metadata`, `documentId`, and `chunkId`
+- `context` (string): Pre-concatenated text blocks separated by `\n\n---\n\n` for direct prompt injection
+- `totalFound` (int): Total count of matching chunks
+
+---
+
+### 6. Code Execution Node (`code`)
+
+Configuration container: `node.data.codeConfig` or `node.data.config`.
+
+Runs inside an isolated sandbox container with a default 30-second timeout (`CODE_TIMEOUT = 30`).
+
+- **Python Entry**: Must define `def main(inputs):`, where `inputs` is a dictionary, returning a `dict`.
+- **JavaScript Entry**: Must define `function main(params)` or `const main = (params) =>`, returning an `object`.
+
+Outputs: All top-level keys returned in the dictionary/object are mapped to individual downstream variables.
+
+---
+
+### 7. Data Transformation Nodes
+
+#### Template Transform (`template`)
+- Container: `node.data.templateConfig`.
+- `template`: Jinja2 template string, e.g. `Hello {{ user_name }}, ticket #{{ order_id }} is updated.`
+- `inputs`: Variable mapping list binding upstream variables to template variables.
+- Outputs: `output` (string) or custom defined output variable name.
+
+#### Variable Aggregator (`variable_aggregator`)
+- Container: `node.data.variableAggregatorConfig`.
+- `mode`: Aggregation strategy:
+  - `"object"`: Bundle variables into a JSON object key-value map
+  - `"array"`: Merge variables sequentially into an array list
+  - `"concat"`: Join string variables using `separator`
+  - `"merge"`: Deep or shallow merge multiple object variables
+- Outputs: `result` (default).
+
+#### Variable Assignment (`variable_assignment`)
+- Container: `node.data.variableAssignmentConfig`.
+- `assignments`: List of assignments supporting three operations:
+  - `overwrite`: Overwrite target context variable with `variableRef`
+  - `clear`: Clear target variable
+  - `set`: Assign fixed `constantValue`
+
+#### Parameter Extractor (`parameter_extractor`)
+- Container: `node.data.parameterExtractorConfig`.
+- `extractionMethod`: Strategy: `"llm"` (model reasoning), `"regex"` (regular expressions), or `"json_path"` (JSON Path syntax).
+- Outputs: Each extracted parameter is exposed as an independent strongly typed output variable.
+
+#### File to URL (`file_to_url`)
+- Container: `node.data.fileToUrlConfig`.
+- Converts incoming binary/temporary file or image variables into permanent or signed public URLs, avoiding large Base64 strings in LLM prompts.
+
+---
+
+### 8. Flow Control & Container Nodes
+
+#### Question Classifier (`question_classifier`)
+- Container: `node.data.questionClassifierConfig`.
+- Configures a language model and multiple preset category branches (with `id`, `name`, `description`, and `handle`). At runtime, prompts the model to classify intent and route along the matching branch handle.
+
+#### Iteration (`iteration`)
+- Container: `node.data.iterationConfig` (with `node.data.config` retained for legacy definitions).
+- `iteratorVariable`: Variable reference to traverse; legacy definitions may use `inputVariable`.
+- `iteratorType`: `"array"` (default) or `"object"`. Array mode wraps scalar input in a one-element array; object mode does not iterate non-object input.
+- Array mode exposes `itemVariable` (default `"item"`) and `indexVariable` (default `"index"`); object mode exposes `keyVariable` (default `"key"`) and `valueVariable` (default `"value"`).
+- `maxIterations`: Defaults to `100`; a positive integer is capped at `1000` at runtime.
+
+#### Loop (`loop`)
+- Container: `node.data.loopConfig` (with `node.data.config` retained for legacy definitions).
+- Prefer `exitConditions` (an array of conditions) together with `exitLogicOperator` (`"and"`; any other value is handled as `"or"`) to define exit behavior. Each condition contains `variable`, `operator`, and `value`.
+- When `exitConditions` is absent, the legacy `conditionVariable`, `conditionOperator`, and `conditionValue` fields are used. With neither condition form configured, the loop continues until its iteration count limit.
+- `counterVariable` defaults to `"loopCount"` and falls back to legacy `indexVariable`; `outputVariable` defaults to `"results"`.
+- `maxIterations` defaults to `100`; the executor applies `min(configured value, 1000)`. Supply a comparable integer value: unlike iteration, this path has no additional strict type validation.
+
+#### Pause (`pause`)
+- Container: `node.data.pauseConfig`.
+- `mode`: `"approval"` (await human sign-off) or `"variables"` (await external form input).
+- Suspends workflow execution and fires an event notification, resuming when input or approval is received.
+
+#### Output Node (`answer`)
+- Container: `node.data.answerConfig`.
+- `outputs`: Final key-value dictionary presented to the caller (`string`, `number`, `boolean`, `array`, `object`).
+- `streaming`: Can bind directly to an upstream streaming LLM node's `response` to stream text back to client applications.
+
+---
+
+## Validation Checklist
+
+The workflow editor uses its validation engine to **report** recognized errors and warnings in the checklist panel, helping authors correct definitions. The publish endpoint does not currently enforce this checklist; authors should address its findings before saving or publishing. Implemented checks include:
+
+1. **Graph Checks**:
+   - Runtime plan validation requires exactly one `user_input` or `trigger` entry point and detects cycles in the workflow graph.
+   - The validator flags nodes without an upstream edge, except `user_input`, `trigger`, `iteration_start`, `loop_start`, and `comment`.
+2. **Node Configuration Checks**:
+   - Depending on node type, it reports missing models, tools, knowledge bases, extraction parameters, assignments, or processing children inside a container.
+   - `condition`, `question_classifier`, `code`, `sub_workflow`, `agent`, `media_generation`, `pause`, and variable-processing nodes each have corresponding configuration checks.
+3. **Variable & Container Checks**:
+   - The editor reports variable references unavailable from the visible upstream graph, invalid or duplicate parameter names, and container-structure issues.
+   - It also reports placement of `pause` nodes inside iteration or loop containers.
+
+Runtime execution still performs node configuration and authorization checks. Passing or ignoring checklist findings does not guarantee that external model, tool, or knowledge base calls will succeed.

@@ -27,7 +27,7 @@ The workflow editor consists of the following parts:
 2. **Add Processing Nodes**: Add nodes to process data; see Node Types below
 3. **Connect Nodes**: Click the output port of the source node, drag to the input port of the target node
 4. **Configure Nodes**: Configure each node's settings in the properties panel
-5. **Add an End Node**: Every workflow ends with an end node that collects the final outputs
+5. **Add an Answer Node**: Use the Answer node to define the final output returned by the workflow; it is the builder's output node, not a separate runtime terminal named `end`
 6. **Test the Workflow**: Click the **Test** (debug) button, enter test inputs, run, and review results
 7. **Save and Publish**: Click **Save** to store as a draft; click **Publish** to activate the workflow
 
@@ -47,7 +47,7 @@ The workflow editor consists of the following parts:
 
 ### Error Handling
 
-There is no try-catch / retry UI in the builder. Failed node executions stop the run (unless the workflow continues), and the error is recorded on the run/node execution for inspection.
+There is no try-catch / retry UI in the builder. What happens after a node failure depends on the executor and workflow structure; the error is recorded on the run/node execution for inspection. The HTTP request executor retries up to 3 times by default, but the builder has no separate retry setting.
 
 ### Workflow Templates
 
@@ -57,7 +57,7 @@ Built-in workflow templates:
 - **Intent Router**: Route conversations based on detected intent
 - **Code Review Assistant**: Automated code review with multiple perspectives
 
-Templates are instantiated into new workflows (variables such as `model_id` / `knowledge_base_id` are filled in during instantiation).
+Templates are instantiated into new workflows. After instantiation, review and configure model, knowledge-base, and other node references in the editor; do not assume that template variable names are fixed API field names.
 
 ### Keyboard Shortcuts
 
@@ -90,7 +90,6 @@ The editor provides the following node types, organized by category:
 | --- | --- | --- |
 | User Input | `user_input` | Entry point for manually executed workflows |
 | Trigger | `trigger` | Entry point for triggered workflows |
-| End | `end` | Terminal node of a workflow |
 | Condition | `condition` | Branch based on expression result |
 | Question Classifier | `question_classifier` | Automatically classify input questions |
 | Iteration | `iteration` | Iterate over items in a list |
@@ -132,7 +131,7 @@ The editor provides the following node types, organized by category:
 | Answer | `answer` | Define the workflow's final output |
 
 <Callout type="info">
-  Node type identifiers are used for API interactions. Use the exact values from the table above when configuring. `document_extractor` and `http_request` are executor/API-level capabilities, not shown in the builder palette. `iteration_exit` and `loop_exit` are internal container nodes used by the workflow engine; do not add them as standalone nodes.
+  Node type identifiers are used for API interactions. Use the exact values from the table above when configuring. `document_extractor` and `http_request` are executor/API-level capabilities, not shown in the builder palette. `iteration_exit` and `loop_exit` are not registered in the verified builder node catalog or workflow executor; treat them as unverified internal markers if they appear in a definition, and do not add them as standalone nodes.
 </Callout>
 
 <Callout type="warn">
@@ -147,9 +146,9 @@ Configure node parameters by task:
 
 - **Model**: Select a configured model (e.g., GPT-4 Turbo, Claude, etc.)
 - **Prompt**: Use `{{variable}}` syntax to reference upstream variables
-- **Temperature**: Default `0.7`, range `0-2`. Controls output randomness
+- **Temperature**: Commonly configured as `0-2`; the available range depends on the selected model. Controls output randomness
 - **Max Tokens**: Limit the length of model output
-- **Top P**: Default `1.0`, range `0-1`. Nucleus sampling parameter
+- **Top P**: Commonly configured as `0-1`; the available range depends on the selected model. Nucleus sampling parameter
 - **Output Variable**: Define the variable name to store model output
 
 **Output variables:** `response`, `reasoning`, `usage` (plus the configured output variable).
@@ -189,7 +188,7 @@ Pause execution until a team member supplies requested variables or submits an a
 
 - **Language**: Python or JavaScript
 - **Code**: Custom execution logic
-- **Timeout**: Default `30` seconds, range `1-300` seconds
+- **Timeout**: The code executor currently fixes this at `30` seconds; it is not a freely configurable `1-300` second range in the builder
 - **Input Variables**: Variables passed to the code
 - **Output Variables**: Variables returned by the code execution
 
@@ -223,11 +222,11 @@ Extract structured parameters from text using LLM, regex, or JSON path.
 - **URL**: Target endpoint address
 - **Headers**: Custom HTTP headers
 - **Body**: JSON-formatted request payload
-- **Timeout**: Default `30` seconds, range `1-300` seconds
+- **Timeout**: Default `30` seconds; no verified `1-300` second code-execution timeout range is exposed
 - **Output Variable**: Store the response data
 
 <Callout type="warn">
-  The HTTP request node has no retry configuration.
+  The HTTP request executor retries up to 3 times by default; the builder has no separate retry setting.
 </Callout>
 
 ### Tool Node
@@ -242,8 +241,8 @@ Extract structured parameters from text using LLM, regex, or JSON path.
 
 - **Knowledge Base**: Select the target knowledge base
 - **Query Template**: Use `{{variable}}` to reference query content
-- **Top K**: Default `5`, range `1-100`. Maximum number of results returned
-- **Score Threshold**: Default `0.3`. Minimum similarity score
+- **Top K**: Default `5`; the exact upper bound depends on the endpoint and configuration, so this guide does not present a fixed `1-100` range
+- **Score Threshold**: Default `0.0`. Minimum similarity score
 - **Search Mode**: hybrid
 
 ### Sub-workflow Node
@@ -259,7 +258,7 @@ Invoke an AI agent with a message and optional context.
 Return a final answer/output from the workflow.
 
 <Callout type="warn">
-  When configuring nodes, ensure all input variables have a clear source (upstream node output or start node variable). Unconnected input variables will cause publication validation to fail.
+  When configuring nodes, ensure all input variables have a clear source (upstream node output or start node variable). The pre-publish checklist reports unconnected inputs as issues; resolve them before debugging and publishing.
 </Callout>
 
 ## Trigger Configuration
@@ -422,7 +421,7 @@ LLM nodes stream their output in real-time; the execution view shows partial con
 
 **Input Variables:** Provided when starting the workflow.
 
-**Output Variables:** Generated during execution (from the end node / node outputs).
+**Output Variables:** Generated during execution by the Answer node and other node outputs.
 
 ## Viewing Execution History
 

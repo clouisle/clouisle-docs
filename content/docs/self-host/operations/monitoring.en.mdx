@@ -10,12 +10,44 @@ Operations monitoring is divided into three layers: infrastructure status, produ
 
 Continuously check `frontend`, `api`, `worker`, `sandbox-worker`, `beat`, PostgreSQL, Redis, and Qdrant. Pay special attention to API 5xx, database connections, Redis queue backlog, Knowledge Base processing failures, Sandbox timeouts/disk limits, and whether Beat runs repeatedly.
 
+Queues are split by responsibility, so identify which one is backed up before acting:
+
+| Queue | Consumer | Symptom when backed up |
+| --- | --- | --- |
+| `default` | `worker` | Delayed notifications, lagging usage resets, growing audit archive |
+| `agent` | `worker` | Background AgentRuns stay in-flight for a long time |
+| `knowledge` | `worker` | Documents stay in processing for a long time |
+| `workflow` | `worker` | Workflow runs queue up |
+| `sandbox` | `sandbox-worker` | Code execution and Agent code tools queue up |
+
 ```bash
 docker compose ps
 docker compose logs -f api worker sandbox-worker beat frontend
 ```
 
 Kubernetes uses commands such as `kubectl get pods` and `kubectl logs -f deployment/api`.
+
+## Database Health
+
+PostgreSQL underpins statistics, the lexical retrieval channel, and audit, so beyond connection state, watch:
+
+- The most expensive statements in `pg_stat_statements` (the supplied image preloads it with `track=all`) to find queries missing an index.
+- Invalid indexes: a failed `CONCURRENTLY` build leaves an `INVALID` index behind and `IF NOT EXISTS` will not rebuild it.
+- Dashboard and statistics endpoint latency: slowness with low CPU usually means a sequential scan instead of a covering index.
+
+```sql
+SELECT query, calls, mean_exec_time, total_exec_time
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 20;
+
+SELECT c.relname
+FROM pg_class c
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE NOT i.indisvalid;
+```
+
+For index creation, cleanup, and verification steps, see [Database Maintenance and Index Tuning](./database-maintenance.mdx).
 
 ## Product Metrics
 

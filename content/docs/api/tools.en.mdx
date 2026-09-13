@@ -16,6 +16,12 @@ icon: Wrench
 | POST | `/api/v1/tools?team_id={team_id}` | Create a custom tool |
 | PUT | `/api/v1/tools/{tool_id}` | Update tool configuration |
 | DELETE | `/api/v1/tools/{tool_id}` | Delete a custom tool |
+| POST | `/api/v1/tools/{tool_id}/share` | Share a tool with another team |
+| GET | `/api/v1/tools/{tool_id}/shares` | List shares for a tool |
+| DELETE | `/api/v1/tools/{tool_id}/share/{team_id}` | Revoke a team's share |
+| GET | `/api/v1/tools/shared-with-me?team_id={team_id}` | List tools shared with a team |
+| POST | `/api/v1/tools/mcp/list-tools` | Discover an MCP server's tool definitions |
+| POST | `/api/v1/tools/database/test-connection` | Test database connectivity |
 
 ## Authentication
 
@@ -504,13 +510,131 @@ curl -X DELETE "https://your-domain.com/api/v1/tools/tool-789" \
 }
 ```
 
+## Cross-Team Tool Sharing
+
+Share custom or MCP tools with other teams within the workspace. Sharing requires `admin` or `owner` role in the tool's owner team; a tool cannot be shared with its own team.
+
+### Share Tool
+
+```
+POST /api/v1/tools/{tool_id}/share
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `team_id` | string | Yes | Target team UUID |
+| `permission` | string | No | `read_only` (view and use) or `read_execute` (view, use, and see execution results), default `read_only` |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/tools/tool-789/share" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id": "team-456", "permission": "read_execute"}'
+```
+
+Returns the created share record with `id`, `tool_id`, `tool_name`, `tool_display_name`, `shared_with_team_id`, `shared_with_team_name`, `permission`, `shared_by_id`, `shared_by_name`, and `shared_at`.
+
+### List Shares for a Tool
+
+```
+GET /api/v1/tools/{tool_id}/shares
+```
+
+Returns `{ "shares": [...], "total": N }`. Accessible only to members of the tool's owner team.
+
+### List Tools Shared With a Team
+
+```
+GET /api/v1/tools/shared-with-me?team_id={team_id}
+```
+
+`team_id` is a **required query parameter**. Items in the list return `is_owned: false`, `owner_team_id`, `owner_team_name`, and `share_permission`.
+
+### Revoke Share
+
+```
+DELETE /api/v1/tools/{tool_id}/share/{team_id}
+```
+
+## MCP & Database Tool Diagnostics
+
+### Discover MCP Server Tools
+
+```
+POST /api/v1/tools/mcp/list-tools
+```
+
+Connect to an MCP server dynamically to inspect its declared tools before creating a tool record.
+
+```json
+{
+  "mcp_config": {
+    "transport": "sse",
+    "command": null,
+    "args": [],
+    "env": {},
+    "url": "https://mcp.internal.example.com/sse",
+    "headers": {}
+  }
+}
+```
+
+`mcp_config.transport` accepts `stdio`, `sse`, and `http`: `stdio` uses `command`, `args`, and `env`; `sse`/`http` use `url` and `headers`.
+
+The response returns `tools` (each with name, description, and input parameter schema), `server_name`, and `server_version`.
+
+<Callout type="warn">
+  This endpoint initiates a real network request or process launch. Target URLs are subject to the deployment outbound network allowlist.
+</Callout>
+
+### Test Database Tool Connection
+
+```
+POST /api/v1/tools/database/test-connection
+```
+
+```json
+{
+  "db_type": "postgresql",
+  "host": "db.example.com",
+  "port": 5432,
+  "database": "analytics",
+  "username": "readonly",
+  "password": "secret_password",
+  "ssl": true,
+  "timeout": 15,
+  "max_limit": 100
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `db_type` | string | Yes | `postgresql`, `mysql`, `redis`, `mongodb` |
+| `host` | string | No | Hostname or IP |
+| `port` | integer | No | Port |
+| `database` | string | No | Database name |
+| `username` | string | No | Username |
+| `password` | string | No | Password |
+| `ssl` | string \| boolean | No | SSL mode |
+| `url` | string | No | Connection URL for Redis or MongoDB (replaces host/port) |
+| `db` | integer | No | Redis database index |
+| `auth_source` | string | No | MongoDB authentication source |
+| `timeout` | integer | No | Query timeout in seconds (1–120, default 15) |
+| `max_limit` | integer | No | Maximum rows returned (1–1000, default 100) |
+
+Returns `400` with `msg` set to the failure reason (such as `database_connection_failed`) when connection testing fails.
+
 ## Error Codes
 
 | Code | Message | Description |
 | --- | --- | --- |
 | `4000` | Not found | Tool does not exist |
-| `3000` | Permission denied | Insufficient permissions |
+| `4004` | Team not found | Target team does not exist |
+| `3000` | Permission denied | Insufficient permissions (sharing requires team admin) |
+| `3003` | Team admin required | Admin role required in the tool owner team |
+| `5001` | Already exists | Tool already shared or tool name taken |
 | `1001` | Validation failed | Invalid request data |
+| `1002` | Bad request | Sharing to the tool's own team or failed connection test |
 
 > **Note:** No per-endpoint rate limits are implemented. There is no rate-limit middleware on these endpoints. Codes `6300`-`6306` are reserved for SSO errors and are not used by the Tools API.
 

@@ -34,6 +34,7 @@ Permissions are checked uniformly by the backend. Hidden frontend menus are a UX
 | `admin:settings:update` | Modify site settings |
 | `admin:sso:read` | View SSO providers and configuration |
 | `admin:sso:update` | Manage SSO providers and user SSO connections |
+| `admin:memory:update/delete` | Edit or delete dashboard memory records |
 | `audit:read` | View audit logs |
 | `audit:export` | Export audit logs |
 
@@ -49,6 +50,26 @@ Permissions are checked uniformly by the backend. Hidden frontend menus are a UX
 | `skill:read/create/update/delete/execute` | Skill management |
 | `apikey:read/create/update/delete` | API Key management |
 | `conversation:read/delete` | Conversation management |
+| `memory:read/create/update/delete` | Team-scoped memory management |
+
+## Built-in Role Matrix
+
+The backend initializes 4 global built-in roles at startup with the following default permissions:
+
+| Role Name | Role Type | Core Permission Characteristics | Typical Persona |
+| --- | --- | --- | --- |
+| **Super Admin** | Global built-in | Holds wildcard permission code `*`; completely bypasses permission checks and can perform system configuration, role management, and audit exports | Operations lead, system owner |
+| **Admin** | Global built-in | Includes `admin:dashboard:access` and all administrative and operational permissions for resources, but excludes create/update/delete of system roles/permissions themselves and modification of global site settings | Workspace administrator, team technical lead |
+| **Member** | Global built-in | No `admin:dashboard:access`; has full collaborative create/edit/run permissions for Agents, workflows, knowledge bases, tools, and Skills within the team | Developer, workflow builder |
+| **Viewer** | Global built-in | Read-only role; can view and chat/run published Agents and workflows within the team, and read/execute tools and Skills | Business auditor, observer |
+
+### Team Membership Role Mapping
+
+Team member roles (`owner`, `admin`, `member`, `viewer`) use a scope-mapping mechanism:
+- `owner` and `admin` map to the `Admin` role at team scope
+- `member` maps to the `Member` role at team scope
+- `viewer` maps to the `Viewer` role at team scope
+- Team-level roles do not implicitly grant global dashboard access (`admin:dashboard:access`)
 
 ## Sidebar Menu Mapping
 

@@ -27,7 +27,6 @@ The Agent API provides agent lifecycle management, chat interaction, and statist
 | GET | `/api/v1/agents/{agent_id}/stats` | Query agent statistics overview |
 | GET | `/api/v1/agents/{agent_id}/stats/trends` | Query trend data |
 | GET | `/api/v1/agents/{agent_id}/stats/tool-usage` | Query tool usage statistics |
-| GET | `/api/v1/agents/{agent_id}/stats/recent-conversations` | Query recent conversations |
 
 ## Authentication
 
@@ -826,23 +825,126 @@ curl -X GET "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-44665
       "total_tokens": 456789
     },
     "performance": {
-      "avg_response_time_ms": 2300
+      "avg_response_time_ms": 2300,
+      "first_token_ms": {
+        "p50": 1200,
+        "p95": 9000,
+        "avg": 2500,
+        "samples": 480
+      }
     },
     "tools": {
       "tool_call_count": 512
+    },
+    "health": {
+      "completed": 90,
+      "failed": 6,
+      "stopped": 4,
+      "interrupted": 3,
+      "unrecognised": 0,
+      "in_flight": 2,
+      "total": 103,
+      "success_rate": 0.8738
+    },
+    "interventions": {
+      "steer": 12,
+      "stop": 3,
+      "follow_up": 5,
+      "total": 20
     }
   },
   "msg": "success"
 }
 ```
 
+`health` counts this agent's runs by outcome:
+
+| Field | Meaning |
+| --- | --- |
+| `completed` / `failed` / `stopped` | Runs that reached that terminal state. |
+| `interrupted` | **Terminal.** The worker executing the run was lost (crash, restart, eviction), so the run never reached completion. Counts toward `total` and lowers `success_rate`. |
+| `unrecognised` | A stored status this build does not know (typically written by a different release). Reported separately so enum drift stays visible instead of being folded into a known bucket or failing the request. |
+| `in_flight` | Non-terminal runs (`queued`, `running`, `stopping`, `completing`, `waiting`). Excluded from `total` and from the `success_rate` denominator. |
+| `total` | Terminal runs only: `completed + failed + stopped + interrupted`. |
+| `success_rate` | `completed / total`, or `0` when there are no terminal runs. |
+
+### Trend Data
+
+```
+GET /api/v1/agents/{agent_id}/stats/trends
+```
+
+Returns a clock-aligned point grid: 24 points for `24h`, 7 for `7d`, 30 for `30d`. Missing buckets are filled with `0`.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "24h",
+    "granularity": "hour",
+    "data": [
+      {
+        "timestamp": "2026-09-13T13:00:00+08:00",
+        "label": "13:00",
+        "conversations": 12,
+        "messages": 87,
+        "tokens": 32100,
+        "avg_response_time_ms": 2150.5,
+        "first_token_p50_ms": 1180.0,
+        "first_token_p95_ms": 8700.0
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+`first_token_p50_ms` and `first_token_p95_ms` are `null` for a bucket with no measured sample, so the latency line breaks instead of dropping to `0`; clients must handle `null`.
+
+### Tool Usage
+
+```
+GET /api/v1/agents/{agent_id}/stats/tool-usage
+```
+
+`tools[].name` is the internal tool identifier and `display_name` is the localized label (MCP tools render as a server prefix plus the tool name). Tools are sorted by call count descending, and `total_calls` sums every call.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "7d",
+    "tools": [
+      {
+        "name": "web_search",
+        "display_name": "Web Search",
+        "count": 312
+      }
+    ],
+    "total_calls": 512
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="info">
+  This endpoint deliberately disables MCP enumeration (`enumerate_mcp_tools=False`), so a statistics request never makes a network call to an external MCP server. MCP tool labels therefore use the known server prefix rather than a live tool list.
+</Callout>
+
 ### Other Statistics Endpoints
+
+Both supplemental statistics endpoints require the `/api/v1` prefix, a valid JWT current user, and pass through `check_agent_access`:
 
 | Endpoint | Description | Parameters |
 | --- | --- | --- |
-| `GET /agents/{agent_id}/stats/trends` | Trend data | `period`: `24h`/`7d`/`30d` |
-| `GET /agents/{agent_id}/stats/tool-usage` | Tool usage statistics | `period`: `24h`/`7d`/`30d`/`all` |
-| `GET /agents/{agent_id}/stats/recent-conversations` | Recent conversations | `limit`: default 10 |
+| `GET /api/v1/agents/{agent_id}/stats/trends` | Trend data | `period`: `24h`/`7d`/`30d` |
+| `GET /api/v1/agents/{agent_id}/stats/tool-usage` | Tool usage statistics | `period`: `24h`/`7d`/`30d`/`all` |
+
+<Callout type="warn">
+  Period boundary behaviour: for the overview and tool-usage endpoints any value other than `24h`, `7d`, or `30d` is treated as `all`; the trends endpoint treats anything other than `24h` or `7d` as `30d`.
+
+  Access control: superusers are allowed; a `private` agent is readable only by its creator (creator-less legacy agents fall back to team scope); non-private agents require team access. Denied requests return `403`, missing resources `404`.
+</Callout>
 
 ---
 

@@ -47,6 +47,8 @@ kubectl -n clouisle scale deployment api --replicas=3
 
 `beat` always stays at one replica. With `ReadWriteOnce` local upload volumes, keep the API at a single replica; production with multiple replicas should configure a shared volume or object storage.
 
+The `worker` consumes the `default,agent,knowledge,workflow` queues (Helm `worker.command`), so scaling the deployment grows all four task classes together. To grow one class only, add a worker deployment whose command ends with a single queue (for example `-Q agent`); the `sandbox` queue is consumed by the separate `sandbox-worker` deployment. Queue-to-task mapping: [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
+
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/kubernetes-resources.svg" alt="Kubernetes resources and Ingress" />
   <figcaption>Kubernetes resources and Ingress</figcaption>

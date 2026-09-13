@@ -67,3 +67,5 @@ docker compose down
 ```
 
 `beat` 必须保持一个副本。`docker compose down -v` 会删除数据卷，执行前必须完成备份。
+
+`worker` 默认消费 `default,agent,knowledge,workflow` 4 个队列，`--scale worker=4` 会同时扩展这 4 类任务。只扩容某一类任务时，增加一个只订阅单队列的 Worker 服务（如 `-Q agent`），`sandbox` 队列由 `sandbox-worker` 独立消费。队列与任务的对应关系见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。

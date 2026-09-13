@@ -1,0 +1,100 @@
+---
+title: System Observability & Health Monitoring
+description: Look up admin observability metrics, health thresholds, aggregation limits, and diagnostic endpoints
+icon: Activity
+---
+
+Clouisle provides centralized system observability and health monitoring for platform administrators (requires the `admin:dashboard:access` global permission). All monitoring routes are mounted under `/api/v1/admin/observability`, and responses are cached in Redis for `30` seconds (namespace `admin:observability:v1`).
+
+## Time Range and Bucketing Rules
+
+Most metric endpoints accept the `time_range` query parameter:
+- Supported values: `7d`, `30d` (default), `90d`, `all` (all historical records). Invalid values fall back to `30d`.
+- Trend granularity (`granularity`): `hour` or `day`. When omitted, `7d` defaults to `hour` buckets and other ranges default to `day` buckets.
+
+## Metric Categories
+
+### 1. Overview
+
+Endpoint: `GET /api/v1/admin/observability/overview`
+
+| Metric Field | Type | Definition |
+| --- | --- | --- |
+| `totals.agent_requests` | integer | Canonical assistant-final messages in the period |
+| `totals.workflow_runs` | integer | Total workflow run instances in the period |
+| `totals.total_requests` | integer | Combined agent requests and workflow runs |
+| `totals.total_tokens` | integer | Total tokens consumed |
+| `rates.agent_success_rate` | number (0-100) | Agent success rate (`round_status == 'completed'`) |
+| `rates.workflow_success_rate` | number (0-100) | Workflow run success rate (`status == 'success'`) |
+| `rates.overall_success_rate` | number (0-100) | Combined execution success rate |
+| `rates.timeout_rate` | number (0-100) | Combined error/timeout rate (workflow `status == 'timeout'` plus agent `round_status == 'error'`) |
+| `latency.p50_ms / p90_ms / p95_ms / p99_ms` | number | Continuous percentiles of total duration (agent `duration_ms` and workflow `total_duration_ms`) |
+| `ttft.p50_ms / p90_ms / p95_ms / p99_ms` | number | Time-to-first-token percentiles, computed from agent `first_token_ms` only |
+| `throughput.current_qps` | number | Events created in the preceding 60 seconds divided by 60 |
+| `throughput.peak_hourly_requests` | integer | Highest number of requests in a single hourly bucket |
+
+### 2. Entity Performance (Agents & Workflows)
+
+Endpoints:
+- Agent list: `GET /api/v1/admin/observability/agents` (sortable by `requests`, `p50`, `p90`, `p95`, `p99`, `timeout_rate`, `success_rate`, `tokens`)
+- Agent detail and trend: `GET /api/v1/admin/observability/agent/{agent_id}`
+- Workflow list: `GET /api/v1/admin/observability/workflows` (additionally sortable by `runs`, `failed_nodes`)
+- Workflow detail and node bottlenecks: `GET /api/v1/admin/observability/workflow/{workflow_id}`
+
+The workflow detail endpoint also returns node-type statistics for the top 20 most-executed node types (`execution_count`, `failed_count`, `avg_duration_ms`), which makes it fast to identify which node (for example `http_request` or `llm`) is blocking a pipeline.
+
+### 3. Timeout and Failure Diagnosis
+
+Endpoint: `GET /api/v1/admin/observability/timeouts` (supports `source=all|agent|workflow`)
+
+- Workflow timeout events: runs with `status = 'timeout'`, reported as `timeout_type = 'workflow'`.
+- Agent error events: assistant interactions with `round_status = 'error'`. Because historical messages do not separate the error subtype, the type is reported as `unknown`, and the response explicitly sets `agent_timeout_type_available: false`.
+
+### 4. Throughput and Token Consumption
+
+- `GET /api/v1/admin/observability/throughput`: returns real-time `qps`, `running_workflows`, and time-bucketed request series.
+- `GET /api/v1/admin/observability/tokens`: aggregates token usage by source (`agent`, `workflow`, `other`) and by model (`by_model`). For `7d` and `30d` it also compares against team model quota counters and takes the larger value, preventing undercounting when events are missing.
+
+## System Health and Thresholds
+
+Endpoint: `GET /api/v1/admin/observability/system/health`
+
+The system collects hardware metrics and retains the most recent 120 health snapshots in a Redis list (24-hour expiry; retrieve the trend via `GET .../system/trend`). Thresholds and fields:
+
+| Monitor | Warning / Danger Thresholds | Key Fields |
+| --- | --- | --- |
+| **CPU** | `usage_percent >= 70%` warning; `>= 90%` danger | `status`, `usage_percent`, `cores`, `architecture` |
+| **Memory** | `usage_percent >= 80%` warning; `>= 90%` danger | `status`, `usage_percent`, `used_bytes`, `total_bytes` |
+| **Disk** | `usage_percent >= 80%` warning; `>= 90%` danger | `status`, `usage_percent`, `used_bytes`, `total_bytes` |
+| **Database** | Connection usage derived from PostgreSQL `pg_stat_activity` and `max_connections` | `status`, `active_connections`, `max_connections` |
+| **Redis** | Connectivity and cache efficiency | `status`, `used_memory`, `connected_clients`, `ops_per_sec`, `hit_rate` |
+| **Workers** | Celery nodes and backlog across 5 core queues | See the worker section below |
+
+### Celery Workers and Core Queues
+
+Endpoint: `GET /api/v1/admin/observability/system/workers`
+
+Clouisle defines 5 fixed queues:
+- `default`: general system tasks and email delivery
+- `knowledge`: document parsing, chunk extraction, and vector indexing
+- `workflow`: asynchronous workflow execution and long-running scheduling
+- `agent`: background agent reasoning and async inference
+- `sandbox`: code node sandbox execution
+
+Queue inspection scans Redis lists in batches of 500 messages with a per-queue cap of 5000. Backlog beyond that cap is reported as `unscanned:{queue}`.
+
+### Slow Query Diagnostics
+
+Endpoint: `GET /api/v1/admin/observability/system/slow-queries`
+
+- Default threshold is `threshold_ms=1000` (queries slower than 1 second), returning duration, call count, and returned rows with pagination.
+- **Prerequisite**: PostgreSQL must have the `pg_stat_statements` extension enabled. If unavailable, the endpoint returns `available: false` with the reason.
+
+## Database Aggregate Concurrency Limit
+
+Statistics and observability analysis fan out independent aggregates with `asyncio.gather`. Without a bound, one request can hold every slot of the shared connection pool and stall regular APIs.
+
+Clouisle bounds this with a global semaphore:
+- **Environment variable**: `DB_AGGREGATE_CONCURRENCY` (default `4`, must be greater than 0).
+- **Mechanism**: a single process-wide `asyncio.Semaphore`, applied per query via `run_bounded()` rather than once around an entire `gather()`.
+- **Rationale**: the Tortoise shared pool defaults to `maxsize=5` and PostgreSQL defaults to `max_connections=100`. In a multi-process deployment (roughly 17 worker processes), limiting aggregate concurrency to `4` keeps analytics from exhausting database connections.

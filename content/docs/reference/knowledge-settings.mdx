@@ -6,6 +6,15 @@ icon: Database
 
 知识库设置同时影响文档处理和运行时检索。创建后嵌入模型与向量维度应保持稳定。
 
+## 嵌入模型与维度
+
+| 字段 | 类型 | 默认值 | 限制/说明 |
+| --- | --- | --- | --- |
+| `embedding_model_id` | UUID/null | `null` | 知识库绑定的嵌入模型；创建后不可修改 |
+| `embedding_dimension` | integer/null | `null` | 由首次向量化实测并固化，后续向量维度必须严格一致 |
+
+创建知识库时 `embedding_dimension` 为空，系统在首批文档切片向量化后写入实测维度。此后再更新 `embedding_model_id` 会被拒绝，提交维度不一致的向量则抛出 `DimensionMismatchError`。供应商支持范围与 Qdrant 多维集合映射见 [Embedding 适配器与向量维度](/reference/embedding-adapters)。
+
 ## 分块与重排序
 
 | 字段 | 类型 | 默认值 | 限制 |

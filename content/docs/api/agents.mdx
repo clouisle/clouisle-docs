@@ -27,7 +27,6 @@ Agent API 提供 Agent 生命周期管理、聊天交互与统计查询能力。
 | GET | `/api/v1/agents/{agent_id}/stats` | 查询 Agent 统计概览 |
 | GET | `/api/v1/agents/{agent_id}/stats/trends` | 查询趋势数据 |
 | GET | `/api/v1/agents/{agent_id}/stats/tool-usage` | 查询工具使用统计 |
-| GET | `/api/v1/agents/{agent_id}/stats/recent-conversations` | 查询最近会话 |
 
 ## 认证
 
@@ -827,23 +826,126 @@ curl -X GET "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-44665
       "total_tokens": 456789
     },
     "performance": {
-      "avg_response_time_ms": 2300
+      "avg_response_time_ms": 2300,
+      "first_token_ms": {
+        "p50": 1200,
+        "p95": 9000,
+        "avg": 2500,
+        "samples": 480
+      }
     },
     "tools": {
       "tool_call_count": 512
+    },
+    "health": {
+      "completed": 90,
+      "failed": 6,
+      "stopped": 4,
+      "interrupted": 3,
+      "unrecognised": 0,
+      "in_flight": 2,
+      "total": 103,
+      "success_rate": 0.8738
+    },
+    "interventions": {
+      "steer": 12,
+      "stop": 3,
+      "follow_up": 5,
+      "total": 20
     }
   },
   "msg": "success"
 }
 ```
 
+`health` 字段统计该 Agent 各运行终态与进行中状态：
+
+| 字段 | 说明 |
+| --- | --- |
+| `completed` / `failed` / `stopped` | 达到对应终态的运行次数。 |
+| `interrupted` | **终态。** 执行该运行的 Worker 丢失（崩溃、重启、驱逐），运行未能完成。计入 `total` 并降低 `success_rate`。 |
+| `unrecognised` | 未识别状态。数据库中存入的状态不在当前构建版本枚举中（通常由其他版本写入）。单独统计以显式展示枚举漂移，避免计入已知状态桶或造成请求 500。 |
+| `in_flight` | 非终态进行中运行（`queued`、`running`、`stopping`、`completing`、`waiting`）。不计入 `total`，也不计入 `success_rate` 分母。 |
+| `total` | 终态总数：`completed + failed + stopped + interrupted`。 |
+| `success_rate` | 成功率：`completed / total`（无终态运行时为 `0`）。 |
+
+### 趋势数据
+
+```
+GET /api/v1/agents/{agent_id}/stats/trends
+```
+
+按周期返回时钟对齐的时间点网格：`24h` 为 24 个小时点，`7d` 为 7 个日点，`30d` 为 30 个日点。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "24h",
+    "granularity": "hour",
+    "data": [
+      {
+        "timestamp": "2026-09-13T13:00:00+08:00",
+        "label": "13:00",
+        "conversations": 12,
+        "messages": 87,
+        "tokens": 32100,
+        "avg_response_time_ms": 2150.5,
+        "first_token_p50_ms": 1180.0,
+        "first_token_p95_ms": 8700.0
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+`first_token_p50_ms` 与 `first_token_p95_ms` 在该时间点没有测量样本时为 `null`，用于让延迟折线断开而不是掉到 0。
+
+### 工具使用统计
+
+```
+GET /api/v1/agents/{agent_id}/stats/tool-usage
+```
+
+`tools[].name` 为内部工具标识，`display_name` 为本地化显示名（MCP 工具按服务前缀渲染）。工具按调用次数降序排列，`total_calls` 为全部工具调用次数之和。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "7d",
+    "tools": [
+      {
+        "name": "web_search",
+        "display_name": "联网搜索",
+        "count": 312
+      }
+    ],
+    "total_calls": 512
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="info">
+  统计端点为只读聚合，不会枚举 MCP 工具（不做无超时网络调用），因此 `display_name` 对 MCP 工具是「服务前缀 + 工具名」形式，无需连接 MCP 服务。
+</Callout>
+
 ### 其他统计端点
+
+所有统计端点均须使用 `/api/v1` 前缀，均要求有效的 JWT 当前用户，并通过 `check_agent_access` 校验访问权限：
 
 | 端点 | 说明 | 参数 |
 | --- | --- | --- |
-| `GET /agents/{agent_id}/stats/trends` | 趋势数据 | `period`: `24h`/`7d`/`30d` |
-| `GET /agents/{agent_id}/stats/tool-usage` | 工具使用统计 | `period`: `24h`/`7d`/`30d`/`all` |
-| `GET /agents/{agent_id}/stats/recent-conversations` | 最近会话 | `limit`: 默认 10 |
+| `GET /api/v1/agents/{agent_id}/stats/trends` | 趋势数据 | `period`: `24h`/`7d`/`30d` |
+| `GET /api/v1/agents/{agent_id}/stats/tool-usage` | 工具使用统计 | `period`: `24h`/`7d`/`30d`/`all` |
+
+<Callout type="warn">
+  `period` 边界行为：概览与工具使用端点对 `24h`/`7d`/`30d` 之外的任何取值一律按 `all` 处理；趋势端点对非 `24h`/`7d` 的取值一律按 `30d` 处理。
+
+  访问控制：统计端点对超级管理员放行；`private` Agent 仅创建者可读（无创建者的历史 Agent 回退为团队范围）；非私有 Agent 需要团队访问权限。被拒返回 `403`，资源不存在返回 `404`。
+</Callout>
 
 ---
 

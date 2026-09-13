@@ -6,7 +6,7 @@ icon: Settings
 
 The following values follow the root-level `deploy/.env.example` and the backend `Settings`. Compose internal addresses use `api`, `db`, `redis`, and `qdrant`; source development usually uses `localhost`.
 
-Configuration has three layers: environment variables control startup-level configuration (connections, secrets, queues, sandbox, etc.); the database `SiteSetting` manages runtime settings (SMTP, SSO, session timeout, upload limits, etc.); LLM provider keys and base URLs are stored in the database, not environment variables.
+Configuration has three layers: environment variables control startup-level configuration (connections, secrets, queues, sandbox, etc.); the database `SiteSetting` manages runtime settings (SMTP, SSO, session timeout, upload limits, outbound network allowlist, etc.); LLM provider keys and base URLs are stored in the database, not environment variables.
 
 ## Application and Network
 
@@ -101,6 +101,11 @@ With filesystem isolation enabled (`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`),
 | --- | --- | --- |
 | `CELERY_VISIBILITY_TIMEOUT_SECONDS` | `3600` | Celery task visibility timeout (seconds) |
 | `KB_PROCESSING_RECOVERY_AFTER_SECONDS` | `600` | Wait before recovering a stuck Knowledge Base processing task (seconds) |
+| `DB_AGGREGATE_CONCURRENCY` | `4` | Upper bound on aggregate queries one request may hold open at once; must be `> 0` |
+
+`DB_AGGREGATE_CONCURRENCY` bounds a single process-wide semaphore shared by every aggregation fan-out, so one dashboard statistics request cannot occupy the whole shared Tortoise pool (default `maxsize=5`) and queue its own remaining queries behind itself. Lower it when dashboard, Agent, or workflow statistics show connection waits or timeouts. Enlarging the pool instead is not an equivalent fix: the default deployment runs roughly 17 processes x pool against PostgreSQL `max_connections` 100. For sizing and verification, see [Database Maintenance and Index Tuning](../operations/database-maintenance.mdx).
+
+The queues a worker consumes are not an environment variable — they are the `-Q` flag on the start command, see [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
 
 ## Frontend Build-time
 

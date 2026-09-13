@@ -1,0 +1,407 @@
+---
+title: 认证与用户登录 API
+description: 用户注册、人机验证、密码登录、两步验证 (TOTP)、密码找回与邮箱验证接口
+icon: KeyRound
+---
+
+认证与用户登录 API 提供账户注册、图形验证码人机验证、OAuth2 兼容的密码登录、两步验证 (TOTP) 挑战与校验、密码重置以及邮箱验证能力。基础路径为 `/api/v1`。
+
+## 端点总览
+
+| 方法 | 路径 | 用途 | 认证方式 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/captcha` | 获取基于点击的人机验证挑战 | 公开 |
+| POST | `/api/v1/captcha/click` | 提交点击轨迹并换取单次有效验证码凭证 | 公开 |
+| POST | `/api/v1/login/access-token` | 用户名/邮箱与密码登录，换取 JWT Access Token | 公开 |
+| POST | `/api/v1/login/verify-totp` | 使用临时凭证完成 TOTP 两步验证挑战 | 公开（带 `temp_token`） |
+| POST | `/api/v1/logout` | 退出当前会话并将令牌加入黑名单 | Bearer JWT |
+| POST | `/api/v1/register` | 注册新用户账户（开放注册） | 公开 |
+| POST | `/api/v1/send-verification` | 发送注册或绑定邮箱验证码 | 公开 |
+| POST | `/api/v1/verify-email` | 通过 6 位数字验证码验证邮箱 | 公开 |
+| GET | `/api/v1/verify` | 通过邮件中的链接令牌验证邮箱 | 公开 |
+| POST | `/api/v1/resend-verification` | 重新发送注册验证邮件 | 公开 |
+| POST | `/api/v1/forgot-password` | 请求发送找回密码验证码或链接 | 公开 |
+| POST | `/api/v1/reset-password` | 通过验证码或重置令牌设置新密码 | 公开 |
+| GET | `/api/v1/sso/providers` | 获取已启用的公开 SSO 身份提供商列表 | 公开 |
+| GET | `/api/v1/sso/login/{provider_name}` | 发起 SSO 登录重定向 | 公开 |
+| GET | `/api/v1/sso/callback/{provider_name}` | 处理 SSO 身份认证回调 | 公开 |
+| DELETE | `/api/v1/sso/connections/{connection_id}` | 解绑用户的指定 SSO 连接 | Bearer JWT |
+| POST | `/api/v1/totp/setup` | 生成 TOTP 密钥与绑定二维码 | Bearer JWT |
+| POST | `/api/v1/totp/enable` | 输入验证码正式启用两步验证 | Bearer JWT |
+| POST | `/api/v1/totp/disable` | 输入密码与验证码停用两步验证 | Bearer JWT |
+| POST | `/api/v1/totp/regenerate-backup-codes` | 重新生成 10 个备用恢复码 | Bearer JWT |
+| GET | `/api/v1/totp/status` | 查询当前用户的两步验证开启状态 | Bearer JWT |
+
+---
+
+## 人机验证（Captcha）
+
+系统配置开启人机验证时，注册、密码登录和找回密码需要携带人机验证凭据。
+
+### 1. 获取验证挑战
+
+```http
+GET /api/v1/captcha
+```
+
+#### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "captcha_id": "c62040db-91fa-4ff8-9125-5e3681428256",
+    "challenge": "{\"target_text\": \"请点击红色的圆圈\", \"image\": \"data:image/png;base64,...\"}",
+    "prompt": "captcha_click_prompt",
+    "expires_in": 300
+  },
+  "msg": "success"
+}
+```
+
+### 2. 提交点击换取证明
+
+客户端记录用户的点击坐标与鼠标轨迹后提交：
+
+```http
+POST /api/v1/captcha/click
+Content-Type: application/json
+
+{
+  "captcha_id": "c62040db-91fa-4ff8-9125-5e3681428256",
+  "challenge": "{\"target_text\": \"请点击红色的圆圈\", \"image\": \"data:image/png;base64,...\"}",
+  "clicked_option": "red_circle",
+  "elapsed_ms": 1340,
+  "pointer": [
+    {"x": 105.5, "y": 80.2, "t": 1200},
+    {"x": 108.0, "y": 82.0, "t": 1340}
+  ]
+}
+```
+
+#### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "captcha_id": "c62040db-91fa-4ff8-9125-5e3681428256",
+    "captcha_token": "proof-token-string"
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 密码登录与两步验证
+
+### 1. 提交凭证登录
+
+采用标准 OAuth2 表单格式（`application/x-www-form-urlencoded`）：
+
+```http
+POST /api/v1/login/access-token
+Content-Type: application/x-www-form-urlencoded
+
+username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-91fa-4ff8-9125-5e3681428256&captcha_token=proof-token-string
+```
+
+- `username` 可以传入用户名或电子邮箱。
+- 若启用了人机验证，必须传递有效的 `captcha_id` 和 `captcha_token`。
+
+#### 直接登录成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer"
+  },
+  "msg": "login_successful"
+}
+```
+
+#### 要求两步验证（TOTP 挑战响应）
+
+当用户已开启两步验证，后端不直接发放正式 `access_token`，而是返回有效时长为 5 分钟的临时凭证 `temp_token`：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "requires_totp": true,
+    "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  },
+  "msg": "totp_required"
+}
+```
+
+#### 强制修改密码
+
+若密码已过期或管理员标记必须修改密码：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer",
+    "force_password_change": true,
+    "reason": "expired"
+  },
+  "msg": "login_successful_change_password_required"
+}
+```
+
+### 2. 校验 TOTP 验证码完成登录
+
+```http
+POST /api/v1/login/verify-totp
+Content-Type: application/x-www-form-urlencoded
+
+temp_token=temp-jwt-token-string&code=123456&is_backup_code=false
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `temp_token` | string | 是 | 登录步骤返回的 5 分钟临时令牌 |
+| `code` | string | 是 | 身份验证器生成的 6 位动态验证码，或 8 位备用恢复码 |
+| `is_backup_code` | boolean | 否 | 当使用备用码时设为 `true`，默认 `false` |
+
+校验成功后返回标准 `access_token` 与 `token_type: bearer`。
+
+### 3. 注销登录
+
+```http
+POST /api/v1/logout
+Authorization: Bearer YOUR_TOKEN
+```
+
+将当前会话加入黑名单注销。
+
+---
+
+## 用户注册与邮箱验证
+
+### 1. 注册新账户
+
+```http
+POST /api/v1/register
+Content-Type: application/json
+
+{
+  "username": "bob",
+  "email": "bob@example.com",
+  "password": "StrongPassword123!",
+  "terms_accepted": true,
+  "captcha_id": "captcha-uuid",
+  "captcha_token": "proof-token"
+}
+```
+
+注册成功后返回新创建的用户对象。若系统第一个注册的用户，会自动被授予超级管理员角色。
+
+### 2. 发送验证邮件
+
+```http
+POST /api/v1/send-verification
+Content-Type: application/json
+
+{
+  "email": "bob@example.com",
+  "purpose": "register"
+}
+```
+
+`purpose` 可选 `register` 或 `reset_password`。发送间隔受 60 秒频控限制。
+
+### 3. 输入 6 位验证码校验
+
+```http
+POST /api/v1/verify-email
+Content-Type: application/json
+
+{
+  "email": "bob@example.com",
+  "code": "839201",
+  "purpose": "register"
+}
+```
+
+响应返回 `{ "verified": true, "email": "bob@example.com" }`。
+
+### 4. 邮件链接一键校验
+
+```http
+GET /api/v1/verify?token=email-verification-token-string
+```
+
+---
+
+## 密码找回与重置
+
+### 1. 发起找回密码
+
+```http
+POST /api/v1/forgot-password
+Content-Type: application/json
+
+{
+  "email": "alice@example.com"
+}
+```
+
+无论邮箱是否存在，接口均统一返回成功以防止邮箱枚举。
+
+### 2. 确认重置密码
+
+支持使用 6 位验证码或邮件专用令牌两种方式：
+
+```http
+POST /api/v1/reset-password
+Content-Type: application/json
+
+{
+  "email": "alice@example.com",
+  "code": "839201",
+  "new_password": "NewStrongPassword456!"
+}
+```
+
+或者：
+
+```http
+POST /api/v1/reset-password
+Content-Type: application/json
+
+{
+  "token": "reset-token-string",
+  "new_password": "NewStrongPassword456!"
+}
+```
+
+重置成功后自动清除该账户的历史连续失败尝试锁定计数。
+
+---
+
+## 两步验证（TOTP）管理
+
+用户登录后，在个人设置中配置 TOTP 2FA。
+
+### 1. 生成绑定二维码
+
+```http
+POST /api/v1/totp/setup
+Authorization: Bearer YOUR_TOKEN
+```
+
+#### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "secret": "JBSWY3DPEHPK3PXP",
+    "qr_code": "data:image/png;base64,...",
+    "backup_codes": [
+      "a1b2c3d4",
+      "e5f6g7h8",
+      "i9j0k1l2",
+      "m3n4o5p6",
+      "q7r8s9t0",
+      "u1v2w3x4",
+      "y5z6a7b8",
+      "c9d0e1f2",
+      "g3h4i5j6",
+      "k7l8m9n0"
+    ]
+  },
+  "msg": "success"
+}
+```
+
+### 2. 确认开启
+
+```http
+POST /api/v1/totp/enable
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "code": "123456"
+}
+```
+
+### 3. 停用两步验证
+
+```http
+POST /api/v1/totp/disable
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "password": "CurrentPassword123!",
+  "code": "123456",
+  "is_backup_code": false
+}
+```
+
+### 4. 重新生成备用恢复码
+
+```http
+POST /api/v1/totp/regenerate-backup-codes
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "code": "123456"
+}
+```
+
+返回重新生成的 10 个备用码。
+
+### 5. 查询状态
+
+```http
+GET /api/v1/totp/status
+Authorization: Bearer YOUR_TOKEN
+```
+
+```json
+{
+  "code": 0,
+  "data": {
+    "enabled": true,
+    "enabled_at": "2026-09-10T14:30:00Z",
+    "remaining_backup_codes": 9
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 错误代码
+
+| 错误码 | 标识 | 说明 |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | 未认证或令牌无效 |
+| `2001` | INVALID_TOKEN | 临时凭据无效 |
+| `2002` | TOKEN_EXPIRED | 登录临时凭据或验证码已过期 |
+| `2003` | INVALID_CREDENTIALS | 用户名或密码错误 |
+| `2004` | INACTIVE_USER | 用户已被禁用或待审批 |
+| `5000` | REGISTRATION_DISABLED | 开放注册已关闭 |
+| `5004` | EMAIL_NOT_VERIFIED | 登录前必须完成邮箱验证 |
+| `5005` | VERIFICATION_CODE_INVALID | 邮箱验证码错误 |
+| `5006` | VERIFICATION_CODE_EXPIRED | 邮箱验证码已过期 |
+| `5008` | EMAIL_SEND_TOO_FREQUENT | 邮件发送过于频繁（60 秒冷却） |
+| `5300` | ACCOUNT_LOCKED | 连续失败次数超限，账户已被临时锁定 |
+| `5302` | CAPTCHA_REQUIRED | 需要提交人机验证码 |
+| `5303` | CAPTCHA_INVALID | 人机验证未通过或凭据已失效 |
+| `5310` | TOTP_REQUIRED | 需要提交两步验证码 |
+| `5311` | TOTP_INVALID | 两步验证动态码或备用码不正确 |
+| `5312` | TOTP_RATE_LIMITED | 两步验证连续尝试失败过多被限速 |
+| `5314` | TOTP_ALREADY_ENABLED | 该账户已开启两步验证 |
+| `6306` | PASSWORD_LOGIN_DISABLED | 系统已启用强制 SSO，密码登录已被禁用 |

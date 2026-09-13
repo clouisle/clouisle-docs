@@ -12,12 +12,34 @@ Clouisle runs 5 application services using 3 images. `clouisle-backend` provides
 | --- | --- | --- | --- |
 | `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
 | `api` | clouisle-backend | FastAPI API | `8000` |
-| `worker` | clouisle-backend | Celery `default`, `knowledge`, `workflow` queues | None |
-| `sandbox-worker` | sandbox-worker | Sandbox queue and artifact uploads | None |
+| `worker` | clouisle-backend | Celery `default`, `agent`, `knowledge`, `workflow` queues | None |
+| `sandbox-worker` | sandbox-worker | Celery `sandbox` queue and artifact uploads | None |
 | `beat` | clouisle-backend | Celery Beat scheduler, must run with a single replica | None |
 | `db` | PostgreSQL 17 + pg_search | Business, full-text retrieval, and audit data | `5432` |
 | `redis` | Redis 7 | Queues, cache, sessions | `6379` |
 | `qdrant` | Qdrant 1.18.3 | Vector index | `6333` |
+
+## Celery queue layout
+
+The `clouisle-backend` image starts `api`, `worker`, and `beat` through subcommands. Task-to-queue routing is declared statically in `task_routes` in `backend/app/core/celery.py`, and the consumed queue names are passed with `-Q`.
+
+| Queue | Consumer | Task modules | Work it carries |
+| --- | --- | --- | --- |
+| `default` | `worker` | `app.tasks.usage`, `notification`, `audit_log`, `api_key`, `password_expiration`, `memory` | Usage resets, notification delivery, audit log archiving, API key and password expiry checks |
+| `agent` | `worker` | `app.tasks.agent` | AgentRun execution (model calls and tool loop) |
+| `knowledge` | `worker` | `app.tasks.knowledge_base` | Document parsing, chunking, embedding, and indexing |
+| `workflow` | `worker` | `app.tasks.workflow` | Workflow runs |
+| `sandbox` | `sandbox-worker` | `app.tasks.sandbox`, `tasks.cleanup_expired_sandbox_sessions` | Code sandbox execution and expired sandbox session cleanup |
+
+The supplied Compose, Helm, and single-file manifests run the worker as `python main.py worker -c 4 -Q default,agent,knowledge,workflow` — one service consuming all four queues — and the sandbox worker as `python main.py sandbox-worker -c <SANDBOX_WORKER_CONCURRENCY>`, consuming only `sandbox`.
+
+Periodic tasks dispatched by Beat: `sweep-lost-agent-runs` every 2 minutes on the `default` queue (reclaims AgentRuns still marked in-flight after a worker crash and is the only producer of `INTERRUPTED`), and `cleanup-expired-sandbox-sessions` every 15 minutes on the `sandbox` queue. Tasks on the `agent` queue set no retries: model calls and tool execution have side effects, so a retry would execute them twice.
+
+Scaling rules:
+
+- `docker compose up -d --scale worker=4` or `kubectl scale deployment worker` scales all four queues together. To scale one queue independently, run an extra worker container subscribed to a single queue, for example `-Q agent` to grow AgentRun execution only.
+- The `sandbox` queue is its own service; scaling `sandbox-worker` does not affect knowledge base or workflow processing.
+- `beat` always runs a single replica, see [Service topology](#service-topology).
 
 ## Request routing
 

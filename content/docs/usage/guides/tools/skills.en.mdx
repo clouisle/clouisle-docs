@@ -1,28 +1,149 @@
 ---
-title: Import and Use Skills
-description: Import reusable Skill packages into a team and bind them to apps
+title: Skills Center
+description: Import, manage, and use reusable Skill packages in Agents
 icon: PackageOpen
 ---
 
-Skills are reusable instructions, resources, and execution conventions. The platform provides the **Capabilities** > **Skills** page; administrators can also review and manage imported packages in the admin panel.
+A Skill is a reusable capability package that bundles prompt instructions, runtime scripts, dependency declarations, and execution conventions. Unlike a single HTTP or code tool, a Skill can either carry a detailed specification the Agent reads and follows (`instructions` mode) or run a script directly inside the sandbox and produce artifacts (`script` mode).
+
+The platform exposes the Skills center under **Capabilities** > **Skills** (`/app/capabilities?tab=skills`); administrators review system and team packages in the admin panel (`/capabilities?tab=skills`).
+
+<Callout type="info">
+  Viewing Skills requires `skill:read`; importing requires `skill:create`; enabling, disabling, or editing requires `skill:update`; sandbox test runs require `skill:execute`; deleting requires `skill:delete`.
+</Callout>
+
+## Package Structure and Specification
+
+Every Skill package is a directory whose root contains a `SKILL.md` file (UTF-8 encoded).
+
+```
+my-skill/
+├── SKILL.md              # Required: frontmatter and prompt instructions
+├── scripts/
+│   └── run.py            # Optional: script executed in script mode
+└── assets/               # Optional: templates, rules, or static resources
+```
+
+### SKILL.md Format
+
+`SKILL.md` combines YAML frontmatter with a Markdown body:
+
+```markdown
+---
+name: text-summarizer
+display_name: Text Summarizer
+description: Produces structured summaries, key points, and multilingual comparisons
+version: 1.0.0
+category: productivity
+icon: FileText
+x-clouisle:
+  execution:
+    mode: instructions
+  input_schema:
+    type: object
+    properties:
+      text:
+        type: string
+        description: Raw text to summarize
+    required:
+      - text
+---
+
+You are a professional long-form summarization expert. When the user supplies a long document:
+1. Extract 3-5 core conclusions;
+2. Output a key-point table;
+3. Preserve critical figures and cite each source.
+```
+
+### Execution Modes
+
+| Mode | How it runs | Typical use |
+| --- | --- | --- |
+| `instructions` (default) | No code runs in the sandbox. The `SKILL.md` body is injected into the Agent runtime context to steer how the model reasons and replies. | Writing standards, analysis procedures, code review rules, domain SOPs |
+| `script` | Runs the script named by `execution.script` (Python or Node.js) in an isolated code sandbox, captures `stdout`/`stderr`, and can persist file artifacts. | Heavy computation, statistics, chart rendering, batch file conversion |
+
+### Limits and Validation Rules
+
+- **Zip upload limits**: the upload must be a `.zip` file, at most **50 MB**, expanding to at most **50 MB** uncompressed, with at most **500** files inside and a **10 MB** limit per extracted file.
+- **Forbidden content**: Zip archives may not contain symlinks, nested archives, or path-escape entries (`../`).
+- **Required fields**: `name` (lowercase letters, digits, underscores, and hyphens) and `description` are mandatory.
 
 ## Import a Skill Package
 
-1. On the **Capabilities** page, select the **Skills** tab.
-2. Select **Import** and upload or choose a Clouisle package.
-3. Review the package's name, version, description, resources, and dependencies.
-4. After importing, enable the Skill for the current team.
-5. Bind the Skill you need in the Agent's **Tools** selector, or use it in a Workflow node.
+The platform supports **Upload Zip** and **Git Repository** imports:
+
+1. Go to **Capabilities** (`/app/capabilities`) and select the **Skills** tab.
+2. Select **Import Skills** in the top-right corner.
+3. Choose the source:
+   - **Upload Zip**: drop in or select a `.zip` archive containing one or more Skill directories.
+   - **Git Repository**: enter a public HTTPS Git repository URL (`repo_url`) plus an optional branch, tag, or commit (`ref`, such as `main` or `v1.0.0`).
+4. The system extracts the archive and opens the **preview** step, listing the package path, Skill name, mode (instructions / script), and validation status.
+5. Name conflicts and duplicates are flagged in red with the reason. Review the list, tick the entries to install, and select **Install selected**.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/skill-import-dialog.png" alt="Import a Skill package" />
   <figcaption>Import a Skill package</figcaption>
 </figure>
 
-## Lifecycle
+## Sandbox Testing
 
-Importing, enabling, disabling, and deleting are separate operations. Disabling does not delete historical references; before deleting, confirm that no published Agent or Workflow depends on it. Skill versions should be recorded together with the package content, and production changes should be validated in a draft app first.
+Test a Skill in isolation before binding it to a production Agent:
+
+1. Find the Skill in the Skills list and select **Test** in the actions column.
+2. Enter the JSON call arguments (`arguments`) in the test drawer.
+3. Select **Run test**:
+   - In `instructions` mode, preview the exact prompt and instructions that will be injected into the Agent.
+   - In `script` mode, the sandbox gateway creates an isolated session, runs the script, and shows status, duration in milliseconds, `stdout`, `stderr`, and the artifact list. Artifacts can be downloaded directly in the UI.
+
+## Bind a Skill to an Agent
+
+1. Open the target Agent's orchestration page (`/app/apps/{agent_id}`).
+2. In the **Tools** section, select **Add tool/Skill** and switch to the **Skills** category.
+3. Tick the Skills to enable. During conversations the Agent decides on its own whether to call the Skill, based on the system prompt and the task.
+4. Once debugging passes, select **Publish**.
+
+<Callout type="warn">
+  **Reference protection**: once any Agent binds a Skill, the system **refuses to delete** it and reports a reference conflict. Unbind it in every Agent's orchestration first.
+</Callout>
+
+## Scope and Permissions
+
+- **System Skills**: `team_id` is empty and every team on the platform can see them. Only superadmins can create, edit, import, or delete them in the admin panel.
+- **Team Skills**: bound to one team and visible only to its members. Team administrators and members with `skill:*` permissions manage them.
+
+## API Endpoints
+
+```http
+# List Skills available to a team (including system Skills)
+GET /api/v1/skills?team_id={team_id}&include_system=true
+
+# Preview Zip / Git imports
+POST /api/v1/skills/import/preview-zip
+POST /api/v1/skills/import/preview-git
+
+# Install Skills from an import session
+POST /api/v1/skills/import/{session_id}/install
+
+# Read / update / delete a Skill
+GET    /api/v1/skills/{skill_id}?team_id={team_id}
+PATCH  /api/v1/skills/{skill_id}
+DELETE /api/v1/skills/{skill_id}
+
+# Run a sandbox test
+POST /api/v1/skills/{skill_id}/test
+```
 
 ## Troubleshooting
 
-Import fails when the package format is invalid, resources are missing, dependencies are unsatisfied, or permissions are insufficient. Keep the error message returned by the server and the package version so administrators can diagnose the issue.
+### Import fails
+
+1. **Zip too large**: confirm the archive is under `50MB` and expands to under `50MB`.
+2. **Missing SKILL.md**: confirm a capitalised `SKILL.md` sits in the directory root and is valid UTF-8 text.
+3. **Invalid frontmatter**: check YAML indentation and confirm the required `name` and `description` fields exist.
+4. **Git timeout**: cloning a public repository times out after `180` seconds; confirm the URL is publicly reachable.
+
+### Execution errors
+
+1. Select **Test** in the Skills center and read the `stderr` output.
+2. For `script` mode, check that the dependencies declared by the script exist in the runtime.
+3. Check that the arguments match the types declared in `x-clouisle.input_schema`.

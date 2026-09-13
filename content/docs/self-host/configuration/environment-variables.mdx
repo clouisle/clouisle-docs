@@ -6,7 +6,7 @@ icon: Settings
 
 以下值以根目录和 `deploy/.env.example`、后端 `Settings` 为准。Compose 内部地址使用 `api`、`db`、`redis` 和 `qdrant`；源码开发通常使用 `localhost`。
 
-配置分三层：环境变量控制启动级配置（连接、密钥、队列、沙箱等）；数据库 `SiteSetting` 管理运行时设置（SMTP、SSO、会话超时、上传限制等）；LLM 厂商的 Key 与 base_url 存数据库而非环境变量。
+配置分三层：环境变量控制启动级配置（连接、密钥、队列、沙箱等）；数据库 `SiteSetting` 管理运行时设置（SMTP、SSO、会话超时、上传限制、出站网络白名单等）；LLM 厂商的 Key 与 base_url 存数据库而非环境变量。
 
 ## 应用与网络
 
@@ -101,6 +101,11 @@ Celery broker 与结果后端由 `REDIS_*` 派生（broker `redis://…/0`、bac
 | --- | --- | --- |
 | `CELERY_VISIBILITY_TIMEOUT_SECONDS` | `3600` | Celery 任务可见性超时（秒） |
 | `KB_PROCESSING_RECOVERY_AFTER_SECONDS` | `600` | 知识库处理卡死后的恢复等待时间（秒） |
+| `DB_AGGREGATE_CONCURRENCY` | `4` | 单个请求可同时持有的聚合查询上限，必须 `> 0` |
+
+`DB_AGGREGATE_CONCURRENCY` 限制的是一个 API 进程内所有聚合 fan-out 共用的信号量，用于防止单次工作台统计请求占满 Tortoise 共享连接池（默认 `maxsize=5`）后把自己的其余查询排在自己后面。仪表盘、Agent 与工作流统计出现连接等待或超时时可下调；把连接池整体调大不是等价方案，默认部署约 17 个进程 × 池，PostgreSQL `max_connections` 为 100。取值与验证方法见[数据库维护与索引调优](../operations/database-maintenance.mdx)。
+
+Worker 消费的队列不是环境变量，而是启动命令的 `-Q` 参数，见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
 
 ## 前端构建期
 

@@ -4,8 +4,9 @@
   "pages": [
     "create-agent",
     "conversation",
-    "embed-and-share",
+    "monitor",
     "memory",
-    "media"
+    "media",
+    "embed-and-share"
   ]
 }

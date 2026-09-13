@@ -1,0 +1,216 @@
+---
+title: Agent Monitor
+description: Review an Agent's usage statistics, execution health, and response performance
+icon: Activity
+---
+
+The monitor dashboard (`/app/apps/{agent_id}/monitor`) aggregates one Agent's conversation volume, Token consumption, response time, tool calls, run outcomes, and user interventions. It only counts conversations and runs that reached the database, and it is the evidence you use to decide whether to change the prompt, add a knowledge base, or switch models.
+
+<Callout type="info">
+  You need access to the Agent: superadmins can open it directly; a **private** Agent is visible only to its creator; a **team** Agent requires team access. Denied requests return `403`, and a missing Agent returns `404`.
+</Callout>
+
+## Open the Monitor
+
+1. Go to **Apps** (`/app/apps`) and open the target Agent.
+2. In the Agent sidebar, select **Monitor** (**Orchestration** / **API** / **Logs** / **Monitor**).
+3. The page title is **Monitor**, with the subtitle "View usage statistics and performance metrics for this Agent".
+
+<Callout type="info" title="Image needed: Agent monitor dashboard">
+  File: `/images/agent-monitor-overview.png`. Screenshot content: the first screen of the Agent monitor page, including the time-range selector and the six overview cards. Crop the screenshot to the metrics area and outline the time-range selector with the theme color. The future `alt` and caption for this image will both use "Agent monitor dashboard".
+</Callout>
+
+## Time Range
+
+The time-range selector at the top defaults to **Last 7 days** and offers only three options:
+
+| Option | Value | Trend granularity |
+| --- | --- | --- |
+| Last 24 hours | `24h` | Hourly, `24` points |
+| Last 7 days | `7d` | Daily, `7` points |
+| Last 30 days | `30d` | Daily, `30` points |
+
+Point labels are aligned to the site time zone and rendered as `HH:00` (hourly) or `MM/DD` (daily).
+
+<Callout type="warn">
+  The monitor page has **no refresh button** and no manual granularity control. Changing the time range is the only way to refresh, and it fires the overview, trend, and tool-usage requests concurrently.
+</Callout>
+
+## Overview Cards
+
+Six metric cards sit at the top of the page. Values at or above `1K` render as `K` and at or above `1M` as `M`; durations below `1` second render in milliseconds, otherwise with 2 decimal seconds.
+
+| Card | Meaning |
+| --- | --- |
+| **Conversations** | Total conversations created in the range |
+| **Messages** | User + assistant + tool messages |
+| **Tokens** | Total Tokens, split into `↑` prompt and `↓` completion |
+| **Avg Response Time** | End-to-end average duration |
+| **Active Users** | Distinct users who created a conversation in the range |
+| **Tool Calls** | Sum of tool-call arguments across assistant messages |
+
+## Usage Trends
+
+Three area charts share the same time range:
+
+| Chart | Description | Y axis |
+| --- | --- | --- |
+| **Conversation Trend** | Number of conversations and messages over time | Count |
+| **Token Usage** | Total tokens consumed over time | Compact format (`K`/`M`) |
+| **Response Time** | Average response time over time | Seconds |
+
+The backend returns a fixed, complete point grid and zero-fills missing buckets, so the curves stay continuous instead of breaking over idle periods.
+
+<Callout type="info" title="Image needed: Usage trends">
+  File: `/images/agent-monitor-trends.png`. Screenshot content: the Conversation Trend, Token Usage, and Response Time area charts on the monitor page. Keep the crop inside the trend cards and outline the time-range selector with the theme color to show that all three charts share one range. The future `alt` and caption for this image will both use "Usage trends".
+</Callout>
+
+## Tool Call Distribution
+
+The **Tool Usage** card renders a donut chart of this Agent's tool calls, ordered by descending count. The legend shows each tool's localized name and call count, and the tooltip label is **Calls**.
+
+- At most the top `8` tools are shown; the remainder is merged into **Other tools** with the combined count preserved.
+- With no tool calls, the card shows **No tool usage data**.
+- Tool names are localized to the site language; the API returns both the localized `display_name` and the raw `name`.
+
+<Callout type="note">
+  Tool statistics **do not enumerate MCP servers**. Stats requests deliberately avoid triggering external MCP calls, so MCP tools never appear in the distribution.
+</Callout>
+
+## Execution Health
+
+The **Execution Health** donut shows the outcome distribution of this Agent's finished runs; the tooltip shows count and percentage.
+
+| Outcome | Meaning |
+| --- | --- |
+| **Completed** | The run finished successfully |
+| **Failed** | The run ended in a failure state |
+| **Stopped** | The user stopped it |
+| **Interrupted** | The worker executing the run was lost (crash, restart, eviction), so the run never completed |
+
+The success rate is **completed ÷ terminal runs** (hinted on the card as "Completed ÷ terminal runs"). The card color follows the rate:
+
+| Success rate | Color |
+| --- | --- |
+| `>= 95%` | Green |
+| `>= 80%` and `< 95%` | Amber |
+| `< 80%` | Red |
+
+<Callout type="warn">
+  **Interrupted is terminal**: it lowers the success rate rather than counting as "still running". In-flight runs (`queued`, `running`, `stopping`, `completing`, `waiting`) are excluded from the denominator, and the page shows "`{count}` in progress, excluded". When nothing has ever finished, the card shows **No runs yet**.
+</Callout>
+
+## First Token Latency
+
+The **First Token Latency** card reports `p50` (median), `p95`, and average, and plots `p95` and `p50` per bucket on a line chart. Buckets without samples are `null`, and the line **breaks instead of connecting** across them; the card also shows the sample count. With no samples it shows **No latency samples yet**.
+
+First-token latency measures how long a user waits for the first character, which is a different signal from **Avg Response Time** (total end-to-end duration): high latency usually points at model first-token speed, context length, or queueing, while high total time can also come from many tool calls.
+
+## User Interventions
+
+The **User Interventions** bar chart counts the three ways users intervene in a run; only non-zero bars render:
+
+| Label | Meaning |
+| --- | --- |
+| **Steering** (`steer`) | Inserting extra instructions mid-generation |
+| **Stopped** (`stopped`) | Manually stopping generation |
+| **Follow-ups** (`follow_up`) | Asking a follow-up about the previous result |
+
+The card also shows the **intervention rate** = `interventions.total / health.total` (terminal runs, 2 decimals), hinted as "Across `{runs}` terminal runs".
+
+<Callout type="note">
+  When the intervention total is `0` the card shows an empty state; if bars have values but no run has finished, the rate is omitted. A high intervention rate means the prompt, tool descriptions, or knowledge retrieval are not clear enough and users keep correcting the Agent.
+</Callout>
+
+## Data Semantics and Known Limits
+
+Some endpoint behaviour does not fully match the documented options, which matters when troubleshooting:
+
+- Overview and tool usage treat any period other than `24h`/`7d`/`30d` **as `all`**; trends treats anything other than `24h`/`7d` **as `30d`**. The UI only exposes the three supported options, so this rarely triggers.
+- On a stats failure the frontend **silently keeps the previous or empty data** and shows no error state. If charts stay empty while conversations clearly exist, reload the page first, then check the backend.
+- Fewer than `6` cards or blank chart areas usually means stats have not returned yet; skeletons occupy the card and chart slots while loading.
+
+**Unavailable** (roadmap): cost breakdowns, request-level response-time percentiles beyond first token, statistics export (CSV/PDF), and scheduled reports. At the operations layer there is also no Prometheus `/metrics` endpoint.
+
+## API Endpoints
+
+The monitor reads three read-only endpoints. All require an active JWT and pass the Agent access check:
+
+```http
+GET /api/v1/agents/{agent_id}/stats?period=7d
+GET /api/v1/agents/{agent_id}/stats/trends?period=7d
+GET /api/v1/agents/{agent_id}/stats/tool-usage?period=7d
+```
+
+`period` accepts `24h`, `7d`, `30d`, and `all` (trends accepts only `24h`/`7d`/`30d`; overview and tool usage default to `7d`).
+
+`stats` returns every section at once:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "30d",
+    "overview": {
+      "total_conversations": 156,
+      "total_messages": 1234,
+      "user_messages": 620,
+      "assistant_messages": 610,
+      "tool_messages": 4,
+      "active_users": 23
+    },
+    "tokens": {
+      "prompt_tokens": 250000,
+      "completion_tokens": 206789,
+      "total_tokens": 456789
+    },
+    "performance": {
+      "avg_response_time_ms": 2300,
+      "first_token_ms": { "p50": 1200, "p95": 9000, "avg": 2500, "samples": 480 }
+    },
+    "tools": { "tool_call_count": 512 },
+    "health": {
+      "completed": 90, "failed": 6, "stopped": 4, "interrupted": 3,
+      "unrecognised": 0, "in_flight": 2, "total": 103, "success_rate": 0.8738
+    },
+    "interventions": { "steer": 12, "stop": 3, "follow_up": 5, "total": 20 }
+  },
+  "msg": "success"
+}
+```
+
+`health.unrecognised` reports stored status values this build does not know; they are reported separately instead of being folded into a bucket. `health.total` = `completed + failed + stopped + interrupted`.
+
+See [Agents API](/api/agents) for the full field reference.
+
+## Troubleshooting
+
+### The monitor will not open, or jumps back to the app list
+
+1. Confirm you have access to the Agent (a private Agent is visible only to its creator).
+2. Confirm the Agent still exists; a deleted Agent returns `404` and the frontend redirects to `/app/apps`.
+3. For a team Agent, confirm you are still a member of the team.
+
+### Every metric is 0
+
+1. Confirm there were conversations in the range (check **Conversations** first).
+2. Confirm you are looking at a published version; draft previews do not produce official statistics.
+3. Confirm callers go through the Agent conversation API rather than calling the model directly.
+
+### Success rate is low
+
+1. Check the **Failed** and **Interrupted** shares in **Execution Health**. A high **Interrupted** share means an unstable runtime (worker crash or restart); talk to operations instead of rewriting the prompt.
+2. Open **Logs** and filter by `failed` to find the failing runs.
+3. Combine with the **Stopped** share in **User Interventions** to see whether timeouts or overly long replies make users give up.
+
+### First-token latency is high
+
+1. Check the model provider's first-token speed and current load.
+2. Shorten the system prompt and the injected knowledge-base context.
+3. Compare **First Token Latency** across models and switch to a faster `chat` model if needed.
+
+## Related pages
+
+- [Create and Orchestrate an Agent](./create-agent) — models, tools, and the statistics endpoints
+- [Conversations and Sessions](./conversation) — how conversations and runs are produced
+- [Agents API](/api/agents) — full field and error-code reference

@@ -138,23 +138,25 @@ For full configuration options, see [Attachments and Media](./media) and [Memory
 
 ## Monitoring and Statistics
 
-Use the stats endpoint `GET /api/v1/agents/{agent_id}/stats` to fetch agent metrics for a time period (`period`: `24h`, `7d`, `30d`, `all`):
+Each Agent has a dedicated **Monitor** page (`/app/apps/{agent_id}/monitor`), accessible via **Monitor** in the Agent sidebar. The page displays overview cards, usage trends, tool call distribution, **Execution Health**, **First Token Latency**, and **User Interventions** across `24h`, `7d` (default), and `30d`.
+
+<Callout type="info">
+  See [Agent Monitor](./monitor) for chart formulas, success-rate definitions, and limits.
+</Callout>
+
+Data is backed by three read-only endpoints (`GET /api/v1/agents/{agent_id}/stats*`, `period`: `24h`, `7d`, `30d`, `all`):
 
 | Metric | Endpoint | Description |
 | --- | --- | --- |
 | Conversations & messages | `/stats` | Total conversations, total messages, active users |
 | Token usage | `/stats` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
-| Average response time | `/stats` | End-to-end average latency |
+| Average response time & first token latency | `/stats` | End-to-end average latency; `p50`/`p95`/`avg` for first token |
+| Execution health & user interventions | `/stats` | Run outcome distribution, success rate, intervention counts |
 | Tool calls | `/stats/tool-usage` | Per-tool call count breakdown |
 | Usage trends | `/stats/trends` | Time-aggregated usage changes |
-| Recent conversations | `/stats/recent-conversations` | List of recent conversations |
-
-<Callout type="info">
-  Statistics are surfaced in the agent list/detail views; there is no separate **Statistics** tab.
-</Callout>
 
 <Callout type="warn">
-  Not implemented / Roadmap: per-agent cost breakdowns, response-time percentiles (p50/p95/p99), statistics export (CSV/PDF), and scheduled usage reports are not available. The statistics API returns only the metrics listed above.
+  Not implemented / Roadmap: per-agent cost breakdowns, request-level response-time percentiles beyond first token, statistics export (CSV/PDF), and scheduled usage reports. At the operations layer there is also no Prometheus `/metrics` endpoint.
 </Callout>
 
 ## API Endpoints
@@ -257,5 +259,5 @@ For full API details, see [Agents API](/reference/api/endpoints/agents).
 | Agent template library | Not implemented | Use duplicate (`POST .../duplicate`) |
 | Bulk edit | Not implemented | Update individual agents via `PUT` |
 | Archive/restore | Not implemented | Unpublish or delete |
-| Cost breakdowns / percentiles | Not implemented | Basic stats only |
+| Cost breakdowns / request-level percentiles | Not implemented | The Monitor page provides `p50`/`p95` for first token |
 | Import/export | Not implemented | None |

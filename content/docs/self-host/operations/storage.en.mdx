@@ -24,7 +24,11 @@ Site settings support **local filesystem** and **object storage**. Local mode fi
 
 ## Scaling Rules
 
-Worker and Sandbox Worker can scale independently. `beat` must run exactly one replica. Multiple API replicas require shared upload storage or object storage; scale Qdrant and PostgreSQL according to their own high-availability schemes. Before scaling, confirm connection pool, queue concurrency, provider rate limits, and disk I/O.
+Worker and Sandbox Worker can scale independently. `beat` must run exactly one replica. Multiple API replicas require shared upload storage or object storage; scale Qdrant and PostgreSQL according to their own high-availability schemes.
+
+The worker consumes the `default,agent,knowledge,workflow` queues by default. When one class of task backs up under load, start a dedicated worker for a single queue — for example `-Q agent` to grow AgentRun execution, or `-Q knowledge` for knowledge base processing.
+
+Before scaling, confirm the database connection budget: PostgreSQL defaults to `max_connections` 100 and every application process carries its own pool. If connections contend, bound aggregation fan-out with `DB_AGGREGATE_CONCURRENCY` rather than enlarging the pool blindly; see [Database Maintenance and Index Tuning](./database-maintenance.mdx). Also confirm provider rate limits and disk I/O.
 
 ## Capacity Checks
 

@@ -4,6 +4,7 @@
   "pages": [
     "storage",
     "backup-recovery",
+    "database-maintenance",
     "upgrade",
     "monitoring",
     "troubleshooting"

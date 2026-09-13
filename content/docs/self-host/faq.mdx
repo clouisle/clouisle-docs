@@ -30,6 +30,10 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 
 ## 检索与任务
 
+### 怎么单独扩容某一类任务？
+
+官方部署的 `worker` 同时消费 `default`、`agent`、`knowledge`、`workflow` 4 个队列，整体扩容会同时增加这 4 类任务的吞吐。需要只扩容 AgentRun 执行时，额外启动一个只订阅单队列的 Worker（如 `-Q agent`）；`sandbox` 队列由独立的 `sandbox-worker` 消费。详见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
+
 ### 文档上传成功后为什么搜不到？
 
 上传和处理是两个阶段。等待文档进入 `completed`，确认嵌入成功和 Qdrant 可用，再检查 Agent 关联的知识库。
@@ -39,6 +43,10 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 混合检索的 `dense_weight` 和 `lexical_weight` 不能同时为 `0`。全文通道还需要 PostgreSQL 的 `pg_search`。
 
 ## 安全
+
+### 为什么内网地址被拒绝？
+
+自定义 HTTP 工具、工作流 HTTP 节点和知识库 URL 抓取默认拦截私网与回环地址。到**站点设置** > **安全** > **出站网络访问白名单**逐条加入内网 IP、CIDR 或域名。云元数据、多播、`0.0.0.0`、通配符和 `localhost` 永久禁止，不可放行；本地推理服务走独立的模型端点白名单。详见[故障排查 → HTTP 工具或内网地址被拦截](./operations/troubleshooting.mdx#outbound-allowlist)。
 
 ### 可以把 `.env` 提交到仓库吗？
 

@@ -1,10 +1,13 @@
 ---
 title: 记忆与上下文
-description: 配置跨会话记忆并理解长对话上下文压缩
+description: 配置跨会话记忆图谱、后台自动提取与长对话上下文压缩
 icon: Brain
 ---
 
-Clouisle 有三层上下文：当前活动消息分支、会话级摘要，以及跨会话用户记忆。三者解决的问题不同。
+Clouisle 将上下文分为三层，解决不同生命周期的连续性与成本问题：
+1. **活动消息分支与上下文压缩**：会话进行时的实时历史，通过动态预算与阶段压缩保障模型窗口不溢出。
+2. **会话级摘要**：单会话内部的长对话背景浓缩，服务于当前会话后续轮次。
+3. **跨会话记忆图谱（Memory Graph）**：跨越不同会话的持久知识网络，以实体和有向关系沉淀用户偏好、项目背景与核心事实。
 
 ## 启用跨会话记忆
 
@@ -12,23 +15,88 @@ Clouisle 有三层上下文：当前活动消息分支、会话级摘要，以�
 2. 开启**启用记忆**。
 3. 设置每次检索的最大记忆数，范围 `1-50`，默认 `10`。
 4. 按需开启**自动提取记忆**，默认开启。
-5. 保存 Agent，并在两次不同会话中验证用户偏好是否被复用。
+5. 保存并发布 Agent。用户在不同会话中对话时，Agent 会自动召回此前记录的事实。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-memory-settings.png" alt="Agent 记忆配置" />
   <figcaption>Agent 记忆配置</figcaption>
 </figure>
-## 管理后台记忆提取
 
-管理员可在**站点设置** > **记忆**（`/site-settings/memory`）配置待处理用户轮次的后台记忆提取。提取会在配置的冷却时间后排队，或在达到待处理轮次阈值时立即触发。Agent 必须同时启用记忆；关闭任一开关都不会创建提取任务。
+## 记忆图谱（Memory Graph）
 
-| 设置 | 默认值 | 约束 |
+持久记忆不仅是一堆扁平文本，而是由**实体（Entities）**与**关系（Relations）**构成的有向知识拓扑网络。
+
+可在个人菜单 > **我的记忆**（`/app/memories`）或管理后台（`/memories`）中可视化探索和管理。
+
+<Callout type="info" title="图片待补充：记忆图谱画布">
+  文件：`/images/memory-graph-canvas.png`。截图内容：记忆图谱的交互画布页面，展示实体节点、关系连线、布局切换按钮（网格、层次、径向）与实体详情侧栏。截图需裁剪到主画布区域，并用主题色框线标出选中的实体节点。未来图片的 `alt` 与 caption 均使用"记忆图谱画布"。
+</Callout>
+
+### 实体类型（Entity Types）
+
+系统预定义了 10 种实体类型：
+
+| 实体类型 | 说明 | 示例 |
 | --- | --- | --- |
-| `memory_async_extraction_enabled` | `false` | 后台提取总开关 |
-| `memory_extraction_model_id` | 空 | 空值或不可用模型使用回退模型链 |
-| `memory_extraction_cooldown_seconds` | `180` | `10-3600` 秒去抖 |
-| `memory_extraction_max_pending_turns` | `6` | `1-50`，达到阈值立即触发 |
+| `preference` | 用户的个人偏好或习惯 | "偏好简洁的代码风格"、"习惯使用 TypeScript" |
+| `project` | 正在进行或参与的项目 | "电商重构项目"、"内部知识库系统" |
+| `person` | 提到的人物或角色 | "张经理（产品负责人）" |
+| `organization` | 涉及的公司、部门或组织 | "研发部"、"供应商 A" |
+| `skill` | 掌握的技术或专长 | "Python"、"PostgreSQL 性能优化" |
+| `goal` | 阶段目标或意图 | "本季度完成文档站国际化上线" |
+| `fact` | 客观事实或特定信息 | "生产集群部署在东京机房" |
+| `concept` | 领域专业概念或术语 | "RAG 混合检索" |
+| `location` | 地点或物理方位 | "上海张江研发中心" |
+| `custom` | 其他无法归类的自定义实体 | 用户自定义事实标签 |
 
+### 关系类型（Relation Types）
+
+实体间可建立有向关系，用于图遍历（Subgraph Traversal）：
+
+| 关系类型 | 含义 |
+| --- | --- |
+| `prefers` | 偏好某项事物 |
+| `uses` | 使用某项工具或技术 |
+| `works_on` | 从事或参与某项事务/项目 |
+| `works_at` | 工作于某机构/公司 |
+| `knows` | 了解或熟悉某人/某技术 |
+| `part_of` | 属于某个更高级别的实体 |
+| `has_goal` | 具有某种目标 |
+| `located_in` | 位于某地点 |
+| `related_to` | 具有关联性 |
+
+### 图谱管理功能
+
+- **多布局可视化**：支持**网格布局**（Grid）、**层次布局**（Hierarchical）与**径向布局**（Radial），并支持放大、缩小与适应视图（Fit View）。
+- **实体检索与过滤**：可按关键词搜索实体名称与描述，或按实体类型进行单选/多选过滤。
+- **关系详情抽屉**：点击实体查看其出向关系（Outgoing Relations）与入向关系（Incoming Relations），可直接编辑属性字典（JSON Properties）或删除特定单向关系。
+- **批量与安全删除**：支持框选模式（Select Mode）批量删除废弃或敏感记忆实体；删除实体会自动级联清理其关联的所有出入向关系及向量嵌入。
+
+## 记忆检索与时间衰减（Decay）
+
+当 Agent 发起记忆检索时，系统综合向量语义相似度与时间衰减计算加权综合得分：
+
+`综合得分 = (1 - w) × 向量相似度 + w × 时间得分`
+
+- **时间衰减计算**：采用半衰期指数衰减模型，默认半衰期为 **30 天**（30 天前创建且未更新的记忆，其时间得分减半）。
+- **权重配置**：时间衰减权重 `w` 默认为 `0.15`，语义相似度占 `0.85`，兼顾语义相关性与近期新鲜度。
+- **时间窗口过滤**：检索时支持指定 `time_window_days`，只召回近 $N$ 天内发生或更新的记忆事实。
+- **子图拓展（Subgraph）**：在获得命中实体后，支持以实体为中心沿关系边向外拓展 `1-3` 层子图（`max_depth`），为 LLM 提供结构化的网状背景信息。
+
+## 管理后台自动提取
+
+管理员可在**站点设置** > **记忆**（`/site-settings/memory`）配置待处理用户轮次的后台记忆提取：
+
+| 设置 | 默认值 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| `memory_async_extraction_enabled` | `false` | 布尔值 | 后台异步提取全局总开关 |
+| `memory_extraction_model_id` | 空 | 文本 | 提取所用的语言模型（为空时使用默认回退模型链） |
+| `memory_extraction_cooldown_seconds` | `180` | `10-3600` 秒 | 去抖冷却时间，防止单次对话高频触发提取 |
+| `memory_extraction_max_pending_turns` | `6` | `1-50` 轮 | 待处理用户轮次达到此阈值时立即触发提取任务 |
+
+<Callout type="info">
+  Agent 必须在自身编排中勾选**启用记忆**与**自动提取记忆**，且站点设置的后台提取总开关处于开启状态，系统才会为该 Agent 的对话排队异步提取任务。
+</Callout>
 
 ## 长对话如何压缩
 
@@ -46,8 +114,30 @@ Clouisle 有三层上下文：当前活动消息分支、会话级摘要，以�
 
 会话级摘要默认在至少 `4` 个轮次后异步提取，注入预算默认 `400` Token。连续失败 `3` 次后打开熔断器，冷却 `600` 秒。摘要只服务当前会话，不会替代跨会话记忆。
 
+## API 端点
+
+```http
+# 列出记忆实体（支持按 entity_type 过滤与分页）
+GET /api/v1/memories/entities?page=1&page_size=20&entity_type=preference
+
+# 创建 / 更新 / 删除实体
+POST   /api/v1/memories/entities
+GET    /api/v1/memories/entities/{entity_id}
+PUT    /api/v1/memories/entities/{entity_id}
+DELETE /api/v1/memories/entities/{entity_id}
+
+# 列出 / 创建 / 删除关系
+GET    /api/v1/memories/relations?entity_id={entity_id}&relation_type=uses
+POST   /api/v1/memories/relations
+DELETE /api/v1/memories/relations/{relation_id}
+
+# 获取完整或局部记忆图谱
+GET /api/v1/memories/graph?entity_ids={id1}&entity_ids={id2}&max_depth=2
+```
+
 ## 排查
 
 - **未记住偏好**：确认 Agent 已启用记忆、信息达到重要性阈值，并使用同一已登录用户。
 - **回复忽略很早的细节**：长会话可能已压缩；把关键约束重新陈述，或开启新会话。
 - **压缩频繁**：检查模型上下文长度、输出预留和工具结果体积。
+- **记忆图谱存在错误事实**：前往 `/app/memories`，通过搜索定位错误实体，点击**编辑**修正描述，或直接**删除**。

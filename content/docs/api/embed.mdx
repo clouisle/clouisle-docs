@@ -1,0 +1,179 @@
+---
+title: 嵌入集成 API
+description: 面向第三方网站与 iframe 嵌入的 Agent 对话与工作流执行 API
+icon: ExternalLink
+---
+
+嵌入集成 API（Embed API）专门用于将 Clouisle 的 Agent 对话组件和工作流执行集成到第三方网页、内部平台或无 Cookie 客户端中。基础路径为 `/api/v1/embed`。
+
+## 认证与安全策略
+
+所有嵌入端点均**仅支持 API Key 认证**（前缀为 `clou_`），不接受 Cookie 会话。认证凭据可通过以下两种方式传入：
+
+- **请求头**：`Authorization: Bearer clou_...`
+- **查询参数**：`?token=clou_...`
+
+### 域名白名单校验（allowed_domains）
+
+若 Agent 或工作流在 `embed_config` 中配置了 `allowed_domains`：
+1. 服务端将提取请求头中的 `Origin` 或 `Referer`，并与配置的白名单逐一比对（支持通配符子域名如 `*.example.com`）。
+2. 若来源域名不匹配，服务端拒绝请求并返回 `403 Forbidden`（业务码 `3000`，错误提示 `embed_domain_not_allowed`）。
+3. 无来源头的内部直接调用（如测试阶段）或未配置域名白名单时，允许访问。
+4. 工作流流式事件订阅（`GET /workflows/runs/{run_id}/stream`）豁免域名校验。
+
+---
+
+## Agent 嵌入端点
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/embed/agents/{agent_id}/info` | 获取嵌入组件所需的公共配置与变量 |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/stream` | SSE 流式发送聊天消息 |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs` | 创建持久化异步 Agent 运行（返回 202） |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream` | 订阅持久化运行的重放与实时 SSE 事件流 |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}` | 查询持久化运行的状态 |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/events` | 按序号回放已缓冲的运行事件 |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/inputs` | 运行过程中发送干预引导（steer）或追问消息 |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/answers` | 提交模型调用 `ask_user` 等待的结构化答案 |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stop` | 协作式终止当前运行 |
+| GET | `/api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages` | 获取嵌入会话的历史消息列表 |
+| POST | `/api/v1/embed/agents/{agent_id}/upload/file` | 上传嵌入会话中的附件文件 |
+
+### 1. 获取嵌入 Agent 信息
+
+```http
+GET /api/v1/embed/agents/{agent_id}/info HTTP/1.1
+Authorization: Bearer clou_api_key
+```
+
+#### 成功响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "在线客服助手",
+    "description": "回答用户关于退换货和价格的问题",
+    "icon": "🤖",
+    "avatar_url": null,
+    "opening_message": "您好！请问有什么可以帮助您？",
+    "suggested_questions": [
+      "如何办理退换货？",
+      "发票怎么开具？"
+    ],
+    "variables": [],
+    "enable_attachments": true,
+    "attachment_config": {
+      "max_file_count": 5,
+      "max_file_size_mb": 10
+    },
+    "hide_tool_calls": false,
+    "hide_message_actions": false,
+    "hide_reasoning": false,
+    "embed_config": {
+      "enabled": true,
+      "allowed_domains": ["https://example.com"]
+    }
+  },
+  "msg": "success"
+}
+```
+
+### 2. 流式发送聊天消息
+
+```http
+POST /api/v1/embed/agents/{agent_id}/chat/stream HTTP/1.1
+Authorization: Bearer clou_api_key
+Content-Type: application/json
+
+{
+  "message": "退换货的期限是几天？",
+  "conversation_id": "conv-uuid-optional",
+  "variables": {}
+}
+```
+
+响应以 `text/event-stream` SSE 形式返回，包含 `message_start`、`content_delta`、`thought`、`tool_start`、`tool_end`、`message_end` 等事件。
+
+### 3. 创建持久化运行（Durable Run）
+
+对于支持断线重连、长流程工具调用的场景，推荐使用运行管理流程：
+
+```http
+POST /api/v1/embed/agents/{agent_id}/chat/runs HTTP/1.1
+Authorization: Bearer clou_api_key
+Content-Type: application/json
+
+{
+  "message": "生成本季度销售报告",
+  "conversation_id": null,
+  "variables": {}
+}
+```
+
+#### 响应（202 Accepted）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-uuid-1234",
+    "conversation_id": "conv-uuid-5678",
+    "status": "queued",
+    "stream_url": "/embed/agents/550e8400-e29b-41d4-a716-446655440000/chat/runs/run-uuid-1234/stream"
+  },
+  "msg": "success"
+}
+```
+
+客户端可随时发起 `GET /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` 订阅事件流，并通过 `after_sequence` 实现去重与断点续连。
+
+---
+
+## 工作流嵌入端点
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/embed/workflows/{workflow_id}/info` | 获取工作流嵌入信息（输入参数定义等） |
+| POST | `/api/v1/embed/workflows/{workflow_id}/run` | 启动嵌入工作流运行 |
+| GET | `/api/v1/embed/workflows/runs/{run_id}/stream` | SSE 流式订阅工作流节点执行过程与结果 |
+
+### 1. 运行工作流
+
+```http
+POST /api/v1/embed/workflows/{workflow_id}/run HTTP/1.1
+Authorization: Bearer clou_api_key
+Content-Type: application/json
+
+{
+  "inputs": {
+    "query": "分析最近客户反馈",
+    "format": "markdown"
+  }
+}
+```
+
+#### 响应（200 OK）
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "wf-run-uuid-1234",
+    "stream_url": "/api/v1/workflows/runs/wf-run-uuid-1234/stream"
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## 错误代码
+
+| 错误码 | 标识 | 说明 |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | 缺少 API Key 或 API Key 无效 |
+| `3000` | PERMISSION_DENIED | 未开启嵌入功能，或请求来源域名不在白名单中 |
+| `4000` | NOT_FOUND | Agent 或工作流不存在，或未处于已发布状态 |
+| `6210` | CONVERSATION_NOT_FOUND | 会话不存在或不属于当前 API Key 绑定的用户 |

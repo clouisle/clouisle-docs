@@ -1,0 +1,137 @@
+---
+title: Database Maintenance and Index Tuning
+description: Concurrently create covering indexes, clean up invalid indexes, and tune aggregation concurrency during maintenance windows
+icon: Database
+---
+
+Clouisle pushes dashboard, Agent session, and workflow run statistics directly down to PostgreSQL (`backend/app/services/stats_sql.py`). To ensure millisecond-level responsiveness under large volumes of conversations and execution logs, covering indexes and connection-pool concurrency controls must be deployed.
+
+## Why Indexes Are Not Run in Startup Migrations
+
+`backend/app/core/init_data.py` enforces safety guards when executing startup DDL migrations: it sets `lock_timeout = '2s'` and wraps execution in a 3-second timeout. This prevents slow DDL statements from blocking application readiness during startup.
+
+Building indexes on heavily populated `messages` or `workflow_runs` tables typically takes minutes. A standard `CREATE INDEX` holds an exclusive lock that blocks online writes. Conversely, the non-blocking `CREATE INDEX CONCURRENTLY` variant **cannot run inside a transaction block**, so it cannot be included in automated application startup migrations and must be executed manually by operators during a scheduled maintenance window.
+
+## Recommended Covering Indexes
+
+Connect to PostgreSQL as the database owner or superuser and **run each statement individually**:
+
+```sql
+-- 1. Conversation aggregates and distinct active user counts
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_agent_created_user
+    ON conversations (agent_id, created_at) INCLUDE (user_id);
+
+-- 2. Conversation history listing (filtered by Agent & user, ordered by update time descending)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_agent_user_updated_at
+    ON conversations (agent_id, user_id, updated_at DESC);
+
+-- 3. Message role and timestamp metrics (counts, token sums, first-token latency percentiles)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_conversation_role_created_at
+    ON messages (conversation_id, role, created_at);
+
+-- 4. Workflow run overview and trend buckets (single index covers both queries)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_workflow_runs_workflow_created_covering
+    ON workflow_runs (workflow_id, created_at)
+    INCLUDE (status, total_duration_ms);
+
+-- 5. Agent run health and intervention metrics
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_agent_runs_agent_updated_at
+    ON agent_runs (agent_id, updated_at);
+```
+
+### Index Purpose Mapping
+
+| Index Name | Queries and Services Served | Optimization Goal |
+| --- | --- | --- |
+| `idx_conversations_agent_created_user` | Agent conversation overview, active distinct user counts, trend buckets | Converts sequential scans to Index Only Scans |
+| `idx_conversations_agent_user_updated_at` | `GET /agents/{agent_id}/conversations` pagination | Eliminates filesort when sorting by `updated_at DESC` |
+| `idx_messages_conversation_role_created_at` | Role message counts, token sums, first-token latency percentiles | Quickly locates messages for a session without reading heap rows |
+| `idx_workflow_runs_workflow_created_covering` | Workflow run overview (status counts, average latency) and trend analysis | Uses `created_at` as a key column for range pruning, while `INCLUDE` holds status and duration |
+| `idx_agent_runs_agent_updated_at` | Agent execution health, error counts, and human intervention metrics | Joins with existing `agent_run_inputs.run_id` index to accelerate intervention counts |
+
+## Design Decisions
+
+### Key vs. INCLUDE Payload Columns
+
+`idx_workflow_runs_workflow_created_covering` serves both the workflow overview and trend queries:
+
+- The overview query computes `MAX(created_at)`. As an aggregate, this only requires the column to be present in the index payload to achieve an Index Only Scan.
+- The trend query filters by time window: `created_at >= $2`. Under PostgreSQL rules, **a non-key column (one residing only in INCLUDE) cannot act as an index scan search qualification (`Index Cond`)**.
+
+Making `created_at` a key column turns table scans with post-filter into direct `Index Cond` pruning, reducing buffer reads by more than 10x and serving both queries with a single unified index.
+
+<Callout type="warn">
+  The `INCLUDE` list forms a strict contract. If queries reference additional columns in the future (e.g., error codes), the planner will fall back to reading heap blocks (Bitmap Heap Scan).
+</Callout>
+
+## Operational Procedures
+
+### 1. Execute One Statement at a Time
+
+`CREATE INDEX CONCURRENTLY` and subsequent `VACUUM` commands cannot run inside a transaction block. Do not wrap them inside `BEGIN ... COMMIT` scripts.
+
+### 2. Clean Up Failed Invalid Indexes
+
+If a `CREATE INDEX CONCURRENTLY` build is interrupted (such as via client timeout or process termination), an `INVALID` index is left in the catalog. Because the index name already exists, subsequent runs with `IF NOT EXISTS` will silently skip creation, leaving the invalid index non-functional.
+
+Before and after maintenance, check for invalid indexes:
+
+```sql
+SELECT c.relname, i.indisvalid
+FROM pg_class c
+JOIN pg_index i ON i.indexrelid = c.oid
+WHERE NOT i.indisvalid;
+```
+
+If any invalid index is returned, drop it concurrently before recreating:
+
+```sql
+DROP INDEX CONCURRENTLY IF EXISTS idx_workflow_runs_workflow_created_covering;
+-- Then rerun the CREATE INDEX CONCURRENTLY statement
+```
+
+### 3. Run VACUUM (ANALYZE) to Build Visibility Maps
+
+Running `ANALYZE` only refreshes query planner statistics so that an Index Only Scan can be chosen. To achieve **zero heap fetches (`Heap Fetches: 0`)**, `VACUUM` must run to construct the table's visibility map. Run vacuum on all modified tables:
+
+```sql
+VACUUM (ANALYZE) conversations;
+VACUUM (ANALYZE) messages;
+VACUUM (ANALYZE) workflow_runs;
+VACUUM (ANALYZE) agent_runs;
+```
+
+## Verification
+
+Use `EXPLAIN (ANALYZE, BUFFERS)` to verify that PostgreSQL uses `Index Only Scan` with `Heap Fetches: 0`:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT COUNT(*)                                     AS total_runs,
+       COUNT(*) FILTER (WHERE status = 'success')   AS success_count,
+       COUNT(*) FILTER (WHERE status = 'failed')    AS failed_count,
+       COUNT(*) FILTER (WHERE status = 'timeout')   AS timeout_count,
+       AVG(total_duration_ms) FILTER (WHERE total_duration_ms IS NOT NULL)
+                                                    AS avg_duration_ms,
+       MAX(created_at)                              AS last_run_at
+FROM workflow_runs
+WHERE workflow_id = '00000000-0000-0000-0000-000000000000'::uuid;
+```
+
+Expected output should show `Index Only Scan using idx_workflow_runs_workflow_created_covering` with `Heap Fetches: 0`.
+
+## Aggregation Concurrency Control: DB_AGGREGATE_CONCURRENCY
+
+Beyond database indexes, Clouisle enforces application-level query concurrency bounds (`backend/app/core/db_limits.py`).
+
+Dashboard statistics endpoints fan out multiple aggregate queries using `asyncio.gather`. Without an upper bound, a single request can saturate the shared Tortoise ORM pool (default `maxsize=5`), causing trailing queries to stall or time out.
+
+```bash
+# Environment variable, default 4, must be > 0
+DB_AGGREGATE_CONCURRENCY=4
+```
+
+- **Mechanism**: A process-wide asynchronous semaphore (`asyncio.Semaphore`). Each fan-out aggregate task must acquire a permit before execution.
+- **Tuning Guidelines**:
+  - PostgreSQL's default `max_connections` is 100. In standard multi-process deployments (4 API workers + 4 Celery workers), connection usage is already near capacity. **Do not arbitrarily increase ORM pool size**.
+  - Under heavy dashboard traffic, keep `DB_AGGREGATE_CONCURRENCY=4` or reduce to `2~3` and rely on covering indexes for rapid query completion.

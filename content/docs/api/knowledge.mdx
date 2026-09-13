@@ -39,6 +39,9 @@ icon: Database
 | GET/POST/PUT/DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | 分块 CRUD |
 | POST | `/knowledge-bases/{kb_id}/search` | 单次检索 |
 | POST | `/knowledge-bases/{kb_id}/search/batch` | 多配置对比检索 |
+| POST | `/knowledge-bases/{kb_id}/share` | 共享知识库给其他团队 |
+| GET | `/knowledge-bases/{kb_id}/shares` | 查询知识库共享列表 |
+| DELETE | `/knowledge-bases/{kb_id}/share/{team_id}` | 取消对指定团队的共享 |
 
 ## 知识库管理
 
@@ -313,6 +316,41 @@ POST /api/v1/knowledge-bases/{kb_id}/search/batch
 ```
 
 请求体为检索配置数组，每种配置独立执行并返回结果，用于对比不同参数的效果。
+
+## 跨团队共享知识库
+
+将知识库以只读权限共享给工作区内的其他团队。
+
+<Callout type="info">
+  创建或修改知识库共享要求当前用户具有该知识库所属团队的 `owner` 或 `admin` 角色；否则返回 `403` 且错误信息为 `TEAM_ADMIN_REQUIRED`。超级管理员与平台管理调用绕过该限制。
+</Callout>
+
+### 共享知识库
+
+```
+POST /api/v1/knowledge-bases/{kb_id}/share
+```
+
+```json
+{
+  "team_id": "target-team-uuid",
+  "permission": "read_only"
+}
+```
+
+响应返回 `KnowledgeBaseShareOut` 记录，包含 `id`、`knowledge_base_id`、`knowledge_base_name`、`shared_with_team_id`、`shared_with_team_name`、`permission`（目前为 `read_only`）、`shared_by_name` 与 `shared_at`。
+
+### 查询知识库共享列表
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/shares
+```
+
+### 取消知识库共享
+
+```
+DELETE /api/v1/knowledge-bases/{kb_id}/share/{team_id}
+```
 
 ## 知识库统计
 

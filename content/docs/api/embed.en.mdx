@@ -1,0 +1,179 @@
+---
+title: Embed Integration API
+description: Agent chat and workflow execution endpoints for third-party websites and iframe embedding
+icon: ExternalLink
+---
+
+The Embed Integration API enables embedding Clouisle Agent conversations and workflow executions into third-party portals, iframe widgets, or cookie-less client applications. The base path is `/api/v1/embed`.
+
+## Authentication & Security Policies
+
+All embed endpoints **exclusively require API Key authentication** (prefixed with `clou_`). Cookie sessions are not accepted. Credentials can be passed using either of the following mechanisms:
+
+- **Header**: `Authorization: Bearer clou_...`
+- **Query Parameter**: `?token=clou_...`
+
+### Domain Whitelist Verification (allowed_domains)
+
+When an Agent or Workflow has `allowed_domains` configured in its `embed_config`:
+1. The server checks the `Origin` or `Referer` request header against the allowed domains list (supports wildcard subdomains such as `*.example.com`).
+2. If the request origin does not match the whitelist, the server returns `403 Forbidden` (`code: 3000`, `embed_domain_not_allowed`).
+3. Direct requests with no origin header or items with empty whitelists are allowed.
+4. Workflow event streams (`GET /workflows/runs/{run_id}/stream`) are exempt from origin verification.
+
+---
+
+## Agent Embed Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/embed/agents/{agent_id}/info` | Retrieve public metadata, config, and variables for the embed widget |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/stream` | Stream chat message via Server-Sent Events (SSE) |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs` | Create a durable async Agent run (returns 202 Accepted) |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream` | Subscribe to replay and live SSE events of a durable run |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}` | Query durable run status |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/events` | Replay buffered run events by sequence |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/inputs` | Send steering or follow-up inputs during execution |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/answers` | Submit structured answers required by `ask_user` tool calls |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stop` | Collaboratively terminate an active run |
+| GET | `/api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages` | Get message history of an embed conversation |
+| POST | `/api/v1/embed/agents/{agent_id}/upload/file` | Upload attachment files for embed sessions |
+
+### 1. Get Embed Agent Info
+
+```http
+GET /api/v1/embed/agents/{agent_id}/info HTTP/1.1
+Authorization: Bearer clou_api_key
+```
+
+#### Response (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Support Assistant",
+    "description": "Answers customer questions regarding returns and billing",
+    "icon": "🤖",
+    "avatar_url": null,
+    "opening_message": "Hello! How can I assist you today?",
+    "suggested_questions": [
+      "How do I request a refund?",
+      "Where can I find my invoice?"
+    ],
+    "variables": [],
+    "enable_attachments": true,
+    "attachment_config": {
+      "max_file_count": 5,
+      "max_file_size_mb": 10
+    },
+    "hide_tool_calls": false,
+    "hide_message_actions": false,
+    "hide_reasoning": false,
+    "embed_config": {
+      "enabled": true,
+      "allowed_domains": ["https://example.com"]
+    }
+  },
+  "msg": "success"
+}
+```
+
+### 2. Stream Chat Message
+
+```http
+POST /api/v1/embed/agents/{agent_id}/chat/stream HTTP/1.1
+Authorization: Bearer clou_api_key
+Content-Type: application/json
+
+{
+  "message": "What is the return window?",
+  "conversation_id": "conv-uuid-optional",
+  "variables": {}
+}
+```
+
+Returns a `text/event-stream` SSE response with events such as `message_start`, `content_delta`, `thought`, `tool_start`, `tool_end`, and `message_end`.
+
+### 3. Create Durable Run
+
+For disconnected resilience and long-running tools, use the durable run workflow:
+
+```http
+POST /api/v1/embed/agents/{agent_id}/chat/runs HTTP/1.1
+Authorization: Bearer clou_api_key
+Content-Type: application/json
+
+{
+  "message": "Generate Q3 sales analysis",
+  "conversation_id": null,
+  "variables": {}
+}
+```
+
+#### Response (202 Accepted)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-uuid-1234",
+    "conversation_id": "conv-uuid-5678",
+    "status": "queued",
+    "stream_url": "/embed/agents/550e8400-e29b-41d4-a716-446655440000/chat/runs/run-uuid-1234/stream"
+  },
+  "msg": "success"
+}
+```
+
+Clients subscribe to `GET /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` to stream events with deduplication and reconnection capability.
+
+---
+
+## Workflow Embed Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/embed/workflows/{workflow_id}/info` | Retrieve workflow embed details and input schema |
+| POST | `/api/v1/embed/workflows/{workflow_id}/run` | Execute an embedded workflow |
+| GET | `/api/v1/embed/workflows/runs/{run_id}/stream` | Stream workflow node execution progress via SSE |
+
+### 1. Run Workflow
+
+```http
+POST /api/v1/embed/workflows/{workflow_id}/run HTTP/1.1
+Authorization: Bearer clou_api_key
+Content-Type: application/json
+
+{
+  "inputs": {
+    "query": "Summarize customer feedback",
+    "format": "markdown"
+  }
+}
+```
+
+#### Response (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "wf-run-uuid-1234",
+    "stream_url": "/api/v1/workflows/runs/wf-run-uuid-1234/stream"
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## Error Codes
+
+| Error Code | Identifier | Description |
+| --- | --- | --- |
+| `2000` | UNAUTHORIZED | Missing or invalid API key |
+| `3000` | PERMISSION_DENIED | Embed not enabled, or request origin not in `allowed_domains` |
+| `4000` | NOT_FOUND | Agent or workflow not found, or not published |
+| `6210` | CONVERSATION_NOT_FOUND | Conversation does not exist or does not belong to the API key user |

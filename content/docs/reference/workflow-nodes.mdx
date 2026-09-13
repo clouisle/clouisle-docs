@@ -1,39 +1,247 @@
 ---
 title: 工作流节点参考
-description: 查阅节点类型、字段默认值、运行限制和验证规则
+description: 查阅全部工作流节点类型、配置字段、输入输出规格、SSRF 防护与校验规则
 icon: Workflow
 ---
 
-工作流定义当前使用 `schema_version: 2`。以下字段来自后端节点配置 Schema 和前端编辑器注册表。
+Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由与循环/迭代容器。工作流定义采用 `schema_version: 2`，图结构包含 `nodes` 与 `edges`（基于 React Flow）。
 
-## 节点字段
+## 节点分类与注册目录
 
-| 节点 | 核心字段 | 默认值/限制 |
-| --- | --- | --- |
-| LLM | `model_id`、`prompt`、`temperature`、`max_tokens`、`top_p` | `temperature=0.7`，范围 `0-2`；`top_p` 范围 `0-1` |
-| Agent | `agent_id`、`message` | Agent 必须存在且可访问 |
-| 知识库检索 | `knowledge_base_id`、`query`、`top_k`、`score_threshold` | Top K 默认 `5`，`1-100`；阈值默认 `0.3`，`0-1` |
-| 条件分支 | `expression`、`true_output`、`false_output` | 两个输出默认 `true`/`false` |
-| 循环 | `array_expression`、`item_variable`、`index_variable`、`max_iterations` | item=`item`、index=`index`、最大 `100`，`1-1000` |
-| 代码执行 | `language`、`code`、`timeout_seconds` | Python/JavaScript；默认 `30s`，`1-300s` |
-| HTTP 请求 | `method`、`url`、`headers`、`body`、`timeout_seconds` | GET 默认；超时默认 `30s`，`1-300s` |
-| 工具 | `tool_id`、`arguments` | 参数按表达式映射 |
-| 子工作流 | `workflow_id`、输入/输出映射、超时、失败策略 | 超时默认 `300s`；`fail_on_error=true` |
-| 延时 | `seconds` | `0-3600` |
+前端节点选择器当前提供 18 个常规画布节点；后端注册表另包含 24 个可执行节点类型（包括 `user_input`、`trigger`、`iteration_start`、`loop_start` 等内部入口节点）。容器内的上下文菜单会移除 `iteration`、`loop` 与 `pause`，并加入结束视觉标记。画布还保留 `start`、`iteration_exit`、`loop_exit` 与 `comment` 等前端别名或视觉标记，它们不都对应独立执行器。下表将常规节点、运行时节点和视觉辅助标记一并列出：
 
-## 编辑器节点
+| 分类 | 节点类型标识 (`type`) | 显示名称 | 核心用途 |
+| --- | --- | --- | --- |
+| **基础与模型 (Model)** | `llm` | LLM | 调用大语言模型执行生成与推理 |
+| | `media_generation` | 媒体生成 | 调用团队授权的生图或生视频模型 |
+| **流程与逻辑 (Logic)** | `condition` | 条件分支 | 多分支 IF/ELSE 逻辑流转 |
+| | `question_classifier` | 问题分类 | 基于大语言模型自动识别用户意图分类 |
+| | `iteration` | 迭代容器 | 对数组变量逐项循环处理 |
+| | `loop` | 循环容器 | 重复执行子图直到条件满足或达到上限 |
+| | `pause` | 暂停 | 工作流挂起，等待人工审核或补充输入 |
+| **数据与转换 (Transform)** | `code` | 代码执行 | 在安全沙箱中运行 Python 或 JavaScript 脚本 |
+| | `template` | 模板转换 | 使用 Jinja2 模板格式化和组装文本 |
+| | `file_to_url` | 文件转URL | 将临时文件/图片变量转换为持久化外部访问 URL |
+| | `variable_aggregator` | 变量聚合器 | 将多个分散变量聚合为对象、数组或拼接文本 |
+| | `variable_assignment` | 变量赋值 | 写入或更新对话上下文变量 |
+| | `parameter_extractor` | 参数提取器 | 通过 LLM、正则或 JSON Path 提取结构化参数 |
+| **扩展与集成 (Extension)** | `sub_workflow` | 子工作流 | 嵌套调用工作空间内已发布的其他工作流 |
+| | `agent` | 智能体 | 调用已发布的 Agent 执行自主决策推理 |
+| | `tool` | 工具 | 调用系统内置工具、自定义 HTTP 工具或 MCP 服务 |
+| | `http_request` | HTTP 请求 | 发起外部 HTTP/HTTPS API 调用（受 SSRF 白名单管控） |
+| | `knowledge_retrieval` | 知识库检索 | 检索绑定的知识库并回传切片上下文 |
+| | `document_extractor` | 文档提取器 | 从上传的 PDF/DOCX 文件中提取纯文本或 Markdown |
+| | `answer` | 输出 | 汇总最终业务结果，支持向客户端流式响应 |
+| **开始与生命周期** | `user_input` | 开始 | 定义人工发起的输入参数与系统变量（前端画布别名为 `start`） |
+| | `trigger` | 触发器 | Webhook、定时或事件驱动的入口节点 |
+| | `iteration_start` / `loop_start` | 容器开始 | 容器内部的虚拟入口执行节点（透传父容器上下文） |
+| | `iteration_exit` / `loop_exit` | 容器结束 | 迭代/循环容器在前端画布中的结束视觉标记（无独立后端执行器，运行时由容器按 `parentId` 调度子节点） |
+| | `comment` | 注释 | 画布静态说明贴纸，不参与运行时执行 |
 
-当前界面还注册用户输入、触发器、媒体生成、迭代容器、迭代开始/结束、循环开始/结束、模板转换、文件转 URL、变量聚合、变量赋值、参数提取、问题分类、输出和注释节点。
+---
 
-## 验证
+## 节点详细配置参考
 
-发布前检查会拒绝不存在的变量引用、空提示词、未选择模型/工具/知识库、缺少输入来源、无输出节点、不完整分支和不完整容器。开始节点不能删除。
+### 1. LLM 节点 (`llm`)
 
-## 数据格式
+配置容器：`node.data.llmConfig` 或 `node.data.config`。
 
-`nodes` 与 `edges` 使用 React Flow 结构；`viewport` 默认 `{x: 0, y: 0, zoom: 1}`。版本 2 支持原生对象和数组，节点可保存推断 Schema 和输出类型规格。
+| 字段 | 类型 | 默认值 | 说明与取值范围 |
+| --- | --- | --- | --- |
+| `modelId` | UUID string | 必填 | 团队授权的对话模型 ID（`team_models.id`） |
+| `systemPrompt` | string | `""` | 系统提示词，支持 `{{node.var}}` 模板变量插值 |
+| `userPrompt` | string | `""` | 用户输入提示词，支持模板变量插值 |
+| `temperature` | float | `0.7` | 传递给模型的采样温度 |
+| `maxTokens` | int | `2048` | 传递给模型的最大生成 Token 数 |
+| `topP` | float | `1.0` | 传递给模型的核采样阈值 |
+| `streaming` | bool | `false` | 是否开启流式生成；若开启，下游 Output 节点可直接消费实时流 |
+| `responseFormat` | string | `"text"` | 输出模式：`"text"`、`"json"`（json_object）或 `"json_schema"` |
+| `jsonSchema` | string (JSON) | `null` | 当选择 `json_schema` 时传入的严格 JSON Schema 定义 |
+| `inputs` | array | `[]` | 映射到当前节点的输入变量列表 |
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-node-reference.png" alt="节点配置参考" />
-  <figcaption>节点配置参考</figcaption>
-</figure>
+输出变量：
+- `response` (string)：模型生成的最终回复文本（流式模式下为惰性流代理）
+- `reasoning` (string)：模型推理思考过程（如 DeepSeek R1 的思维链）
+- `usage` (object)：Token 计量数据，含 `prompt_tokens`、`completion_tokens`、`total_tokens`
+
+---
+
+### 2. 媒体生成节点 (`media_generation`)
+
+配置容器：`node.data.mediaGenerationConfig` 或 `node.data.config`。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `mode` | string | `"image"` | 媒体模式：`"image"`（生图）或 `"video"`（生视频） |
+| `modelId` | UUID string | 必填 | 团队授权的图像/视频模型 ID |
+| `prompt` | string | 必填 | 生成正向提示词（支持变量插值） |
+| `negativePrompt` | string | `null` | 反向提示词（仅图片） |
+| `width` / `height` | int/null | `null` | 图像宽高；未设置时由上游模型或工具配置决定 |
+| `numImages` | int | `1` | 单次生成图片张数；具体上限由模型或工具配置决定 |
+| `referenceImageVariable` | string | `null` | 参考图输入变量引用（垫图/图生图） |
+| `duration` | float/null | `null` | 视频时长；未设置时使用工具配置的默认时长 |
+| `aspectRatio` | string/null | `null` | 视频比例；未设置时使用工具配置的默认比例 |
+| `motionIntensity` | float/null | `null` | 视频运动幅度 |
+
+输出变量：
+- `result`：生成的媒体持久化访问 URL。生图模式下为 URL 数组，生视频模式下为单个 URL 字符串。
+
+---
+
+### 3. 条件分支节点 (`condition`)
+
+配置容器：`node.data.conditionConfig` 或 `node.data.config`。
+
+支持基于多条件组的树状逻辑判断。每个条件由 `variable`（变量引用）、`operator`（比较运算符）和 `value`（目标值）组成。
+
+支持的操作符清单：
+- 相等判断：`equals`（等于）、`not_equals`（不等于）
+- 文本模式：`contains`（包含）、`not_contains`（不包含）、`starts_with`（以...开头）、`ends_with`（以...结尾）、`regex_match`（正则表达式匹配）
+- 数值比较：`greater_than`（`>`）、`less_than`（`<`）、`greater_or_equal`（`>=`）、`less_or_equal`（`<=`）
+- 空值与状态：`is_empty`（为空）、`is_not_empty`（非空）、`is_null`（为 null）、`is_not_null`（非 null）
+
+---
+
+### 4. HTTP 请求节点 (`http_request`)
+
+配置容器：`node.data.config`。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `method` | string | `"GET"` | HTTP 方法：`GET`、`POST`、`PUT`、`DELETE` 等 |
+| `url` | string | 必填 | 目标请求 URL，支持 `{{node.var}}` 动态渲染 |
+| `headers` | object | `{}` | 请求头键值对，支持模板变量 |
+| `body` | any | `null` | 请求正文（支持 JSON 对象或纯文本插值） |
+| `timeout` | int | `30` | 请求超时时间（秒）；执行器默认值为 `30`，该节点层未实现额外范围校验 |
+
+<Callout type="warn" title="SSRF 安全阻断机制（YUN-150）">
+所有 HTTP 请求节点的出站目标在 DNS 解析后均会通过 `validate_external_http_url` 进行强校验：
+- 严禁请求内网私有地址（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`127.0.0.1`、`localhost`）与链路本地元数据（`169.254.169.254`）。
+- 仅当目标 IP/CIDR/域名被系统管理员显式列入**站点设置 > SSRF 出站白名单**（`ssrf_allowed_targets`）时，才允许向内网服务（如 `localhost`/`local` 或特定内网网段）发起调用。
+- 关键阻断网络（`169.254.0.0/16`、`224.0.0.0/4`、`0.0.0.0/32`）与 Google 云元数据域名（`metadata.google.internal`）属于不可豁免项，即使用户在白名单中配置也会在归一化校验阶段被直接拒绝或拦截。
+</Callout>
+
+输出变量：
+- `statusCode` (int)：HTTP 响应状态码（如 `200`、`404`）
+- `body` (any)：自动解析为 JSON 结构；若非合规 JSON 则返回原始文本
+- `headers` (object)：响应头键值对
+
+---
+
+### 5. 知识库检索节点 (`knowledge_retrieval`)
+
+配置容器：`node.data.knowledgeRetrievalConfig`。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `knowledgeBaseId` | UUID string | 必填 | 绑定的知识库唯一标识 |
+| `querySource` | string | `"variable"` | 查询来源：`"variable"` 或 `"constant"` |
+| `queryVariableRef` | string | `""` | 当 `querySource` 为 `"variable"` 时的变量引用 |
+| `queryConstantValue` | string | `""` | 当 `querySource` 为 `"constant"` 时使用的固定查询文本 |
+| `searchMode` | string | `"hybrid"` | 检索模式：`"hybrid"`（混合）、`"vector"`（向量）或 `"fulltext"`（全文） |
+| `topK` | int | `5` | 召回文档切片数量 |
+| `threshold` | float | `0.0` | 相似度得分截断阈值 |
+| `outputVariable` | string | `"results"` | 切片列表的自定义输出变量名 |
+
+输出变量：
+- `results` (array)：切片数组，每项包含 `content`（正文）、`score`（相似度分值）、`metadata`（元数据）、`documentId` 和 `chunkId`
+- `context` (string)：已自动用 `\n\n---\n\n` 拼接好的长文本上下文，方便直接喂给 LLM
+- `totalFound` (int)：命中的切片总数
+
+---
+
+### 6. 代码执行节点 (`code`)
+
+配置容器：`node.data.codeConfig` 或 `node.data.config`。
+
+在沙箱安全容器中执行，默认超时 `30` 秒（`CODE_TIMEOUT = 30`）。
+
+- **Python 入口**：必须声明 `def main(inputs):` 函数，形参 `inputs` 为字典，必须返回 `dict`。
+- **JavaScript 入口**：必须声明 `function main(params)` 或 `const main = (params) =>`，必须返回 `object`。
+
+输出变量：函数返回字典中的所有键值对将自动映射为下游可用的独立变量。
+
+---
+
+### 7. 数据处理辅助节点
+
+#### 模板转换 (`template`)
+- 配置容器：`node.data.templateConfig`。
+- `template`：Jinja2 风格模板字符串，如 `你好 {{ user_name }}，工单 #{{ order_id }} 已更新。`
+- `inputs`：映射上游变量至模板变量名的参数映射列表。
+- 输出变量：`output`（字符串）或自定义命名的输出变量。
+
+#### 变量聚合器 (`variable_aggregator`)
+- 配置容器：`node.data.variableAggregatorConfig`。
+- `mode`：聚合模式：
+  - `"object"`：将变量作为键值对组装为 JSON 对象
+  - `"array"`：将变量按顺序合并为数组列表
+  - `"concat"`：使用 `separator` 分隔符将各字符串拼装为长文本
+  - `"merge"`：深度或浅度合并多个对象
+- 输出变量：`result`（默认）。
+
+#### 变量赋值 (`variable_assignment`)
+- 配置容器：`node.data.variableAssignmentConfig`。
+- `assignments`：赋值项列表，支持三种操作（`operation`）：
+  - `overwrite`：以 `variableRef` 引用的变量覆盖目标对话变量
+  - `clear`：重置目标变量为空值
+  - `set`：设置指定的 `constantValue` 常量值
+
+#### 参数提取器 (`parameter_extractor`)
+- 配置容器：`node.data.parameterExtractorConfig`。
+- `extractionMethod`：提取策略：`"llm"`（大模型推理）、`"regex"`（正则表达式）、`"json_path"`（JSON Path 语法）。
+- 输出变量：定义的每一个提取参数都将作为独立的强类型输出变量暴露给下游。
+
+#### 文件转URL (`file_to_url`)
+- 配置容器：`node.data.fileToUrlConfig`。
+- 将节点接收到的文件或图片二进制变量转换为带有安全访问权限的永久/临时 URL，避免在大模型上下文中传递冗长的 Base64。
+
+---
+
+### 8. 流程控制与容器节点
+
+#### 问题分类 (`question_classifier`)
+- 配置容器：`node.data.questionClassifierConfig`。
+- 配置一个大模型与若干预定义的分类分支（包含 `id`、`name`、`description` 和 `handle`），节点在运行时通过提示词驱动模型判断分类，命中对应分支向下游继续执行。
+
+#### 迭代 (`iteration`)
+- 配置容器：`node.data.iterationConfig`（兼容旧定义中的 `node.data.config`）。
+- `iteratorVariable`：待遍历的变量引用；旧定义可使用 `inputVariable`。
+- `iteratorType`：`"array"`（默认）或 `"object"`。数组模式对标量输入会封装成单元素数组；对象模式下非对象输入不会执行迭代。
+- 数组模式使用 `itemVariable`（默认 `"item"`）与 `indexVariable`（默认 `"index"`）；对象模式使用 `keyVariable`（默认 `"key"`）与 `valueVariable`（默认 `"value"`）。
+- `maxIterations`：默认 `100`；正整数配置会在运行时被限制为最多 `1000`。
+
+#### 循环 (`loop`)
+- 配置容器：`node.data.loopConfig`（兼容旧定义中的 `node.data.config`）。
+- 优先使用 `exitConditions`（条件数组）与 `exitLogicOperator`（`"and"` 或其他值按 `"or"` 处理）定义退出条件；条件由 `variable`、`operator`、`value` 组成。
+- 若未提供 `exitConditions`，兼容使用旧字段 `conditionVariable`、`conditionOperator`、`conditionValue`；若两类条件均未配置，循环会持续到迭代次数上限。
+- `counterVariable` 默认为 `"loopCount"`，未设置时兼容读取旧字段 `indexVariable`；`outputVariable` 默认为 `"results"`。
+- `maxIterations` 默认 `100`，执行器会以 `min(配置值, 1000)` 处理。应提供可比较的整数值；该路径未像迭代节点那样实施额外的严格类型验证。
+
+#### 暂停 (`pause`)
+- 配置容器：`node.data.pauseConfig`。
+- `mode`：`"approval"`（人工审批继续）或 `"variables"`（等待外部补充表单字段）。
+- 工作流运行至该节点时状态置为挂起，通过发布事件通知外部系统，待人工确认或填表后恢复调度。
+
+#### 输出节点 (`answer`)
+- 配置容器：`node.data.answerConfig`。
+- `outputs`：定义工作流最终呈现给调用方的结构化键值对（支持 `string`、`number`、`boolean`、`array`、`object` 等）。
+- `streaming`：支持绑定某个流式 LLM 节点的 `response` 变量，向客户端实时透传文字生成。
+
+---
+
+## 校验清单（Validation Checklist）
+
+工作流编辑器使用校验引擎在检查面板中**报告**已识别的错误或警告，帮助作者修正定义。该清单当前不由发布接口强制执行；保存或发布前应主动处理其提示。已实现的检查包括：
+
+1. **图结构检查**：
+   - 运行时计划验证要求恰好一个 `user_input` 或 `trigger` 入口，并检测工作流图中的循环。
+   - 校验器会标记缺少上游边的节点；`user_input`、`trigger`、`iteration_start`、`loop_start` 和 `comment` 除外。
+2. **节点配置检查**：
+   - 依据节点类型报告诸如缺少模型、工具、知识库、提取参数、变量赋值或容器处理节点等问题。
+   - `condition`、`question_classifier`、`code`、`sub_workflow`、`agent`、`media_generation`、`pause` 与变量处理节点都有对应配置检查。
+3. **变量与容器检查**：
+   - 编辑器报告当前可见上游变量中不存在的变量引用、非法或重复参数名，以及容器结构相关问题。
+   - 编辑器也会报告迭代/循环容器中 `pause` 节点的放置问题。
+
+运行时仍会执行各节点的配置检查与授权校验；通过或忽略检查面板中的提示不保证调用外部模型、工具或知识库时一定成功。

@@ -67,3 +67,5 @@ docker compose down
 ```
 
 `beat` must stay at one replica. `docker compose down -v` deletes data volumes; complete a backup before running it.
+
+The `worker` consumes the `default,agent,knowledge,workflow` queues, so `--scale worker=4` grows all four task classes together. To grow one class only, add a worker service subscribed to a single queue (for example `-Q agent`); the `sandbox` queue is consumed independently by `sandbox-worker`. Queue-to-task mapping: [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
