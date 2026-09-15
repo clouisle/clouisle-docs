@@ -54,23 +54,23 @@ Permissions are checked uniformly by the backend. Hidden frontend menus are a UX
 
 ## Built-in Role Matrix
 
-The backend initializes 4 global built-in roles at startup with the following default permissions:
+The backend initializes 5 global built-in roles at startup with the following default permissions:
 
 | Role Name | Role Type | Core Permission Characteristics | Typical Persona |
 | --- | --- | --- | --- |
 | **Super Admin** | Global built-in | Holds wildcard permission code `*`; completely bypasses permission checks and can perform system configuration, role management, and audit exports | Operations lead, system owner |
-| **Admin** | Global built-in | Includes `admin:dashboard:access` and all administrative and operational permissions for resources, but excludes create/update/delete of system roles/permissions themselves and modification of global site settings | Workspace administrator, team technical lead |
+| **Admin** | Global built-in | Includes `admin:dashboard:access` and all administrative and operational permissions for resources, but excludes create/update/delete of system roles/permissions themselves and modification of global site settings | Workspace administrator, technical lead |
+| **Team Admin** | Global built-in | Team-level administrator role; has all Member permissions plus updating and managing the team itself (`team:update`, `team:manage`) | Team lead, project lead |
 | **Member** | Global built-in | No `admin:dashboard:access`; has full collaborative create/edit/run permissions for Agents, workflows, knowledge bases, tools, and Skills within the team | Developer, workflow builder |
 | **Viewer** | Global built-in | Read-only role; can view and chat/run published Agents and workflows within the team, and read/execute tools and Skills | Business auditor, observer |
 
 ### Team Membership Role Mapping
 
 Team member roles (`owner`, `admin`, `member`, `viewer`) use a scope-mapping mechanism:
-- `owner` and `admin` map to the `Admin` role at team scope
+- `owner` and `admin` map to the `Team Admin` or `Admin` permission set at team scope
 - `member` maps to the `Member` role at team scope
 - `viewer` maps to the `Viewer` role at team scope
 - Team-level roles do not implicitly grant global dashboard access (`admin:dashboard:access`)
-
 ## Sidebar Menu Mapping
 
 | Menu item | Required permission | Super Admin | Admin | Member | Viewer |
