@@ -210,7 +210,7 @@ Both conversation searches match a keyword against the **conversation title or I
 | Location | Path | Scope |
 | --- | --- | --- |
 | Agent **Logs** page | `/app/apps/{agent_id}/logs` | **Your own** conversations for that agent; also filter by creation time and sort by updated time / creation time / message count. Requires `conversation:read` |
-| Admin **Activity Log** page | `/activities` (**Conversations** tab) | **Every user's** conversations on the platform, filterable by team, agent, and user. Requires `activities:read` |
+| Admin **Activity Log** page | `/activities` (**Conversations** tab) | **Every user's** conversations on the platform, filterable by team, agent, and user. Requires `admin:conversation:read` (the route guard also requires `workflow:read`) |
 
 ### Logs Page
 

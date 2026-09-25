@@ -209,7 +209,7 @@ Agent: AI，即人工智能...
 | 位置 | 路径 | 范围 |
 | --- | --- | --- |
 | Agent **日志**页 | `/app/apps/{agent_id}/logs` | 该 Agent 下**你自己**的会话；另可按创建时间过滤、按更新时间/创建时间/消息数排序，需要 `conversation:read` |
-| 管理端**活动日志**页 | `/activities`（**对话**标签） | 平台内**所有用户**的会话，可按团队、Agent、用户过滤，需要 `activities:read` |
+| 管理端**活动日志**页 | `/activities`（**对话**标签） | 平台内**所有用户**的会话，可按团队、Agent、用户过滤，需要 `admin:conversation:read`（路由守卫同时要求 `workflow:read`） |
 
 ### 日志页
 
