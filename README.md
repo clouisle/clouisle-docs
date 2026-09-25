@@ -60,8 +60,27 @@ Cloudflare Workers Build settings must therefore be:
 
 | Setting | Value |
 | --- | --- |
-| Build command | `npm run build:cf` |
+| Build command | `npm run build:cf` — or leave empty to use the repo's `wrangler.jsonc` `build.command` |
 | Deploy command | `npx wrangler versions upload` (preview) / `npx wrangler deploy` (production) |
+
+The build is also declared in `wrangler.jsonc`:
+
+```jsonc
+"build": {
+  "command": "npm run build:cf",
+}
+```
+
+`wrangler` runs that command itself before uploading, so a missing dashboard build command (or one that runs only `next build`) can no longer break the deploy:
+
+```bash
+rm -rf .open-next
+npx wrangler versions upload --dry-run --outdir /tmp/cf-dry
+# [custom build] Running: npm run build:cf
+# [custom build] Worker saved in `.open-next/worker.js` 🚀
+# [custom build] Successfully populated static assets cache
+# Total Upload: 56324.74 KiB / gzip: 7845.52 KiB   → exit 0
+```
 
 `build:cf` runs two steps, and both are required:
 
