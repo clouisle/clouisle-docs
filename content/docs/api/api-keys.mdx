@@ -292,7 +292,7 @@ GET /api/v1/api-keys/stats
 | `agent:chat` | 与 Agent 对话 |
 | `workflow:execute` | 执行工作流 |
 | `workflow:run` | 触发工作流运行 |
-| `knowledge:read` | 读取知识库内容 |
+| `kb:read` | 读取知识库内容 |
 
 <Callout type="info">
   如果你需要「最小权限」，当前唯一可靠的机制是**资源绑定**：把 `agent_ids` / `workflow_ids` 限定到实际要调用的资源，并在不需要时停用 Key。作用域字符串只能作为文档与审计线索。
