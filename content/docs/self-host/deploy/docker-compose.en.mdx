@@ -47,6 +47,29 @@ curl http://localhost:8000/api/v1/health
 
 Configure the external reverse proxy so `/api/*` goes to `api:8000` and `/` goes to `frontend:3000`. The browser entry point defaults to `http://localhost:3000`.
 
+## Service inventory and ports
+
+`deploy/docker-compose.yml` defines 5 application services plus 3 infrastructure services — 8 containers in total:
+
+| Service | Image | Command | Host port |
+| --- | --- | --- | --- |
+| `db` | `clouisle-postgres-pg-search:0.24.3-pg17-alpine1` | `postgres -c shared_preload_libraries=pg_search,pg_stat_statements -c pg_stat_statements.track=all` | `5432` |
+| `redis` | `redis:7-alpine` | `redis-server --requirepass …` (when `REDIS_PASSWORD` is set) | `6379` |
+| `qdrant` | `qdrant/qdrant:v1.18.3` | default | `6333` |
+| `api` | `clouisle-backend:latest` | `python main.py server -H 0.0.0.0 -w 4 --no-reload` | `8000` |
+| `worker` | `clouisle-backend:latest` | `python main.py worker -c 4 -Q default,agent,knowledge,workflow` | none |
+| `sandbox-worker` | `clouisle-sandbox-worker:latest` | `python main.py sandbox-worker -c ${SANDBOX_WORKER_CONCURRENCY:-1}` | none |
+| `beat` | `clouisle-backend:latest` | `python main.py beat` | none |
+| `frontend` | `clouisle-frontend:latest` | `node server.js` (image default) | `3000` |
+
+There is no Nginx service. The `api` healthcheck runs `GET http://localhost:8000/api/v1/health` inside the container; `worker` and `sandbox-worker` wait for `api` to become **healthy**, while `beat` and `frontend` only wait for `api` to be started (`service_started`). `db`, `redis`, and `qdrant` each have their own healthcheck (`pg_isready`, `redis-cli ping`, `/healthz`), and every application service waits for those to pass.
+
+`api` owns the `uploads_data` volume (mounted at `/app/uploads`). `worker` and `sandbox-worker` do not mount it: they use `UPLOAD_STORAGE_MODE=remote` with `API_INTERNAL_BASE_URL=http://api:8000` to read and write files through the internal gateway. `sandbox-worker` additionally runs with `user: "0"`, `cap_add: [SYS_ADMIN]`, and `seccomp=unconfined` so bwrap can create user and mount namespaces.
+
+<Callout type="warn">
+  Production deployments must set strong random values for `POSTGRES_PASSWORD` and `INTERNAL_API_TOKEN`. The Compose file uses the `${VAR:?required}` form, so `docker compose up` fails immediately when either is unset. `INTERNAL_API_TOKEN` must be shared by `api`, `worker`, and `sandbox-worker`.
+</Callout>
+
 ## Initialization
 
 Tortoise ORM creates and migrates tables automatically at API startup (no Alembic). The first registered user automatically becomes the Super Admin.

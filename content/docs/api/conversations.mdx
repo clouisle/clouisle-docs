@@ -1,27 +1,221 @@
 ---
 title: 会话 API
-description: 查询、更新、删除会话并处理消息版本
+description: 查询、重命名、删除会话，并读取会话与消息统计
 icon: MessagesSquare
 ---
 
-用户会话端点挂载在 `/api/v1/agents` 下，管理员会话端点挂载在 `/api/v1/conversations` 下。管理员端点需要相应管理权限。
+会话有两套路由：
 
-## 用户端点
+- **用户会话（agents 路由器）**：挂载在 `/api/v1/agents` 下，只作用于当前用户自己的会话，支持查询、重命名、删除会话与删除单条消息。
+- **平台会话（conversations 路由器）**：挂载在 `/api/v1/conversations` 下，面向团队/管理视角，支持分页检索团队内会话、查看详情、单条与批量删除，以及会话统计。
+
+两套路由都需要 `conversation:read`（写操作为 `conversation:delete`）。
+
+## 端点总览
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| GET | `/api/v1/agents/conversations/my` | 查询当前用户会话 |
-| GET | `/api/v1/agents/{agent_id}/conversations` | 查询 Agent 会话 |
+| GET | `/api/v1/agents/conversations/my` | 查询当前用户的全部会话 |
+| GET | `/api/v1/agents/{agent_id}/conversations` | 查询当前用户在某 Agent 下的会话 |
 | GET | `/api/v1/agents/conversations/{conversation_id}` | 获取会话和消息 |
-| PATCH | `/api/v1/agents/conversations/{conversation_id}` | 更新标题 |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | 重命名会话 |
 | DELETE | `/api/v1/agents/conversations/{conversation_id}` | 删除会话 |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}/messages/{message_id}` | 删除单条消息 |
+| GET | `/api/v1/conversations` | 分页检索团队内会话 |
+| GET | `/api/v1/conversations/{conversation_id}` | 获取会话详情（含消息与用户信息） |
+| DELETE | `/api/v1/conversations/{conversation_id}` | 删除单个会话 |
+| DELETE | `/api/v1/conversations?ids=...` | 批量删除会话 |
+| GET | `/api/v1/conversations/stats` | 会话与消息总量、按 Agent 分布 |
+| GET | `/api/v1/conversations/stats/trends` | 会话、消息与 Token 的按日趋势 |
 
-标题长度为 `1-200` 字符。首次聊天时不传会话 ID 会自动创建；后续传回 ID 以延续变量和历史。
+## 用户会话端点
+
+用户端点全部以 `Conversation.user` 为范围：访问他人的会话一律按「不存在」处理（`404`，错误码 `6210`）。每个端点的参数、响应与错误详见 [Agent API 的 Agent 会话](./agents#agent-会话)。
+
+| 方法 | 路径 | 目标 |
+| --- | --- | --- |
+| GET | `/api/v1/agents/conversations/my` | 当前用户的全部会话，可按 `agent_id` 过滤 |
+| GET | `/api/v1/agents/{agent_id}/conversations` | 当前用户在该 Agent 下的会话，支持 `search`/时间范围/`sort_by` 与分页 |
+| GET | `/api/v1/agents/conversations/{conversation_id}` | 会话详情 + 可见消息（含 `version_count`） |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | 重命名（`title` 1–200 字符，不传则不变） |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}` | 删除会话（消息级联，同时递减 Agent 计数） |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}/messages/{message_id}` | 删除单条消息（行锁事务内同步更新会话计数与 Token 用量） |
+
+## 平台会话端点
+
+平台路由器面向团队/管理视角，是管理后台「会话管理」页面的数据源。
+
+### 分页检索会话
+
+```
+GET /api/v1/conversations
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | 否 | - | 按团队筛选（会校验团队成员身份） |
+| `agent_id` | string (UUID) | 否 | - | 按 Agent 筛选（不在可访问范围内时返回空列表而非报错） |
+| `user_id` | string (UUID) | 否 | - | 按用户筛选（仅对具备仪表盘访问权限的调用者生效） |
+| `search` | string | 否 | - | 按**会话标题**模糊匹配，**不检索消息正文** |
+| `untitled_only` | boolean | 否 | false | 仅返回无标题会话；与 `search` 同时提供时 `untitled_only` 生效（`elif` 分支） |
+| `page` | integer | 否 | 1 | 页码（最小 1） |
+| `page_size` | integer | 否 | 20 | 每页条数（1–100） |
+
+结果按 `updated_at` 降序返回 `PageData[ConversationListOut]`。列表项除会话字段外还包含管理视图专用的 `user_id`、`user_name`，以及冗余的 `agent_name`、`agent_icon`。
+
+### 获取会话详情
+
+```
+GET /api/v1/conversations/{conversation_id}
+```
+
+返回 `ConversationWithMessages`：会话字段 + `messages`（可见消息，逐条带 `version_count`），并额外带 `user_id`、`user_name`。与用户端点不同，平台详情允许具备仪表盘访问权限的管理员读取团队内**他人**的会话。
+
+### 删除会话
+
+```
+DELETE /api/v1/conversations/{conversation_id}
+```
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/conversations/conv-123" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 批量删除会话
+
+```
+DELETE /api/v1/conversations?ids=conv-123&ids=conv-456
+```
+
+`ids` 是必填的**重复查询参数**（`list[UUID]`），不是 JSON 请求体。批量删除不会回滚单条失败：只要至少一个目标存在就执行删除，只有全部目标都不存在时才返回 `404`（`6210`）。删除同样是永久的，建议先按时间、团队、用户与 Agent 筛选确认范围。
+
+### 访问范围
+
+平台端点的可见范围由「可访问 Agent + 仪表盘权限」共同决定：
+
+| 调用者 | 可见范围 |
+| --- | --- |
+| 超级管理员 | 全部团队的会话 |
+| 团队所有者/管理员（具备仪表盘访问权限） | 所在团队内全部会话；可进一步用 `team_id` 限定 |
+| 普通成员/访客 | 仅自己的会话 |
+
+非超级管理员在指定 `team_id` 时会先校验团队成员身份；无可访问 Agent 时列表返回空结果（不报错）。
+
+<Callout type="warn">
+  能力差异：平台 `/api/v1/conversations` 路由器**没有** `PATCH`（重命名）也**没有**按消息删除的端点。这两项操作只在 agents 路由器下的 `/api/v1/agents/conversations/...` 提供。会话详情端点也不提供独立的消息分页接口——消息内联在详情响应中。
+</Callout>
+
+## 会话统计
+
+两条统计路由都以「可访问 Agent」为底座，并叠加 `own_only` 与仪表盘权限：
+
+- 不传 `team_id` 时，范围是调用者所在团队的全部 Agent（超级管理员为全部 Agent）。
+- 传入 `team_id` 时，范围限定为该团队的 Agent，并校验团队成员身份。
+- 具备仪表盘访问权限（超级管理员，或指定团队的所有者/管理员）时看到范围内全部会话；普通成员/访客只看到自己的会话。
+- `own_only=true` 会把任何调用者都限制为自己的会话。
+
+<Callout type="info">
+  当调用者没有任何可访问 Agent 时，两条路由都返回零值数据（`stats` 为空的 `conversations_by_agent`，`trends` 为整段零值日桶），而不是报错。
+</Callout>
+
+### 会话统计概览
+
+```
+GET /api/v1/conversations/stats
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | 否 | - | 限定到单个团队 |
+| `own_only` | boolean | 否 | false | 仅统计调用者自己的会话 |
+
+```json
+{
+  "code": 0,
+  "data": {
+    "total_conversations": 1284,
+    "total_messages": 18237,
+    "conversations_by_agent": [
+      {
+        "agent_id": "1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d",
+        "agent_name": "Support Assistant",
+        "agent_icon": "life-buoy",
+        "count": 742
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+`conversations_by_agent` 最多返回会话数最多的 **10** 个 Agent，按数量降序。若某 Agent 记录已无法解析，`agent_name` 回退为本地化的「unknown」文案，`agent_icon` 为 `null`。
+
+### 会话趋势
+
+```
+GET /api/v1/conversations/stats/trends?period=30d
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | 否 | - | 限定到单个团队 |
+| `period` | string | 否 | `7d` | 时间范围：`7d`（7 个日点）或 `30d`（30 个日点）；**其他任何取值都按 `7d` 处理** |
+| `own_only` | boolean | 否 | false | 仅统计调用者自己的会话 |
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "7d",
+    "data": [
+      {
+        "date": "09/20",
+        "conversations": 34,
+        "messages": 512,
+        "tokens": 187340,
+        "users": {}
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `period` | string | 请求传入的周期 |
+| `data` | array | 每个日点一项，从最早到当天 |
+| `data[].date` | string | 日期标签，格式为 `MM/DD` |
+| `data[].conversations` | integer | 当天创建的会话数 |
+| `data[].messages` | integer | 当天在可访问会话中产生的消息数 |
+| `data[].tokens` | integer | 当天 `prompt` 与 `completion` Token 之和 |
+| `data[].users` | object | 按用户 ID 的拆分：`{"name": string, "conversations": integer, "tokens": integer}` |
+
+<Callout type="warn">
+  `users` 只在请求带了 `team_id` **且**调用者具备该团队仪表盘权限时才填充，否则为空对象。另外，在「无可访问 Agent」的零值提前返回路径中，日点结构里根本没有 `users` 字段——客户端解析前应先判断字段是否存在，不要假设它一定为空对象。
+</Callout>
 
 ## 消息版本
 
-消息可有多个版本，响应包含 `version_number`、`is_active`、父消息/分支关系。编辑或重新生成会创建分支；切换版本只改变活动版本。
+消息可有多个版本，响应包含 `version_number`、`is_active`、父消息/分支关系与 `version_count`。编辑或重新生成会创建分支；切换版本只改变活动版本，且会停用所选版本之后的版本（它们基于旧分支）。详见 [Agent 聊天 API 的消息版本](./chat#消息版本)。
 
-## 管理员端点
+## 错误码
 
-管理后台可以分页查看团队/用户/Agent 会话，查看详情，单条或批量删除。删除是永久操作，应先按时间、团队、用户和 Agent 筛选。
+| 错误码 | 消息 | 说明 |
+| --- | --- | --- |
+| `2000` | Unauthorized | 缺少或无效的 Bearer 令牌 |
+| `3000` | Permission denied | 缺少 `conversation:read` / `conversation:delete`，或 `not_team_member`（指定的 `team_id` 非本人团队） |
+| `6210` | Conversation not found | 会话不存在、不属于当前用户（用户端点），或不在可访问团队内 |
+| `6211` | Message not found | 消息不存在或不属于该会话（仅删除单条消息时返回） |
+| `1001` | Validation failed | 参数不合法，例如 `ids` 缺失或分页越界（`page_size` 上限 100） |
+
+<Callout type="warn">
+  用户端点把「他人的会话」与「不存在的会话」统一返回 `404`（`6210`），以免泄露会话是否存在；平台端点对不在可访问团队内的会话返回 `403`（`not_team_member`），对普通成员访问他人会话同样返回 `404`。
+</Callout>
+
+## 相关文档
+
+- [Agent 聊天 API](./chat) — 发送消息、流式响应与持久运行
+- [Agent API](./agents) — Agent 管理、Agent 会话端点与 Agent 统计
+- [SSE 流式事件](./streaming) — 运行事件与断点续连

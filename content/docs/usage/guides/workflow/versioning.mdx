@@ -1,17 +1,23 @@
 ---
 title: 工作流版本管理
-description: 发布快照、恢复历史版本并处理旧定义
+description: 发布快照、对比并恢复历史版本，以及处理旧定义
 icon: GitBranch
 ---
 
-发布工作流会自动保存一个版本快照。版本包含定义、变量、触发器配置和创建信息。
+版本记录是工作流定义的快照，保存 `definition`、变量、触发器类型与配置。它在两个时机产生：定义变更时版本号递增，发布时把当前版本号存档。
+
+## 版本号与快照
+
+- **改定义才递增版本号**：`PUT /api/v1/workflows/{id}` 只要带上新的 `definition`，就执行 `workflow.version += 1`。只改名称、描述、图标、可见性或触发器配置不会递增。
+- **发布时存档**：`POST /api/v1/workflows/{id}/publish` 为当前版本号创建一条 `WorkflowVersion` 快照（同一版本号已有快照时跳过），再把状态改为 `published`。同一工作流同一版本号只存一份快照。
+- **已发布运行读快照、不读草稿**：正式运行加载最新已发布版本的快照；草稿上的改动不会影响已发布工作流的运行，只有调试运行才用草稿。
 
 ## 发布版本
 
 1. 保存草稿并打开**检查清单**。
 2. 修复所有错误；警告应在发布前评估。
-3. 选择**发布**，设置运行页呈现为**表单与结果**或**结果与详情**。
-4. 发布后版本号递增，运行入口使用当前已发布版本。
+3. 选择**发布**，在对话框中选择运行页呈现方式：**表单与结果**（`presentation_mode: simple`，只显示输入、运行状态和最终结果）或**结果与详情**（`presentation_mode: result_first`，优先显示结果，并允许展开执行轨迹和运行详情）。
+4. 发布后运行入口使用当前已发布版本；版本号随后只在定义再次变更时递增。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-publish-dialog.png" alt="工作流发布对话框" />
@@ -20,12 +26,51 @@ icon: GitBranch
 
 ## 查看和恢复
 
-在**工作流设置** > **版本历史**查看快照。选择某版本后点击**恢复**；系统会先保存当前状态，再创建恢复后的新当前版本。恢复不会删除其他历史记录。
+在**工作流设置** > **版本历史**查看按版本号倒序排列的快照，当前版本带"当前"标记。选择某版本后点击**恢复**（界面提示"恢复到 `v{version}`"，确认框说明当前版本会自动保存），会依次完成：
+
+1. 把当前工作流状态另存为一条新快照；
+2. 用目标版本的 `definition`、变量、触发器类型与配置覆盖当前工作流，并把 `workflow.version` 加 1；
+3. 为恢复后的状态再创建一条快照。
+
+恢复不会删除其他历史记录，恢复前的状态也已经存成快照，可以再恢复回去。
+
+## 版本 API
+
+界面读写的持久化快照位于 `/api/v1/workflows`：
+
+| 操作 | 端点 | 说明 |
+| --- | --- | --- |
+| 列出快照 | `GET /api/v1/workflows/{id}/versions` | `page`（默认 `1`）、`page_size`（默认 `20`），按版本号倒序，返回 `total` |
+| 查看某版本号 | `GET /api/v1/workflows/{id}/versions/{version}` | `version` 是整数版本号，不是 UUID |
+| 手动存档 | `POST /api/v1/workflows/{id}/versions` | 为当前状态创建快照，body `{description}`；需要 `workflow:update` 权限 |
+| 恢复 | `POST /api/v1/workflows/{id}/versions/{version}/restore` | body `{description?}`；先自动保存当前状态，再覆盖并递增版本号 |
+
+另一组面向程序化版本管理的端点挂在 `/api/v1/workflow-versions` 下（与上表互不相通）。完整的请求头、响应结构与错误码见[工作流版本 API](/api/workflow-versions)：
+
+| 操作 | 端点 | 说明 |
+| --- | --- | --- |
+| 创建版本 | `POST /api/v1/workflow-versions` | body 含 `workflow_id`、`nodes`、`edges`、`config`、`description`；创建为草稿状态，不改工作流 |
+| 版本历史 | `GET /api/v1/workflow-versions/{workflow_id}/history` | `limit` 1–100（默认 `20`）、`offset`（默认 `0`）、可选 `status` 过滤 |
+| 查看版本 | `GET /api/v1/workflow-versions/{workflow_id}/version/{version_id}` | 按版本 UUID 读取 |
+| 发布版本 | `POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | 置为已发布并把该定义写回工作流 |
+| 归档版本 | `POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | 置为已归档，不影响其他版本 |
+| 版本对比 | `GET /api/v1/workflow-versions/{workflow_id}/diff?from_version=&to_version=` | 返回新增/删除/修改的节点、新增/删除的连线与配置变更 |
+| 回滚 | `POST /api/v1/workflow-versions/{workflow_id}/rollback` | body `{version_id, create_backup}`（默认 `true`）；默认把当前版本归档为回滚备份，再以目标定义创建并发布一个新版本 |
+| 复制到新工作流 | `POST /api/v1/workflow-versions/{workflow_id}/fork` | body `{version_id, new_workflow_id, new_name?}`；在目标工作流里创建草稿版本 |
+| 版本统计 | `GET /api/v1/workflow-versions/{workflow_id}/stats` | 总/已发布/草稿/已归档版本数与首末版本时间 |
+
+<Callout type="warn">
+  `/api/v1/workflow-versions` 的版本由进程内管理器持有（源码注释写明"生产环境应改用数据库"）：进程重启后历史丢失，也不会出现在**版本历史**面板里，且与 `/api/v1/workflows/{id}/versions` 的记录不是同一份数据。需要持久化、界面可见的版本历史时，使用上一张表的端点。
+</Callout>
+
+<Callout type="info">
+  工作流模板没有市场类 API：不存在 `/api/v1/workflow-templates` 之类的端点。内置模板只在编辑器里实例化成新工作流，实例化后仍需在编辑器中检查模型、知识库等引用。
+</Callout>
 
 ## 旧版工作流
 
 `schema_version` 小于 `2` 的旧定义可以载入画布，但运行按钮会被禁用。重新保存会写入新类型系统版本；这是硬切换，不会在运行时自动迁移旧定义。
 
 <Callout type="warn">
-  发布前应记录版本说明，并在恢复后重新运行输入边界、条件分支、子工作流和外部副作用节点。
+  发布前应记录版本说明，并在恢复后重新运行输入边界、条件分支、决策分支、子工作流和外部副作用节点。
 </Callout>

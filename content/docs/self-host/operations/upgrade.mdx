@@ -8,18 +8,68 @@ icon: RefreshCw
 
 ## Compose 升级
 
-1. 备份 PostgreSQL、Qdrant、上传卷和 `.env`。
-2. 拉取新镜像：`docker compose pull`。
-3. 逐个检查服务配置和镜像标签。
-4. 执行 `docker compose up -d`，先观察 `api` 和 Worker 日志。
-5. 检查 `/api/v1/health`、登录、模型列表、知识库检索和一个已发布 Agent。
-6. 检查工作流旧定义是否需要重新保存 `schema_version: 2`。
+Compose 引用的都是预构建镜像、没有 `build:` 段，且 `up -d --force-recreate` 是停止/重建而非滚动发布，所以请安排在维护窗口内执行。生产环境不要依赖 `latest`，改为固定不可变 tag 或 digest。
 
-安装器升级会保留现有 `.env`，但仍需审阅新增变量和默认值。
+升级前备份 PostgreSQL、Qdrant 快照、上传卷和 `.env`（Redis 队列状态按需备份），并在预发环境验证镜像 tag。
+
+```bash
+cd /opt/clouisle        # 换成实际安装目录（安装器默认为 /opt/clouisle）
+docker compose pull
+docker compose up -d --force-recreate
+
+docker compose ps
+docker compose logs --tail=50 api worker sandbox-worker beat frontend
+curl --fail http://localhost:8000/api/v1/health
+```
+
+`worker`、`sandbox-worker`、`beat` 都要确认日志无启动错误，`beat` 保持单副本。
+
+自建镜像时从**仓库根目录**构建三个镜像并推送到同一 tag：
+
+```bash
+REGISTRY=registry.example.com/clouisle
+IMAGE_TAG=vX.Y.Z
+docker build -f deploy/dockerfiles/backend.Dockerfile -t "$REGISTRY/clouisle-backend:$IMAGE_TAG" .
+docker build -f deploy/dockerfiles/frontend.Dockerfile -t "$REGISTRY/clouisle-frontend:$IMAGE_TAG" .
+docker build -f deploy/dockerfiles/sandbox-worker.Dockerfile -t "$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG" .
+docker push "$REGISTRY/clouisle-backend:$IMAGE_TAG"
+docker push "$REGISTRY/clouisle-frontend:$IMAGE_TAG"
+docker push "$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
+```
 
 ## Kubernetes 升级
 
-使用相同 release 和 namespace 执行 `helm upgrade`，或审阅新生成 manifest 后 apply。先更新 API 与迁移，再更新 Worker/Beat/Frontend；生产期间保持 Beat 单副本。
+同一 release 和 namespace 执行 `helm upgrade`（更新 `images.backend`、`images.sandboxWorker`、`images.frontend` 的 tag，保留现有 Secret）；或审阅新生成的 manifest 后 apply。用 manifest 时逐个更新工作负载并观察 rollout：
+
+```bash
+kubectl -n clouisle set image deployment/api api="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/worker worker="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/sandbox-worker sandbox-worker="$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/beat beat="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/frontend frontend="$REGISTRY/clouisle-frontend:$IMAGE_TAG"
+
+kubectl -n clouisle rollout status deployment/api
+kubectl -n clouisle rollout status deployment/worker
+kubectl -n clouisle rollout status deployment/sandbox-worker
+kubectl -n clouisle rollout status deployment/beat
+kubectl -n clouisle rollout status deployment/frontend
+```
+
+API 的滚动策略是 `maxUnavailable: 0` / `maxSurge: 1`，因此新 Pod 就绪后旧 Pod 才会退出；数据库结构变更发生在 API 启动时（Tortoise ORM，无 Alembic），旧副本仍在新结构上运行，所以 schema 变更必须向后兼容。
+
+<Callout type="error">
+  不要执行 Alembic 迁移命令——项目不存在该流程。schema 由后端启动时的 `init_db` 通过 Tortoise ORM 初始化/更新。
+</Callout>
+
+安装器升级会保留现有 `.env`，但仍需审阅新增变量和默认值。检查工作流旧定义是否需要重新保存 `schema_version: 2`。
+
+## 升级后验证
+
+- 所有基础设施与应用服务在运行，`beat` 恰好一个副本。
+- 经公共代理访问 `GET /api/v1/health` 成功。
+- 登录、Agent 对话/流式输出、文件上传、知识库检索、工作流执行均正常。
+- `worker`、`sandbox-worker`、`beat` 日志无启动错误。
+- 备份与监控任务继续运行。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/upgrade-rollout-status.svg" alt="升级滚动状态" />
@@ -28,4 +78,17 @@ icon: RefreshCw
 
 ## 回滚
 
-回滚镜像前确认数据库迁移是否可逆。若迁移不可逆，不要只切回旧镜像；恢复备份到隔离环境验证。工作流版本可在产品 UI 单独恢复，但这不等同于服务回滚。
+回滚镜像前确认数据库结构变更是否可逆。若不可逆，不要只切回旧镜像；恢复备份到隔离环境验证。工作流版本可在产品 UI 单独恢复，但这不等同于服务回滚。
+
+```bash
+# Compose：把 Compose 文件/环境里的镜像 tag 改回上一版，然后重建
+docker compose pull
+docker compose up -d --force-recreate
+
+# Kubernetes：逐个撤销应用工作负载
+kubectl -n clouisle rollout undo deployment/api
+kubectl -n clouisle rollout undo deployment/worker
+kubectl -n clouisle rollout undo deployment/sandbox-worker
+kubectl -n clouisle rollout undo deployment/beat
+kubectl -n clouisle rollout undo deployment/frontend
+```

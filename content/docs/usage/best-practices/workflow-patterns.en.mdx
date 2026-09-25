@@ -1,45 +1,81 @@
 ---
 title: Workflow Design Patterns
-description: Build maintainable workflows using sequential, parallel, conditional, and loop patterns
+description: Build maintainable workflows with sequential, iteration fan-out, conditional, decision-routing, and loop patterns
 icon: Workflow
 ---
 
-Apply four typical design patterns to build well-structured, maintainable workflows.
+Five structural patterns cover most orchestration needs: sequential, iteration fan-out, conditional, decision routing, and loop. Choose the pattern first, then the nodes — the pattern tells you where to look when something fails.
 
 ## Sequential Pattern
 
 Linear execution: A → B → C → D
 
-**Use case**: Document processing pipeline
+**Use case**: A document pipeline (extract → chunk → embed → store) where each step needs the previous step's output.
 
-## Parallel Pattern
+The execution plan is layered by topology, but **nodes inside a layer still run one after another**: drawing two edges from one handle does not make them run concurrently. With no data dependency between them, merging them into a single node (or a single tool call) is usually faster than splitting.
 
-Concurrent execution: A → (B, C, D) → E
+## Iteration Fan-out Pattern
 
-**Use case**: Multi-source data aggregation
+Use one **Iteration** node to run its container's child nodes once per array item: `{{items}}` → iteration container (`item` / `index`) → `results` array.
+
+**Use case**: Multi-source aggregation, batch content processing, one model call per record.
+
+- There is **no Parallel node** in the palette. The Iteration node's **Parallel execution** toggle and **Max parallelism** (default `10`) are only parameter-validated today — the executor still processes items sequentially — so do not expect them to cut runtime. Shrink the item count and the number of nodes per iteration first.
+- The executor enforces the iteration cap: one iteration handles at most `1000` items (`MAX_ITERATIONS`), and anything beyond that is truncated with a warning logged; with no cap configured it processes `100` items. The editor does not expose this field, so set it in the definition or through the API.
+- Each item gets a clear `item`/`index` input and appends its output to `results`, which is far easier to reproduce than an unbounded loop.
 
 ## Conditional Pattern
 
-Branching logic: A → if(condition) → B else C
+Deterministic if/else: A → if(condition expression) → B else C, where the expression compares upstream variables with Jinja2 syntax (e.g. `{{analysis.urgency}} == "high"`).
 
-**Use case**: Content routing
+**Use case**: Field-level routing — amount ranges, attachment presence, customer tier, empty variables. Hand these rules to a Condition node: it costs no model call and is easy to audit.
+
+Incomplete conditional branches (a missing True or False branch, a branch without a condition, a reference to a nonexistent variable) are caught by the checklist.
+
+## Decision Routing Pattern
+
+Use a **Decision** node to have a model judge a state against typed options or ordered levels once, then route on the result:
+
+```
+Start → Decision (choice: refund / technical / billing) → {refund | technical | billing | manual_review}
+```
+
+**Use case**: Ticket triage, refund approval, risk grading — where "which path" depends on natural-language meaning and you also need to know how sure the model is.
+
+| Question type | Branch handles | Outputs | Why choose it |
+| --- | --- | --- | --- |
+| `choice` | one per option, plus the fallback branch | `answer`, `confidence`, `probabilities` | Mutually exclusive dispositions |
+| `score` | one per level, plus the fallback branch | `answer`, `score`, `confidence`, `probabilities` | Levels are ordered and you need a numeric score |
+| `noul` | `yes`, `no`, plus the fallback branch | the `noul` probability | A single binary call; returns no confidence |
+
+Three habits that always apply:
+
+1. **Give the fallback branch an exit**: set a **confidence threshold** (e.g. `0.6`) and connect the fallback to a human queue or a **Pause** node. The threshold reroutes only when confidence is **strictly below** it; a confidence exactly at the threshold still takes the model's branch.
+2. **Do not use a Decision node for deterministic rules**: whether an amount exceeds 5000 or a field is empty belongs in a Condition node; leave semantic judgement to the model.
+3. **Calibrate the threshold from a debug-run trace**: a flat `probabilities` distribution means the instructions or state need rewriting, while two near-equal options are what the threshold is for.
+
+Compared with the **Question Classifier**: the classifier asks a chat model for JSON and parses the category out of the text, so there is no confidence guarantee; use a Decision node when you want stable structure and confidence. Fields, a worked example, and failure paths: [Orchestrate a Workflow → Decision Node](../guides/workflow/orchestrate.mdx#decision-node) and [Workflow Nodes → Decision Node](../guides/workflow/nodes.mdx#decision-node).
 
 ## Loop Pattern
 
 Iterative execution: A → while(condition) → B → A
 
-**Use case**: Batch processing and bounded retries
+**Use case**: Bounded retries and batch processing that accumulates state.
 
-Configure an explicit termination condition and a finite cap. The workflow editor defaults the loop limit to 10; the executor enforces a maximum of 1000 iterations. Use an Iteration node when processing an array or object so each item has a clear input and output rather than relying on an unbounded loop.
+Configure an explicit termination condition and a finite cap. The editor defaults the loop limit to `10` with an input range of `1`–`1000`; the executor then enforces a maximum of `1000`. Both caps only stop a runaway loop — they are not a substitute for designing a condition that terminates. Prefer an Iteration node when processing an array or object so each item has clear inputs and outputs rather than relying on an unbounded loop.
 
 **Safety checklist**:
-- Set a cap appropriate to the input size
+
+- Match the cap to the input size (an iteration beyond `1000` items is silently truncated)
 - Ensure the condition can make progress toward termination
 - Handle empty input and per-item failures
-- Keep retries separate from business iteration
+- Keep retries separate from business iteration: node-level retry policies (LLM / HTTP up to 3, Tool / Agent / Decision / Knowledge Retrieval 2, Sub-workflow 1, Code / Template / Condition 0) should not be confused with loop iterations
+- Give decision branches a fallback exit so "the model was unsure" does not become a stalled flow
 
 ## Related documentation
 
+- [Orchestrate a Workflow](../guides/workflow/orchestrate.mdx) — Canvas, node configuration, and triggers
+- [Workflow Nodes](../guides/workflow/nodes.mdx) — Node categories and Decision node configuration
 - [Agent vs Workflow](../concepts/agent.mdx) — Choosing the right abstraction
 - [System Architecture](../concepts/architecture.mdx) — Component overview
 - [Prompt Engineering](./prompt-engineering.mdx) — Prompt-writing guidance

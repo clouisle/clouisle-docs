@@ -47,8 +47,8 @@ icon: MonitorCog
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `theme_mode` | `light`、`dark` 或 `system` | `light` | 主题模式 |
-| `theme_primary_color` | string | `#3B82F6` | 主题主色 |
+| `theme_mode` | `light`、`dark` 或 `system` | `system` | 站点默认主题模式（用户可在个人设置中覆盖） |
+| `theme_primary_color` | string | 空 | 主题主色（留空使用内置默认配色） |
 | `theme_branding_display` | `full`、`name_only`、`icon_only` 或 `hidden` | `full` | 品牌展示 |
 
 还可自定义更多颜色令牌（主色前景、背景、卡片、侧边栏、导航栏、强调色、图表色等）。
@@ -121,7 +121,7 @@ icon: MonitorCog
 | `password_expiration_warning_days` | number | `7` | 过期前警告天数 |
 | `password_history_count` | number | `5` | 密码历史数量 |
 | `password_min_age_days` | number | `0` | 密码最短使用天数 |
-| `force_password_change_on_first_login` | boolean | `false` | 首次登录强制修改密码 |
+| `force_password_change_first_login` | boolean | `false` | 首次登录强制修改密码 |
 
 ### 会话设置
 
@@ -145,6 +145,19 @@ icon: MonitorCog
 
 管理员 TOTP 统计和每用户状态/禁用端点在 `/api/v1/admin/totp` 下可用。
 
+### 人机验证
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `enable_captcha` | boolean | `false` | 在登录页启用人类验证 |
+
+启用后，密码登录请求必须携带一次性验证凭据（`captcha_id` + `captcha_token`）：前台先调用 `POST /api/v1/login/captcha/click` 把一次有效的点击交互兑换成私有一次性 proof，再随登录提交。缺失时报 `captcha_required`，校验失败报 `captcha_invalid`。
+
+<Callout type="warn" title="只有这一个总开关">
+  安全页只有这一个验证码开关（界面文案「启用人类验证」），**没有**失败次数阈值、有效时长或难度配置。它是降低自动化尝试的补充手段，不能替代登录锁定与 TOTP：暴力破解防护实际由 `max_login_attempts`（默认 `5`）/`lockout_duration_minutes`（默认 `15`）与 `require_totp` 承担。把 `enable_captcha` 当作「机器人登录已解决」会留下暴力破解敞口。
+</Callout>
+
+
 ### 模型端点白名单
 
 保存或测试具有新 API 端点的模型前：
@@ -158,7 +171,32 @@ icon: MonitorCog
 远程端点优先使用 HTTPS。仅对可信私有网络上的端点使用 HTTP，因为 API 密钥和模型流量在没有传输加密的情况下发送。
 </Callout>
 
-匹配是精确的。URL 路径被忽略，但 scheme、主机名和端口必须全部匹配。移除 Origin 会阻止后续的模型发现、连接测试和运行时请求，无需重启服务。
+匹配是精确的。URL 路径被忽略，但 scheme、主机名和端口必须全部匹配。移除 Origin 会阻止后续的模型发现、连接测试和运行时请求，无需重启服务。默认白名单已预置 20 个已知供应商 Origin（如 `https://api.openai.com`、`https://api.anthropic.com`、`http://localhost:11434`），最多可保存 **200** 条。
+
+### 出站网络白名单（SSRF 豁免）
+
+Clouisle 对自定义 HTTP 工具、工作流 HTTP 请求节点、知识库网址导入与数据库工具连接测试执行统一的 SSRF 校验：域名先解析为 IP，任一解析结果落入 **私有（`is_private`）/ 回环（`is_loopback`）/ 链路本地（`is_link_local`）/ 保留（`is_reserved`）/ 组播（`is_multicast`）/ 未指定（`is_unspecified`）** 分类即拒绝。常见代表：`127.0.0.1`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.169.254`、`fe80::/10`、`0.0.0.0`、`::`，以及主机名 `localhost`、`local`、`metadata.google.internal`。
+
+需要调用内网 API、微服务或内网数据库时，在**设置** > **安全** > **出站网络白名单（SSRF 豁免）** 中逐行添加被批准的目标（设置键 `ssrf_allowed_targets`，JSON 数组）：
+
+| 写法 | 示例 | 匹配规则 |
+| --- | --- | --- |
+| 单个 IP | `192.168.1.50` | 精确匹配该地址 |
+| CIDR 网段 | `10.10.0.0/16` | 解析到的 IP 属于该网段即放行 |
+| 精确域名 | `api.internal.service` | 域名必须含 `.`，大小写不敏感 |
+| 通配域名 | `*.corp.internal` | 匹配该后缀的所有子域**以及基域本身** |
+
+<Callout type="error" title="永远无法加入白名单的目标">
+  保存时即被拒绝：`*`、`0.0.0.0`、`::`、`169.254.169.254`、`metadata.google.internal`，以及任何与云元数据（`169.254.0.0/16`）、组播（`224.0.0.0/4`）、未指定（`0.0.0.0/32`）网段重叠的 CIDR（含 `0.0.0.0/0`、`::/0`）。非法条目会直接报错，不会被静默忽略。
+</Callout>
+
+其他约束与行为：
+
+- 白名单**最多 200 条**，重复项自动去重；不含 `.` 的主机名（如 `localhost`）无法作为条目，请改用 IP 或 CIDR。
+- 留空白名单等于拦截全部内网目标——这是默认的安全姿态；放行范围越宽，工具与工作流越容易变成内网探测跳板。
+- 校验**在每次请求时**重新读取站点设置并解析域名，改完立即生效，不需要重启服务。
+- 透明代理的 Fake-IP 基准池 `198.18.0.0/15`（Clash/Surge/Mihomo TUN 模式）被自动放行，避免公共域名被误判为 SSRF。
+
 
 ## 通知设置
 
@@ -168,16 +206,20 @@ icon: MonitorCog
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `smtp_enabled` | boolean | `true` | 启用 SMTP |
-| `smtp_host` | string | `smtp.gmail.com` | SMTP 主机 |
+| `smtp_enabled` | boolean | `false` | 启用 SMTP |
+| `smtp_host` | string | 空 | SMTP 主机 |
 | `smtp_port` | number | `587` | SMTP 端口 |
 | `smtp_encryption` | `none`、`ssl` 或 `tls` | `tls` | 加密方式 |
 | `smtp_username` | string | 空 | SMTP 用户名 |
 | `smtp_password` | string | 空 | SMTP 密码 |
-| `email_sender_name` | string | `Clouisle` | 发件人名称 |
-| `email_sender_address` | string | 空 | 发件人地址 |
+| `email_from_name` | string | `Clouisle` | 发件人名称 |
+| `email_from_address` | string | 空 | 发件人地址 |
 
 更新 SMTP 设置：前往**设置** > **通知渠道**，输入 SMTP 详情，设置发件人名称和地址，点击**测试**（`POST /api/v1/admin/site-settings/test-email`），然后点击**保存更改**。
+
+<Callout type="info">
+  `smtp_enabled` 默认 `false`、`smtp_host` 默认空，即开箱状态是「未配置邮箱」。在启用并填好主机、端口、加密方式、凭据与发件地址之前，邮件通知会**静默地只留在站内**：不会报错，也不会事后补发。先点**测试**确认投递成功，再保存。
+</Callout>
 
 ### 外部通知渠道
 
@@ -186,7 +228,7 @@ icon: MonitorCog
 | 渠道 | 关键设置 | 测试端点 |
 | --- | --- | --- |
 | 钉钉 | `dingtalk_enabled`、类型（`webhook` 或 `app`）、Webhook URL/Secret 或 App Key/Secret/Agent ID | `/test-dingtalk` |
-| 企业微信 | `wechat_enabled`、类型（`webhook` 或 `app`）、Webhook URL 或 Corp ID/App ID/Secret | `/test-wechat` |
+| 企业微信 | `wechat_enabled`、`wechat_notification_type`（`webhook` 或 `app`）、Webhook URL 或 Corp ID（`wechat_corp_id`）/Agent ID（`wechat_agent_id`）/App Secret（`wechat_secret`） | `/test-wechat` |
 | 飞书 | `feishu_enabled`、类型（`webhook` 或 `app`）、Webhook URL/Secret 或 App ID/Secret | `/test-feishu` |
 | Slack | `slack_enabled`、Incoming Webhook URL | `/test-slack` |
 | Webhook | `webhook_enabled`、URL、方法、自定义请求头、正文模板、HMAC Secret | `/test-webhook` |
@@ -240,6 +282,7 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 | `user.pending_approval` | 新注册待审批 |
 | `kb.doc_indexed` / `kb.doc_failed` | 知识库文档处理 |
 | `workflow.run_failed` | 工作流执行失败 |
+| `workflow.pause_pending` | 工作流暂停、等待人工审批 |
 | `apikey.expiring` / `apikey.expired` | API Key 生命周期 |
 | `security.login_anomaly` | 新地点/设备登录 |
 | `security.account_locked` | 多次失败后账户锁定 |
@@ -330,9 +373,24 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `audit_log_retention_days` | number (30-3650) | `365` | 审计日志保留天数 |
-| `audit_log_archive_path` | string | 空 | 审计日志归档路径 |
+| `audit_log_archive_path` | string | `/var/log/clouisle/audit_archives` | 归档 JSON 文件写入的本地路径 |
 
 超过保留期限的日志被归档（手动触发）到归档路径下的月度 JSON 文件，然后删除。详见[审计日志管理](./audit-logs.mdx)。
+
+### 审计告警（未启用）
+
+以下 5 个键在初始化时写入数据库，但**目前没有任何代码读取它们**——没有检测任务，也没有投递逻辑，配置后不会产生任何告警：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `audit_alert_enabled` | boolean | `true` | 疑似遗留的告警总开关 |
+| `audit_alert_webhook` | string | 空 | 疑似遗留的告警 Webhook URL |
+| `audit_alert_failed_login_threshold` | number | `5` | 疑似遗留的失败登录阈值 |
+| `audit_alert_failed_login_window` | number | `5` | 疑似遗留的检测窗口（分钟） |
+| `audit_alert_bulk_deletion_threshold` | number | `10` | 疑似遗留的批量删除阈值 |
+
+需要安全告警时请使用已实现的路径：[自动通知](./notifications.mdx) 的 `security.*` 事件与外部渠道。
+
 
 ## SSO 设置
 
@@ -354,18 +412,24 @@ SSO 提供商在**设置** > **SSO** 中管理。提供商通过名称和协议�
 
 ## 团队设置
 
-团队管理员可以管理团队成员、模型授权和团队信息。团队用于分组用户和资源（Agent、工作流和知识库）。
+团队用于分组用户和资源（Agent、工作流和知识库）。团队管理员可以管理**成员**与**团队基本信息**；**模型授权只能由超级管理员修改**。
 
 > **注意：** 团队 slug、可见性、邀请流程、加入请求、成员限制、每团队资源限制、每团队安全/API 设置、计费、数据保留、自定义域名和品牌**未实现**。
 
 ### 访问团队管理
 
-1. 打开平台**团队切换器**。
-2. 选择**管理团队**。
-3. 团队管理页在 `/teams` 打开。
-4. 选择团队查看**成员**标签，或（对授权经理）**模型授权**标签。
+有两个入口，权限与能力完全不同：
 
-**所需权限：** 团队管理员或所有者（用于编辑和成员/模型管理）。
+| 入口 | 路径 | 所需权限 | 能力 |
+| --- | --- | --- | --- |
+| 后台团队管理 | `/teams` | `admin:team:read`（或超级管理员） | 跨团队查看/创建/编辑；**模型授权仅超级管理员可改** |
+| 团队设置（团队作用域） | `/app/team` | 团队成员，且需 `team:manage` / `team:update`（团队管理员或所有者） | 当前团队的成员、基本信息与（只读）模型标签 |
+
+打开方式：点击**团队切换器** → **管理全部团队 (系统后台)**（进入 `/teams`，仅在有 `admin:team:read` 时显示）或**管理当前团队**（进入 `/app/team`，仅在有 `team:manage` 时显示）。
+
+<Callout type="warn">
+  **成员（Member）与观察者（Viewer）角色没有 `admin:team:read`**，因此看不到 `/teams` 入口；他们在团队切换器里只能看到**管理当前团队**（且需要 `team:manage`）。判断「某人为什么看不到团队管理」时先查这个权限，而不是怀疑前端 bug。
+</Callout>
 
 ### 团队信息
 
@@ -381,14 +445,22 @@ SSO 提供商在**设置** > **SSO** 中管理。提供商通过名称和协议�
 
 ### 模型授权
 
-团队管理员和所有者可以管理团队可使用哪些已启用的模型：
+**团队模型授权只能由超级管理员操作。** 在 `/app/team` > **模型授权** 标签里，团队管理员/所有者看到的是**只读**视图：已授权模型、启用状态，以及「今日用量 / 限额」进度（限额由系统管理员分配，`无限制` 表示未设上限）。修改授权要去 `/teams` 的团队详情，而该入口本身还要求 `admin:team:read`。
 
-1. 打开**管理团队**（`/teams`）并选择团队。
-2. 打开**模型授权**。
-3. 选择**授权模型**并选择已启用的模型，或撤销现有授权。
-4. 保存授权变更。
+| 操作 | 端点 | 权限 |
+| --- | --- | --- |
+| 查看团队已授权模型 | `GET /api/v1/teams/{team_id}/models` | 团队成员或超级管理员 |
+| 授权模型 | `POST /api/v1/teams/{team_id}/models` | **仅超级管理员** |
+| 修改配额/优先级/启用状态 | `PUT /api/v1/teams/{team_id}/models/{model_id}` | **仅超级管理员** |
+| 撤销授权 | `DELETE /api/v1/teams/{team_id}/models/{model_id}` | **仅超级管理员** |
+| 批量授权/撤销 | `POST` / `DELETE /api/v1/teams/{team_id}/models/batch` | **仅超级管理员** |
+| 列出可授权模型 | `GET /api/v1/teams/{team_id}/available-models` | **仅超级管理员** |
 
-授权后的模型在团队的 Agent 和知识库配置需要模型时可用。
+授权后的模型才会出现在团队的 Agent 与知识库模型选择器中。
+
+<Callout type="warn">
+  让团队管理员「自己去授权模型」是常见的流程错误：UI 里根本改不动，必须找超级管理员。这同时意味着模型配额是集中治理的——团队无法自行扩额。
+</Callout>
 
 ### 成员管理
 
@@ -458,6 +530,22 @@ SSO 提供商在**设置** > **SSO** 中管理。提供商通过名称和协议�
 参见：
 - [团队与成员](./teams.mdx) — 团队管理详细指南
 - [角色与权限](./roles-permissions.mdx) — 角色和权限
+
+## 灰度发布设置（私有）
+
+以下键的类别是 `retrieval`、`public=false`——它们不出现在站点设置界面，也不通过公开设置接口暴露，只供运维调整，用于混合检索（hybrid retrieval）的灰度放量：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `retrieval_hybrid_mode` | `rollout`、`enabled` 或 `disabled` | `rollout` | 混合检索总开关 |
+| `retrieval_hybrid_team_ids` | JSON 数组 | `[]` | 显式纳入灰度的团队 ID 白名单 |
+| `retrieval_hybrid_percentage` | number | `100` | 确定性灰度百分比（0-100，按团队集合哈希分桶） |
+
+优先级：环境变量 `RETRIEVAL_HYBRID_KILL_SWITCH=true` **最高**，无论设置如何都关闭混合检索；`disabled` 全局关闭；`enabled` 全局开启；`rollout` 时团队命中白名单即开启，否则按哈希分桶 `< percentage` 决定。
+
+<Callout type="warn">
+  在 `rollout` 模式下，`retrieval_hybrid_percentage` 是基于「团队集合」的哈希分桶（同一组团队始终落在同一桶），不是随机抽样——所以调百分比会改变哪些团队被纳入，而不是逐个请求随机切换。把模式改成 `disabled` 会全局退回单一检索模式，直接影响召回质量。
+</Callout>
 
 ## 功能标志与其他设置
 

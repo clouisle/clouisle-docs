@@ -9,24 +9,33 @@ A Workflow orchestrates deterministic multi-step tasks with a directed node grap
 ### Two ways to start
 
 - **User input**: generates an interactive run form, suitable for manual initiation.
-- **Trigger**: starts via manual/API or Webhook, suitable for integrations and automation.
+- **Trigger**: starts via API call, `cron` schedule, or Webhook, suitable for integrations and automation.
 
-Each Workflow can have only one start node, and the start node cannot be deleted.
+Each Workflow can have only one start node, and the start node cannot be deleted (the canvas rejects the delete and shows a toast).
 
 ### Typed data flow
 
-The current definition format is `schema_version: 2`. Node outputs keep native objects and arrays and are no longer implicitly converted to JSON strings. Legacy definitions can be opened, but must be re-saved before they can run. Variable references are made with the editor's variable picker; the pre-publish validation checklist reports nonexistent references and type mismatches as issues to review before debugging and publishing.
+The current definition format is `schema_version: 2`. Node outputs keep native objects and arrays and are no longer implicitly converted to JSON strings; `schema_version: 1` definitions pass JSON strings between nodes and are not compatible. Variable references are made with the editor's variable picker; the pre-publish validation checklist reports nonexistent references, missing inputs, and type mismatches (`Type mismatch: expected X, got Y`) as issues to review before debugging and publishing.
+
+<Callout type="warn">
+**Legacy definition handling (partly not implemented).** v1 and v2 are incompatible (v1 passes JSON strings between nodes), and the code records the intent that "a legacy definition must be re-saved before it can run" — but **neither the backend nor the editor actually enforces that check today**: the backend's `WORKFLOW_SCHEMA_VERSION` constant is declared but never used for validation, and the corresponding editor logic is just a comment, so the run button is not disabled by the version number. When you open a historical Workflow, **save it manually** before running, otherwise you may get results that do not match v1 semantics.
+</Callout>
 
 ### Nodes and containers
 
-Nodes fall into four categories: model, logic, transformation, and extension. Iteration loops over arrays; loops repeat until a condition is met; both are container nodes whose inner subgraphs have their own start and exit nodes. See the [Workflow node reference](/reference/workflow-nodes) for the full fields.
+Nodes fall into four categories: model (LLM or media generation), logic (conditions, classification, iteration/loop, human approval), transformation (code, templates, files, variables), and extension (sub-workflows, Agents, tools, knowledge retrieval, and the `answer` node that defines the final result). Iteration loops over arrays; loops repeat until a condition is met; both are container nodes whose inner subgraphs have their own start and exit nodes. Comment nodes (`comment`) on the canvas are documentation only and are excluded from execution planning (`NON_EXECUTABLE_NODE_TYPES = {"comment"}`). See the [Workflow node reference](/reference/workflow-nodes) for the full fields.
 
 ### Running, debugging, and observability
 
-Drafts can be **debugged**, and published versions can run for real. Execution states include pending, running, succeeded, failed, canceled, timed out, and skipped. The run drawer shows inputs, results, node traces, Tokens, duration, errors, and the matched branch.
+Drafts can be **debugged** (`POST /api/v1/workflows/{id}/debug`, which executes the current draft rather than the published version); only a published Workflow can run for real, and the run endpoint rejects anything else outright. Statuses exist on two levels with different meanings — do not mix them when troubleshooting:
+
+- **Run statuses**: `pending`, `running`, `waiting` (awaiting human approval), `success`, `failed`, `cancelled`, `timeout`.
+- **Node statuses**: `pending`, `running`, `waiting`, `success`, `failed`, `skipped` (condition not matched or skipped).
+
+The run drawer shows inputs, results, node traces, Tokens, duration, errors, and the matched branch; a run awaiting approval stays in `waiting` until feedback is submitted (see [Orchestrate a Workflow](../guides/workflow/orchestrate.mdx)). A real run is asynchronous: the endpoint only returns a `run_id` and the task is dispatched to the `workflow` queue for the main worker (see [System Architecture](./architecture.mdx)), so with no consumer on that queue the run stays in `pending` forever.
 
 ### Publishing, versions, and restore
 
-Publishing automatically creates a version snapshot. Restoring an old version first saves the current state, then copies the specified version as the new current version, so version history is never erased. The publish page offers two presentation modes: **Form & Result** or **Result & Details**.
+Publishing automatically creates a version snapshot and marks that version published. Restoring an old version first archives the current version as a backup (flagged `archived_reason=rollback_backup`), then copies the target version into a **new** published version, so version history is never erased and no existing version record is overwritten. The publish page offers two presentation modes: **Form & Result** (inputs, status, and final result only) or **Result & Details** (result first, with expandable node-level traces).
 
 Related content: [Orchestrate a Workflow](../guides/workflow/orchestrate.mdx), [Versioning](../guides/workflow/versioning.mdx), [Workflow API](/api/workflow).

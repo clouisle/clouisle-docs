@@ -4,7 +4,11 @@ description: 在隔离的 Bubblewrap 命名空间中安全运行 Python 与 Java
 icon: CodeXml
 ---
 
-代码沙箱是 Clouisle 的安全隔离执行环境，用于在工作流、Agent 和工具中运行用户提供的 Python 与 JavaScript 代码。沙箱任务进入专用 Celery Worker，由 rootless Bubblewrap 提供文件系统隔离，并通过超时、输出限制和磁盘检查约束失控任务。
+代码沙箱是 Clouisle 的安全隔离执行环境，用于在工作流、Agent 和工具中运行用户提供的 Python 与 JavaScript 代码。沙箱任务进入专用 Celery Worker（独立消费 `sandbox` 队列，与主 Worker 的四个队列分开），每个任务在独立的 Bubblewrap 用户+挂载命名空间中执行，并由超时、输出限制与磁盘检查约束失控任务。
+
+<Callout type="warn">
+官方部署的 sandbox-worker 以 **root**（`user: "0"` / `runAsUser: 0`）运行，并在运行时默认 cap 集之上叠加 **`CAP_SYS_ADMIN`**，同时使用 `seccomp=unconfined`（保留 `no-new-privileges`）——**它不是 rootless 容器**。隔离来自**每个任务**的 Bubblewrap 用户+挂载命名空间，而不是 Worker 自身被降权；逃逸后果与加固方式见下文「加固：收敛 Worker 的 `CAP_SYS_ADMIN`」。
+</Callout>
 
 ### 隔离架构与 Bubblewrap 挂载布局
 
@@ -40,6 +44,7 @@ bwrap \
 3. **运行时与中日韩（CJK）字体支持**：
    - **预置运行时**：预装 Python 3.13（基于 `uv` 管理）与 Node.js 22。
    - **CJK 字体支持**：`clouisle-sandbox-worker` 镜像预装 `fontconfig`、`fonts-wqy-zenhei` 与 `fonts-wqy-microhei` 并刷新字体缓存；`/usr/share/fonts` 通过只读挂载暴露给沙箱，使用 `matplotlib`、`seaborn`、`Pillow` 生成图表时可正常渲染中日韩字符，杜绝方块乱码（豆腐块）。
+
 ### 支持的运行时
 
 | 运行时 | 基础环境 |
@@ -55,7 +60,18 @@ bwrap \
 
 ### 执行边界
 
-代码工具默认超时 `30` 秒，持久化配置允许 `1-600` 秒；直接执行接口限制 `1-60` 秒。默认磁盘 `1024MB`，标准输出和错误各 `256KB`。产物路径必须位于 `/workspace`。边界明细见 [工具与 Skills 的沙箱边界](./tool.mdx)。
+沙箱任务限制由 `SandboxLimits` 统一定义，实际生效值取「任务配置」与「调用侧超时」中先到的一个：
+
+| 限制 | 默认值 | 允许范围 | 说明 |
+| --- | --- | --- | --- |
+| `timeout_seconds` | `30` | `1-600` | 单次任务的执行超时（秒）；超时后按进程组 SIGTERM → SIGKILL 回收 |
+| `disk_mb` | `1024` | `0-102400`（并受 `SANDBOX_MAX_DISK_MB` 默认 `8192` 约束） | 工作空间磁盘配额 |
+| `max_stdout_kb` | `256` | `16-8192` | 标准输出上限，超出部分截断并追加 `...<truncated>` |
+| `max_stderr_kb` | `256` | `16-8192` | 标准错误上限，同上 |
+
+调用侧还有一层独立的超时：直接执行接口 `POST /api/v1/tools/execute-code` 的 `timeout` 默认 `30`、范围 `1-60`；Agent 对话中调用代码工具时，外层上限来自 `STREAM_TOOL_TIMEOUT_CODE`（默认 `60` 秒）。已保存工具的 `limits.timeout_seconds` 优先于调用侧传入值（只在配置缺省时才用传入值补位），两边先触发的一方决定结果：沙箱内超时会让任务以执行超时失败，外层超时则表现为工具调用超时。
+
+产物路径必须位于 `/workspace` 内，单产物默认上限 `10MB`、产物总量默认上限 `10MB`（`SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` / `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB`）。边界明细见 [工具与 Skills 的沙箱边界](./tool.mdx)。
 
 ### 安全模型
 
@@ -109,9 +125,28 @@ sysctl --system
 - **Docker Compose**：启用 daemon 用户命名空间重映射（`/etc/docker/daemon.json` 中 `"userns-remap": "default"`），让每个容器进入嵌套用户命名空间——`CAP_SYS_ADMIN` 只作用于容器自身的 userns，宿主逃逸链全部失效。沙箱 Worker 仍能在重映射后的命名空间内特权创建自己的 Bubblewrap userns，沙箱功能不受影响。启用后需重设既有命名卷属主，且 daemon 上所有容器都会被重映射。
 - **Kubernetes**：不适用 daemon 级重映射；依赖 NetworkPolicy 限制沙箱出网、及时升级 Bubblewrap 并关注其 CVE，或在集群提供节点级用户命名空间支持时使用该能力。
 
+### 运行时开关与降级行为
+
+沙箱链路上有四个关键开关，**默认配置更偏向「代码总能跑起来」而不是「隔离一定生效」**，生产部署需要逐项确认：
+
+| 环境变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `SANDBOX_RUNTIME_ENABLED` | `true` | 设为 `false` 时完全不走沙箱网关，代码直接在 API/Worker 进程内执行（**无任何隔离**），仅供本地调试 |
+| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | 沙箱任务失败或网关抛异常时，回退到进程内的 legacy runner |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | 代码 `false`；镜像/Compose/Helm/K8s `true` | 把可执行载荷包进 Bubblewrap 挂载命名空间 |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | 代码 `bwrap`；部署 `/usr/bin/bwrap` | Bubblewrap 可执行文件名或绝对路径 |
+
+**为什么 `SANDBOX_LEGACY_FALLBACK_ENABLED` 值得单独关注**：`execute_code` 这条调用路径在沙箱网关返回失败或抛出异常时，会**静默**改用进程内 legacy runner 重新执行，只在服务端日志留一条 `warning`。也就是说，沙箱 Worker 宕机、`bwrap` 缺失、队列无人消费这些情况，默认结果不是「代码被拒绝执行」，而是「代码退回到**没有隔离**的进程内执行」——隔离保护在无声中消失，而调用方拿到的是一个「成功」的结果。
+
+要 fail-closed，把它设为 `false`：沙箱失败会直接把失败结果返回给调用方，不再降级。安全敏感的部署应当关闭该开关，并对沙箱任务失败率设告警。
+
+<Callout type="warn">
+反方向的坑同样要提防：文件系统隔离**已启用**时，找不到 `bwrap`、工作空间根目录不存在、或任务 `cwd` 逃出工作空间，启动器会抛 `SandboxIsolationError` 让任务失败——**启动器自身不会退化成未隔离执行**。但上层 `SANDBOX_LEGACY_FALLBACK_ENABLED=true` 仍会捕获这次失败并降级，所以只配置隔离开关、不关闭 fallback，并不能保证隔离一定生效。
+</Callout>
+
 ### 相关配置
 
-沙箱环境变量集中在 [环境变量参考](../../self-host/configuration/environment-variables.mdx)。启用文件系统隔离需要 `SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true` 且 `SANDBOX_FILESYSTEM_ISOLATION_BINARY` 指向 Bubblewrap 可执行文件（Compose/Helm 默认 `/usr/bin/bwrap`）；找不到 `bwrap` 或任务没有工作空间根目录时任务直接失败，不会降级为未隔离执行。Docker Compose 和 Helm 中的 sandbox-worker 默认使用 root + `CAP_SYS_ADMIN` + `seccomp=unconfined` 的安全配置；部署时若出现 bwrap 用户命名空间错误，见 [故障排查](../../self-host/operations/troubleshooting.mdx)。
+沙箱环境变量集中在 [环境变量参考](../../self-host/configuration/environment-variables.mdx)。启用文件系统隔离需要 `SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true` 且 `SANDBOX_FILESYSTEM_ISOLATION_BINARY` 指向 Bubblewrap 可执行文件（Compose/Helm 默认 `/usr/bin/bwrap`）。Docker Compose 和 Helm 中的 sandbox-worker 默认使用 root + `CAP_SYS_ADMIN` + `seccomp=unconfined` 的安全配置；部署时若出现 bwrap 用户命名空间错误，见 [故障排查](../../self-host/operations/troubleshooting.mdx)。
 
 ---
 

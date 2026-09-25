@@ -1,137 +1,142 @@
 ---
 title: Roles & Permissions
-description: Configure global roles and team-scoped permissions
+description: Configure global roles, custom roles, and team-scoped permissions
 icon: ShieldCheck
 ---
 
-Clouisle uses both global role permissions and resource-scoped roles. The frontend hides menus based on permissions, and the backend re-validates them in API dependencies; do not treat "cannot see the menu" as a security boundary.
+Authorization in Clouisle stacks **global roles** and **team gates**. The frontend hides menus and buttons by permission, and the backend re-validates in API dependencies — "cannot see the entry point" is not a security boundary; the endpoint still returns 403.
+
+For the full permission catalog and built-in role matrix, see the [Permissions & Roles Reference](/reference/permissions). This page covers **how to operate it, who has which permission, and what happens when it fails**.
 
 ## Permission Model
 
 ### Permission Hierarchy
 
 ```
-System level (Super Admin / Admin dashboard APIs)
-  ├── Global settings (admin:settings:*)
-  ├── User management (admin:user:*)
-  ├── Role and permission management (admin:role:*, admin:permission:*)
-  ├── Team management (admin:team:*)
-  ├── Model management (admin:model:*)
-  ├── App management (admin:app:*)
-  ├── Capability management (admin:capability:*)
-  ├── Knowledge-base management (admin:knowledge-base:*)
-  ├── SSO management (admin:sso:*)
-  └── Audit logs (audit:read, audit:export)
+Identity layer (is_superuser bypasses everything; no permission or membership check)
+  └── Global layer (User → Role → Permission, matched by permission code; `*` matches anything)
 
-Team-scoped platform APIs
-  ├── Team permissions (team:read/create/update/delete/manage)
-  └── Resource permissions (agent:*, workflow:*, kb:*, tool:*, skill:*)
+Global-layer namespaces
+  ├── Admin permissions (admin:*, requires admin:dashboard:access to enter the dashboard)
+  │     ├── admin:user:*, admin:role:*, admin:permission:*
+  │     ├── admin:team:*, admin:model:*, admin:app:*, admin:capability:*
+  │     ├── admin:knowledge-base:*, admin:settings:*, admin:sso:*
+  │     ├── admin:conversation:*, admin:memory:*, admin:notification:*
+  │     └── audit:read, audit:export
+  └── Resource permissions (team:*, agent:*, workflow:*, kb:*, tool:*, skill:*, apikey:*, conversation:*, memory:*)
+
+Team gate layer (TeamMember.role: owner / admin / member / viewer)
+  └── Applied when the resource carries team_id: the user must be a member; owner/admin-only
+      operations are decided by TEAM_MANAGEMENT_PERMISSIONS
 ```
 
-Dashboard permissions authorize Super Admin / Admin users to access system-level admin APIs; team-scoped permissions authorize platform resource APIs only within the user's teams. Team roles map as `admin → Admin`, `member → Member`, and `viewer → Viewer`; `Owner` is a team ownership concept, not an additional selectable member role in this permission matrix.
+The two layers are an **AND**: the global layer supplies "what may be done", the team gate supplies "in which team and at what level". Team roles therefore grant no permission codes themselves, and admin-dashboard permissions can never come from a team role.
+
+### Permission Check Order
+
+For a team-scoped request the backend runs, in order (see `backend/app/api/team_access.py`):
+
+1. **Team exists**: missing team → `team_not_found`, HTTP 404.
+2. **Superuser shortcut**: `is_superuser=True` passes immediately, without role or membership checks.
+3. **Membership**: not a member of that team → `not_team_member`, HTTP 403.
+4. **Team admin gate**: when the required permission is in `TEAM_MANAGEMENT_PERMISSIONS` (or the caller explicitly requires it) and the membership role is not `owner`/`admin` → `team_admin_required`, HTTP 403.
+5. **Team viewer limit**: membership role is `viewer` and the required permission is not in `VIEWER_ALLOWED_PERMISSIONS` → `operation_not_permitted`, HTTP 403.
+6. **Global permission code**: some global role of the user must contain the code (or the wildcard `*`); otherwise `operation_not_permitted`, HTTP 403.
+
+<Callout type="info">
+  Global-layer and admin endpoints use `PermissionChecker("code")`: superusers pass straight through; regular users must match the code. `*` is an ordinary permission code that the check logic treats as "matches any code", and only the built-in Super Admin role holds it.
+</Callout>
 
 ### Permission Types
 
-**Dashboard / Admin Permissions (require `admin:dashboard:access`):**
+**Dashboard / Admin permissions (`admin:` and `audit:` prefixes):**
 
-- `admin:user:*` — User management
-- `admin:role:*` — Role management
-- `admin:permission:*` — Permission management
-- `admin:model:*` — Model management
-- `admin:team:*` — System-wide team management
-- `admin:app:*` — Cross-team Agent and workflow management
-- `admin:capability:*` — Cross-team tool and Skill management
-- `admin:knowledge-base:*` — Knowledge base management from admin
-- `admin:settings:read/update` — View / modify site settings
-- `admin:sso:read/update` — View / manage SSO
-- `admin:conversation:*` — Conversation management
-- `admin:memory:*` — Memory record management
-- `admin:notification:*` — Notification management
-- `audit:read` / `audit:export` — View / export audit logs
+| Permission | Description |
+| --- | --- |
+| `admin:dashboard:access` | Master switch for the admin dashboard (Dashboard, System, Resources, Monitoring groups) |
+| `admin:user:read/create/update/delete` | User management |
+| `admin:role:read/create/update/delete` | Role management |
+| `admin:permission:read/create/update/delete` | Permission viewing and maintenance |
+| `admin:team:read/create/update/delete` | System-wide team management (any team) |
+| `admin:model:read/create/update/delete` | Model management |
+| `admin:app:read/create/update/delete/publish/duplicate` | Cross-team agents and workflows |
+| `admin:capability:read/create/update/delete/execute` | Cross-team tools and skills |
+| `admin:knowledge-base:read/test/create/update/delete` | Knowledge base management from the admin |
+| `admin:settings:read/update` | View / modify site settings |
+| `admin:sso:read/update` | View / manage SSO |
+| `admin:conversation:read/delete` | Admin conversation management |
+| `admin:memory:read/update/delete` | Admin memory records |
+| `admin:notification:create/delete` | Admin notifications |
+| `audit:read` / `audit:export` | View / export audit logs |
 
-**Team / Resource Permissions (team-isolated):**
+**Resource permissions (constrained by team data isolation):**
 
-- `team:read/create/update/delete/manage` — Team management
-- `agent:read/create/update/delete/publish/chat` — Agent management
-- `workflow:read/create/update/delete/publish/run/execute` — Workflow management
-- `kb:read/test/create/update/delete` — Knowledge base management
-- `tool:read/create/update/delete/execute` — Tool management
-- `skill:read/create/update/delete/execute` — Skill management
-- `apikey:read/create/update/delete` — API Key management
-- `conversation:read/delete` — Conversation management
+| Permission | Description |
+| --- | --- |
+| `team:read/create/update/delete/manage` | The team itself and its members |
+| `agent:read/create/update/delete/publish/chat` | Agent management |
+| `workflow:read/create/update/delete/publish/run/execute` | Workflow management |
+| `kb:read/test/create/update/delete` | Knowledge base management |
+| `tool:read/create/update/delete/execute` | Tool management |
+| `skill:read/create/update/delete/execute` | Skill management |
+| `apikey:read/create/update/delete` | API key management (**per user**, see below) |
+| `conversation:read/delete` | Conversation management |
+| `memory:read/create/update/delete` | Personal memory management |
 
 <Callout type="info">
-  In the admin dashboard, tools and Skills are reached through **Capabilities** (`/capabilities`), not a separate Tools navigation item.
+  In the admin dashboard, tools and skills are reached through **Capabilities** (`/capabilities`); there is no separate Tools navigation item.
 </Callout>
 
-For the full permission catalog and sidebar menu mapping, see the [Permissions & Roles Reference](/en/reference/permissions).
+## Built-in Roles
 
-## Accessing Permission Management
+At startup the backend idempotently initializes 5 global built-in roles (`is_system_role = true`) from `SystemPermissions`. They cannot be renamed or deleted, and their permission sets cannot be changed through the API.
 
-### Admin Dashboard
+| Role | Dashboard access | Authorization highlights |
+| --- | --- | --- |
+| **Super Admin** | Yes (and bypasses all checks) | Holds the wildcard permission code `*`, satisfying any permission check |
+| **Admin** | Yes | Dashboard read/write plus the full team-scoped resource set; **without** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:sso:update`, `admin:memory:update/delete` |
+| **Team Admin** | No | All Member permissions plus `team:update` and `team:manage`; granted by a startup migration to users whose membership role is `owner`/`admin` |
+| **Member** | No | Creates, edits, and runs team resources and manages their own API keys; without `team:update/manage`, `agent:delete/publish`, `workflow:delete/publish`, `tool:delete` |
+| **Viewer** | No | Read plus use/execute only; no write permission at all, and no `apikey:*` |
 
-1. Log in as administrator
-2. Navigate to **Admin** → **Permissions**
-3. View the permission management interface
-
-### Permission Views
-
-- **Roles**: Predefined and custom roles
-- **Users**: User permissions and roles
-- **Teams**: Team permissions
-- **API Scopes**: API access permissions
-- **Audit**: Permission change history
-
-## Role Management
-
-### System Roles
-
-**Super Admin:**
+### Super Admin
 
 ```yaml
 Name: Super Admin
-Type: System
-Description: Full system access
+Type: System built-in
+is_superuser: true  # the account also carries the superuser flag
 Permissions:
-  - "*" (all permissions)
+  - "*"           # wildcard code, matches any permission check
 ```
 
-**Admin:**
+The first user registered in the system is automatically promoted to Super Admin and assigned this role. An `is_superuser=True` account passes team endpoints directly, but it still needs a `TeamMember` row to appear in member lists such as `/teams/my`.
+
+### Admin
 
 ```yaml
 Name: Admin
-Type: System
-Description: Dashboard access, system read visibility, and team-scoped resource management
+Type: System built-in
 Permissions:
+  # Admin dashboard
   - admin:dashboard:access
   - admin:user:read/create/update/delete
-  - admin:role:read
-  - admin:permission:read
+  - admin:role:read            # read-only: cannot create/edit/delete roles
+  - admin:permission:read      # read-only: cannot create/edit/delete permissions
   - admin:team:read/create/update/delete
   - admin:model:read/create/update/delete
-  - admin:app:read/create/update/delete/publish/duplicate
   - admin:capability:read/create/update/delete/execute
+  - admin:app:read/create/update/delete/publish/duplicate
   - admin:knowledge-base:read/test/create/update/delete
   - admin:settings:read
   - admin:sso:read
+  - audit:read/export
   - admin:conversation:read/delete
   - admin:notification:create/delete
   - admin:memory:read
-  - audit:read
-  - audit:export
-  # Team-scoped permissions use explicit codes; there is no wildcard permission code.
-```
-
-**Member:**
-
-```yaml
-Name: Member
-Type: System
-Description: Collaborative member role without dashboard access
-Permissions:
-  - team:read
-  - agent:read/create/update/chat
-  - workflow:read/create/update/run
+  # Team-scoped resource permissions (explicit codes, no wildcard)
+  - team:read/create/update/delete/manage
+  - agent:read/create/update/delete/publish/chat
+  - workflow:read/create/update/delete/publish/run/execute
   - kb:read/test/create/update/delete
   - tool:read/create/update/delete/execute
   - skill:read/create/update/delete/execute
@@ -139,414 +144,364 @@ Permissions:
   - conversation:read/delete
 ```
 
-**Viewer:**
+Admin can manage every team and its members (`team:manage`), but team-management actions still require them to be `owner`/`admin` **inside that team**.
+
+### Team Admin
+
+```yaml
+Name: Team Admin
+Type: System built-in
+Permissions: all Member permissions, plus
+  - team:update    # change team name/description/avatar
+  - team:manage    # add/change/remove members
+```
+
+The startup migration `migrate_team_admin_roles()` grants this role to every user whose membership role is `owner` or `admin` in at least one team, and cleans up legacy team-scoped assignments. Consequently, **before** making someone a team admin they must already hold the global `team:manage` (usually by being given the Team Admin role first), otherwise the endpoint returns 403.
+
+### Member
+
+```yaml
+Name: Member
+Type: System built-in
+Permissions:
+  - team:read
+  - agent:read/create/update/chat        # no delete / publish
+  - workflow:read/create/update/run      # no delete / publish / execute
+  - kb:read/test/create/update/delete
+  - tool:read/create/update/delete/execute
+  - skill:read/create/update/delete/execute
+  - apikey:read/create/update/delete
+  - conversation:read/delete
+```
+
+Note: Member holds `tool:delete`, but tool deletion requires team owner/admin (`tool:delete` belongs to `TEAM_MANAGEMENT_PERMISSIONS`), so a Member cannot actually delete team tools.
+
+### Viewer
 
 ```yaml
 Name: Viewer
-Type: System
-Description: Default read-only role with execute permissions
+Type: System built-in
 Permissions:
   - team:read
-  - agent:read
-  - agent:chat
-  - workflow:read
-  - workflow:run
-  - kb:read
-  - kb:test
-  - tool:read
-  - tool:execute
-  - skill:read
-  - skill:execute
+  - agent:read/chat
+  - workflow:read/run
+  - kb:read/test
+  - tool:read/execute
+  - skill:read/execute
   - conversation:read
 ```
 
-### Team-scoped Roles and Permissions
+Viewer is the only default role: first initialization points the site setting `default_role_id` at Viewer, so newly registered users (including SSO-provisioned ones) get it by default.
 
-Team membership roles are relationship roles, not wildcard permission sets. The fixed roles are `owner`, `admin`, `member`, and `viewer`; startup migration maps `owner` and `admin` to the scoped **Admin** role, `member` to **Member**, and `viewer` to **Viewer**.
+<Callout type="warn" title="System role permissions are overwritten at startup">
+  Every backend start runs `sync_role_permissions()`, which aligns the permission sets of the 4 non-superuser built-in roles **to the list in code**: permissions outside the list are removed and missing ones are re-added. Editing the database to grant a system role extra permissions is reverted on the next start.
+</Callout>
 
-Platform permission codes are explicit values:
+## The Two UI Surfaces
 
-| Area | Codes |
-|------|-------|
-| Teams | `team:read`, `team:create`, `team:update`, `team:delete`, `team:manage` |
-| Agents | `agent:read`, `agent:create`, `agent:update`, `agent:delete`, `agent:publish`, `agent:chat` |
-| Workflows | `workflow:read`, `workflow:create`, `workflow:update`, `workflow:delete`, `workflow:publish`, `workflow:run` |
-| Knowledge bases | `kb:read`, `kb:create`, `kb:update`, `kb:delete`, `kb:test` |
+Two interfaces deal with teams and roles, and their permission requirements differ:
 
-Use `team:update`/`team:delete` for team mutations and `team:manage` for member management. There are no `team:view` or `team:members` permission codes, and platform permissions are not expressed as `team:*` wildcards in the permission registry.
+| Surface | Route | Required permission | What it can do |
+| --- | --- | --- | --- |
+| Admin team list (the team switcher's "Manage All Teams (Admin)") | `/teams` | `admin:team:read` (frontend `route-permissions.ts`) | List all teams, create a team (`admin:team:create`), edit a team (`admin:team:update`), delete a team (`admin:team:delete`), bulk delete |
+| Team-scoped page ("Manage Current Team") | `/app/team` | The page itself only requires membership; the entry link appears only for `is_superuser` or a team owner/admin holding `team:manage` | View members, add members (`team:manage` + owner/admin), change roles (owner), remove, leave, transfer ownership, view authorized models (read-only), edit team info (`team:update` + owner/admin) |
 
-Global dashboard permissions use the separate `admin:*` namespace; a team-scoped role does not grant dashboard access.
+Members and Viewers cannot see `/teams` (the frontend blocks on `admin:team:read` and the admin endpoints validate `admin:team:*`), so their only team entry is `/app/team`. The model tab on `/app/team` is **read-only**: it shows the team's authorized models and today's usage, stating that authorization is assigned by a system administrator.
 
-### Create Custom Role
+## Role Management
 
-1. Navigate to **Admin** → **Permissions** → **Roles**
-2. Click **Create Role**
-3. Fill in role details:
-   - **Name**: Role name
-   - **Description**: Role description
-4. Select permissions:
-   - Browse permission categories
-   - Check permissions to include
-   - Use "Select All" for categories
-5. Review permissions
-6. Click **Create Role**
+The dashboard **Roles** page (`/roles`) lists every role. That route requires `admin:role:read` — the built-in Admin role only has read, so **only a Super Admin (or a custom role carrying `admin:role:*`) can create, modify, or delete custom roles**.
 
-Custom roles are global roles (`is_system_role = false`). Permissions can be replaced later via `PUT /api/v1/admin/roles/{role_id}/permissions`.
+### Create a Custom Role
 
-**Custom Role Example:**
+1. Sign in as Super Admin and go to **Admin** → **Roles**.
+2. Click **Create Role** and fill in **Name** (globally unique) and **Description**.
+3. Check permission codes in the list (you can select all within a category).
+4. Save. `POST /api/v1/admin/roles` requires `admin:role:create`.
+
+Custom roles are global roles (`is_system_role = false`) and can be assigned as any user's global role, independent of team membership. A duplicate name returns `role_with_name_exists`.
+
+**Example:**
 
 ```yaml
 Name: Content Manager
-Description: Manages knowledge bases and documents
+Description: Manages knowledge bases and documents, no dashboard access
 Permissions:
   - team:read
-  - kb:create
-  - kb:read
-  - kb:update
-  - kb:delete
-  - kb:test
-  - agent:read
-  - agent:chat
+  - kb:read/test/create/update/delete
+  - agent:read/chat
 ```
 
-### Edit Role
-
-1. Navigate to **Roles**
-2. Select role
-3. Click **Edit**
-4. Modify:
-   - Role name
-   - Description
-   - Permissions
-5. Save changes
-
 <Callout type="warn">
-  System roles (Super Admin, Admin, Member, Viewer) cannot be modified or deleted. Custom roles are edited via `PUT /api/v1/admin/roles/{role_id}` and `PUT /api/v1/admin/roles/{role_id}/permissions` (replaces the full permission set).
+  Unknown permission codes passed at **creation time are silently ignored**, whereas replacing a permission set (`PUT .../permissions`) fails with `permission_code_not_found` for an unknown code. The two behave differently — keep that in mind when debugging.
 </Callout>
 
-### Delete Role
+### Edit a Role
 
-1. Navigate to **Roles**
-2. Select custom role
-3. Click **Delete**
-4. Choose action for users with this role:
-   - Assign to different role
-   - Remove role (keep user)
-5. Confirm deletion
+`PUT /api/v1/admin/roles/{role_id}` changes the name and description (`admin:role:update`); `PUT /api/v1/admin/roles/{role_id}/permissions` takes `{ "permissions": [...] }` and **replaces** the whole set (not incremental). Both reject system roles:
+
+- name/description → `cannot_modify_system_role`
+- permission set → `cannot_modify_system_role_permissions`
+
+### Delete a Role
+
+`DELETE /api/v1/admin/roles/{role_id}` requires `admin:role:delete`. Two hard limits:
+
+- System role → `cannot_delete_system_role`
+- Still assigned to users → `role_in_use`, with `count` in the error payload
+
+<Callout type="error">
+  Deleting a role has **no** "migrate users to another role" option. To delete an in-use custom role you must first open **Admin** → **Users** and change that role on every affected user, then come back — otherwise the endpoint simply returns `role_in_use`. The list page supports selecting several custom roles and deleting them in bulk.
+</Callout>
+
+### Custom Permissions
+
+The permission catalog itself is maintainable (`/permissions` page, requires `admin:permission:read`):
+
+| Operation | Endpoint | Permission |
+| --- | --- | --- |
+| List permissions (`scope`, `search` filters, `page`/`page_size`) | `GET /api/v1/admin/permissions` | `admin:permission:read` |
+| List available scopes | `GET /api/v1/admin/permissions/scopes` | `admin:permission:read` |
+| Create a custom permission (`is_system=false`) | `POST /api/v1/admin/permissions` | `admin:permission:create` |
+| Update a custom permission | `PUT /api/v1/admin/permissions/{permission_id}` | `admin:permission:update` |
+| Delete a custom permission | `DELETE /api/v1/admin/permissions/{permission_id}` | `admin:permission:delete` |
+
+System permissions (`is_system=true`, i.e. every code defined in `SystemPermissions`) cannot be modified or deleted: `cannot_update_system_permission` / `cannot_delete_system_permission`. A duplicate custom code returns `permission_with_code_exists`.
+
+<Callout type="warn">
+  A newly created custom permission code is **not checked anywhere by default** — unless some backend code happens to test that exact string, it is just a record. Checking it on a role unlocks nothing.
+</Callout>
 
 ## User Permissions
 
 ### View User Permissions
 
-1. Navigate to **Admin** → **Users**
-2. Select user
-3. View the user's global roles and team memberships
-4. View:
-   - Global roles
-   - Team memberships and team roles
-   - Effective permissions (derived from the user's global roles plus team-scoped role assignments)
+**Admin** → **Users** opens the user list (requires `admin:user:read`). The user detail/edit panel shows:
 
-**User Permission View:**
+- The user's **global roles** (multi-select, the `roles` field)
+- Team memberships and in-team roles (maintained from the teams pages)
+- SSO connections, `auth_source`, `is_active`, and the `is_superuser` flag
 
-```yaml
-User: john.doe@example.com
-Global Roles: Member
+There is no aggregate "effective permissions" view: actual permissions are the union of permission codes from all global roles plus the team gates, so you compare manually against the [Permissions Reference](/reference/permissions).
 
-Team Memberships:
-  Support Team:
-    Role: Admin
-  Sales Team:
-    Role: Member
-```
+### Change a User's Global Roles
 
-### Change User System Role
+1. In **Admin** → **Users**, click **Edit** on the target user.
+2. Check/uncheck roles in the **Role** area (multi-select).
+3. Save. The frontend calls `PUT /api/v1/admin/users/{user_id}` with `roles: ["Admin", ...]`, requiring `admin:user:update`.
 
-1. Navigate to **Admin** → **Users**
-2. Select user
-3. Click **Edit**
-4. Change the user's global role:
-   - Super Admin
-   - Admin
-   - Member
-   - Viewer
-5. Save changes
+Backend behaviour:
+
+- `roles` **replaces** the set: it clears first and then writes, so roles you omit are lost.
+- Role names must match exactly; unmatched names are ignored.
+- **Protection rule**: if the user is still `owner`/`admin` of some team and the new role set no longer contains `team:manage` (or `*`), the request fails with 403 `operation_not_permitted` (`permission: team:manage`). To strip a team administrator, first downgrade their membership role in every team.
 
 <Callout type="warn">
-  Assigning Admin grants dashboard access and system read permissions; Super Admin grants full system access.
+  Role changes apply to subsequent requests immediately (permissions are read per request); issued JWTs do not cache permissions. Changing your own or someone else's roles does not force a logout, but the next restricted request will be denied.
+</Callout>
+
+<Callout type="info">
+  Roles **cannot** be set while creating a user: `POST /api/v1/admin/users` does not accept `roles`, so a new user has no global role until you assign one afterwards.
 </Callout>
 
 ### Grant Special Permissions
 
-> **Note: Not implemented / Roadmap.** There is no per-user permission grant/revoke with scope and expiry. The endpoints `GET /users/{user_id}/permissions`, `/permissions/check`, and `POST/DELETE /users/{user_id}/permissions` do not exist. Permissions are assigned through global roles (`PUT /api/v1/admin/roles/{role_id}/permissions`) and team memberships.
+> **Not implemented / Roadmap.** There is no per-user permission grant/revoke with scope and expiry. The endpoints `GET /users/{user_id}/permissions`, `/permissions/check`, and `POST/DELETE /users/{user_id}/permissions` do not exist. Permissions are assigned only through global roles (`PUT /api/v1/admin/roles/{role_id}/permissions`) and team memberships.
 
 ## Team Permissions
 
-### View Team Permissions
+### Team Roles Are Gates, Not Grants
 
-1. Navigate to **Teams**
-2. Select team
-3. View members and their team roles
+`TeamMember.role` has exactly 4 fixed values: `owner`, `admin`, `member`, `viewer`. It carries **no permission codes**; it answers only two questions: is this person a member of this team, and is their level high enough for a management action.
 
-### Configure Team Roles
+The legacy `ScopedRoleAssignment` (team-scoped role table) and `check_scoped_permission` design is retired: the model is still defined in code, but nothing creates or reads it, and the startup migration only deletes leftover rows. Team management capability therefore comes from the global **Team Admin** role, not from a team-scoped grant.
 
-Team membership is mirrored into team-scoped role assignments:
+Two rules:
 
-| Team role | Scoped role in that team |
-|-----------|--------------------------|
-| Owner | Admin |
-| Admin | Admin |
-| Member | Member |
-| Viewer | Viewer |
+| Rule | Content |
+| --- | --- |
+| `TEAM_MANAGEMENT_PERMISSIONS` | `team:update`, `team:manage`, `team:delete`, `tool:delete` — these actions require both the global permission code **and** `owner`/`admin` in that team |
+| `VIEWER_ALLOWED_PERMISSIONS` | A team `viewer` may only use: `team:read`, `agent:read`/`agent:chat`, `workflow:read`/`workflow:run`/`workflow:execute`, `kb:read`/`kb:test`, `tool:read`/`tool:execute`, `skill:read`/`skill:execute`, `conversation:read`; anything else is `operation_not_permitted` |
 
-> **Note:** Team roles are the fixed set Owner / Admin / Member / Viewer. There is no per-team permission override (adding/removing individual permissions for a team). Custom global roles can be created and assigned as a user's global role, but team-scoped access uses the mirrored role assignments above.
+A team `viewer` and the global **Viewer** role are two different things: the former only means "lowest level inside this team" and grants no global `Viewer` codes; conversely, when adding a global Viewer to a team, use the `viewer` membership role.
 
-### Resource Permissions
+### Typical Team Role Combinations
 
-**Agent Permissions Example:**
+Real capability = global role permissions ∩ team gate. The most common combinations (assuming the member already holds the matching global role):
+
+| Capability | owner + Team Admin | admin + Team Admin | member + Member | viewer + Viewer |
+| --- | :-: | :-: | :-: | :-: |
+| View team and members | ✓ | ✓ | ✓ | ✓ |
+| Edit team info (name/description/avatar) | ✓ | ✓ | ✗ | ✗ |
+| Add members | ✓ | ✓ | ✗ | ✗ |
+| Change member roles | ✓ | ✗ | ✗ | ✗ |
+| Remove members | ✓ | ✓ (not other admins/owner) | ✗ | ✗ |
+| Transfer ownership | ✓ | ✗ | ✗ | ✗ |
+| Delete the team | ✗ (use the dashboard `admin:team:delete`) | ✗ | ✗ | ✗ |
+| Create/edit agents, workflows, knowledge bases | ✓ | ✓ | ✓ | ✗ |
+| Delete agents / publish agents and workflows | ✓ | ✓ | ✗ | ✗ |
+| Chat with agents, run workflows | ✓ | ✓ | ✓ | ✓ |
+| Create/edit own tools and skills | ✓ | ✓ | ✓ | ✗ |
+| Edit **others'** tools/skills | ✓ | ✓ | ✗ | ✗ |
+| Delete tools | ✓ | ✓ | ✗ (team gate rejects) | ✗ |
+| Search/test knowledge bases, upload/delete documents | ✓ | ✓ | ✓ | read-only search |
+| Execute tools and skills | ✓ | ✓ | ✓ | ✓ |
+| Manage API keys | Own keys only | Own keys only | Own keys only | ✗ |
+| View audit logs / admin dashboard | Needs global `audit:read` / `admin:dashboard:access` | Same | ✗ | ✗ |
+
+<Callout type="warn" title="API keys are not team resources">
+  An API key is owned by a person via `user_id`: for non-superusers the list endpoint forces `user_id = current user`, and `ensure_api_key_owner()` requires "owner or superuser" to read/write a single key. So a team owner/admin **cannot see or revoke** someone else's keys — only a superuser can "view all API keys". See the [API Keys reference](/reference/api-keys).
+</Callout>
+
+Full constraints on team-management actions live in [Teams & Members](./teams.mdx).
+
+### Resource Visibility
+
+Beyond the two gates, the resource's own visibility also blocks access:
+
+**Agent example:**
 
 ```yaml
 Agent: Customer Support Agent
 Owner: john.doe@example.com
 Team: Support Team
 
-Access Control:
-  Owner: Full access
-  Team Admins: Full access
-  Team Members: Read, Chat
-  Team Viewers: Read, Chat
-  Other Teams: No access
+Access control:
+  visibility=team  → team members can read; writes need the owner or a team owner/admin
+  visibility=private → only the creator (or team owner/admin when the creator is absent)
+Team members: Read, Chat
+Other teams: No access
 ```
 
-**Workflow Permissions Example:**
+**Workflow example:**
 
 ```yaml
 Workflow: Customer Inquiry Processing
 Owner: jane.smith@example.com
 Team: Support Team
 
-Access Control:
-  Owner: Full access
-  Team Admins: Full access
-  Team Members: Read, Execute
-  Team Viewers: Read
-  Other Teams: No access
+Access control:
+  visibility=team  → team members can read; writes need the owner or a team owner/admin
+  visibility=private → only the creator (or team owner/admin when the creator is absent)
+Team members: Read, Run
+Other teams: No access
 ```
 
 ### Share Resources
 
-Cross-team sharing is limited:
+Cross-team sharing exists only for **tools**:
 
-- **Tools**: Custom tools can be shared with other teams via `POST /api/v1/admin/tools/{tool_id}/share` (and listed/unshared with `GET /{tool_id}/shares` / `DELETE /{tool_id}/share/{team_id}`).
-- **Agents / Workflows / Knowledge Bases**: There is no per-resource share with per-team permission levels. Cross-team visibility is controlled by the resource's `visibility` (Team / Public for agents), and access is otherwise team-isolated.
+- Custom tools can be shared with other teams via `POST /api/v1/admin/tools/{tool_id}/share` (list with `GET /api/v1/tools/{tool_id}/shares`, unshare with `DELETE /api/v1/tools/{tool_id}/share/{team_id}`).
+- Agents / workflows / knowledge bases have no per-team sharing level: cross-team visibility comes from the resource's `visibility` (Team / Public for agents), and access is otherwise team-isolated.
 
-## API Scope Management
+## API Key Scopes
 
-### API Scopes
-
-API keys carry a `scopes` list (default `["chat"]`; empty means full access), a `rate_limit` (requests per minute, 0 = unlimited), an `expires_at` date, and can be associated with specific agents and workflows. API keys are managed in **API Keys** (`/api-keys`) and via `POST /api/v1/api-keys`.
-
-### Configure API Key Scopes
-
-1. Navigate to **API Keys**
-2. Select API key
-3. Edit scopes and associations
-4. Save changes
-
-**API Key Scope Example:**
+An API key carries a `scopes` list (default `["chat"]`; an empty list means unrestricted), a `rate_limit` (requests per minute, `0` = unlimited), an `expires_at`, and can be bound to specific agents and workflows. Keys are managed on the `/api-keys` page or `/app/api-keys`, created via `POST /api/v1/api-keys` (requires `apikey:create`).
 
 ```yaml
 API Key: ak_...
 Owner: integration@example.com
 Scopes:
   - chat
-
-Rate Limit: 1000 (requests/minute)
-Expires At: 2027-02-11
-Associated Agents: 2
-Associated Workflows: 1
+Rate limit: 1000 (requests/minute)
+Expires at: 2027-02-11
 ```
+
+<Callout type="info">
+  Scopes are an **upper bound**, not a role: the key's effective power is still constrained by the agents/workflows it can call, their configuration, and team isolation. See the [API Keys reference](/reference/api-keys).
+</Callout>
 
 ## Permission Auditing
 
 ### View Permission Changes
 
-> **Note: Not implemented / Roadmap.** There is no dedicated permission-change audit view, and the audit log has no `granted` / `revoked` actions. Role changes and team membership changes do produce audit log entries (e.g. `update_user`, `add_team_member`, `update_team_member`, `create_role`, `update_role`), which can be reviewed in **Audit Logs**.
+> **Not implemented / Roadmap.** There is no dedicated permission-change audit view, and the audit log has no `granted` / `revoked` action types.
+
+Current audit coverage (each endpoint checked):
+
+| Has audit entries | No audit entries |
+| --- | --- |
+| Users: `create_user`, `update_user`, `delete_user`, `activate_user`, `deactivate_user`, `force_password_change`, … | **Role create/update/delete** (no audit calls in any `/api/v1/admin/roles` endpoint) |
+| Teams: `create_team`, `update_team`, `delete_team`, `add_team_member`, `remove_team_member` | **Permission create/update/delete** (no audit calls in any `/api/v1/admin/permissions` endpoint) |
+| Team model authorization: `add_team_model`, `update_team_model`, `remove_team_model`, batch add/remove | **Member role changes**, **ownership transfer**, **leaving a team** |
+
+Review entries in **Audit Logs** (requires `audit:read`), filtered by resource and operation. See [Audit Logs](./audit-logs.mdx).
 
 ### Permission Usage Reports
 
-> **Note: Not implemented / Roadmap.** Permission usage reports (usage by user/team, unused permissions, over-privileged users) do not exist.
+> **Not implemented / Roadmap.** There are no per-user/team permission usage reports, unused-permission lists, or over-privilege detection.
 
 ## Troubleshooting 403s
 
-### Permission Denied Errors
+### Permission Denied
 
-**Symptoms:**
-- User cannot access feature
-- "Permission denied" error
-- 403 Forbidden response
+**Symptoms:** a feature is unavailable, or the API returns 403 `operation_not_permitted` / `team_admin_required` / `not_team_member`.
 
-**Solutions:**
+Check in order:
 
-1. **Check user permissions:**
-   ```
-   Admin → Users → Select user
-   Permissions → View effective permissions
-   ```
-
-2. **Check team membership:**
-   - Verify user is in correct team
-   - Check team role
-   - Verify team has access to resource
-
-3. **Check resource permissions:**
-   - Verify resource is shared with team
-   - Check resource access level
-   - Verify resource is not private
-
-4. **Check API key scopes:**
-   - Verify API key has required scopes
-   - Check scope restrictions
-   - Regenerate key if needed
+1. **Is the global permission code missing?** Go to **Admin** → **Users** → edit the user and check whether `roles` includes a role carrying the target code (compare with the [Permissions Reference](/reference/permissions)). The error response carries a `permission` field naming the missing code.
+2. **Is the team gate the wrong level?** When the action uses a management permission (`team:update`/`team:manage`/`team:delete`/`tool:delete`) the user must be team `owner`/`admin`; a team `viewer` is always rejected for writes.
+3. **Is the user not a member?** `not_team_member` (403) means the user is not in that team at all.
+4. **Is it resource visibility?** A `visibility=private` resource returns `agent_access_denied` / `tool_access_denied` (403) to non-creators, regardless of role permissions.
+5. **Is it API key ownership?** A key can only be read/written by its owner or a superuser; anyone else gets `permission_denied`.
 
 ### Over-Privileged Users
 
-**Symptoms:**
-- Users have unnecessary permissions
-- Security audit findings
+1. In **Users**, check the target user's `roles` and compare each against the [Permissions Reference](/reference/permissions).
+2. In **Roles**, review each role's permission set — note that the built-in Admin role already covers all team resources, so stacking extra broad custom roles is usually unnecessary.
+3. Before downgrading, verify whether the user is still `owner`/`admin` of any team; otherwise `PUT /admin/users/{id}` is rejected by the `team:manage` protection rule.
+4. Review regularly. User and team-membership changes are audited, but **role create/update/delete is not**, so keep your own record of role edits.
 
-**Solutions:**
+### Inconsistent Permission Behaviour
 
-1. **Review user permissions:**
-   - Review the user's global roles and team memberships in **Users**
-   - Cross-check against the role permission matrix
-
-2. **Apply least privilege:**
-   - Remove unused permissions from roles
-   - Downgrade roles if appropriate
-   - Use custom roles for specific needs
-
-3. **Regular audits:**
-   - Schedule quarterly permission reviews
-   - Update roles based on job changes
-
-### Permission Conflicts
-
-**Symptoms:**
-- Unexpected permission behavior
-- Inconsistent access
-
-**Solutions:**
-
-1. **Check permission hierarchy:**
-   - Global roles provide permission codes
-   - Team-scoped roles apply only inside the target team
-   - `admin:*` permissions cannot be satisfied by team-scoped assignments
-
-2. **Review role assignments:**
-   - View the user's global roles and team memberships
-   - Check the role permission sets in **Roles**
-
-3. **Resolve conflicts:**
-   - Adjust role permission sets
-   - Use more specific roles
-   - Document permission decisions
+1. **Identify the layer**: a team-scoped request is "global code + team gate"; only dashboard endpoints look at `admin:*`.
+2. **Identify the source**: users may hold several roles and permissions are unioned; the startup migration may also have added Team Admin.
+3. **Remember system roles cannot be hand-edited**: their permission sets are re-synced to the code list on every start, so direct database edits do nothing.
 
 ## Best Practices
 
-### Permission Management
-
 **✅ Do:**
-- Follow principle of least privilege
-- Use roles instead of individual permissions
-- Document permission decisions
-- Review permissions regularly
-- Audit permission changes
-- Use temporary permissions when appropriate
-- Test permission changes in staging
+
+- Carry job permissions in custom roles instead of adding more built-in roles
+- Grant the Team Admin global role first, then set the person as team `admin` (the reverse order is blocked with 403)
+- Use team `viewer` + global Viewer together for read-only team members
+- Create and rotate API keys per integration instead of sharing a personal account's key
+- Review role members and team owner/admin lists quarterly
+- Validate permission changes in a test environment before production
 
 **❌ Don't:**
-- Grant admin access unnecessarily
-- Use overly broad permissions
-- Skip documentation
-- Forget to review
-- Ignore audit logs
-- Make permanent what should be temporary
-- Change permissions in production without testing
 
-### Role Design
-
-**✅ Do:**
-- Create roles based on job functions
-- Use descriptive role names
-- Document role purposes
-- Keep roles simple and focused
-- Review roles regularly
-- Version role changes
-
-**❌ Don't:**
-- Create too many roles
-- Use vague role names
-- Skip documentation
-- Make roles too complex
-- Forget to review
-- Change roles without versioning
-
-### Security
-
-**✅ Do:**
-- Enforce strong authentication
-- Use 2FA for privileged accounts
-- Rotate API keys regularly
-- Monitor permission usage
-- Audit permission changes
-- Restrict admin access
-- Use IP whitelisting for sensitive operations
-
-**❌ Don't:**
-- Allow weak passwords
-- Skip 2FA for admins
-- Use static API keys forever
-- Ignore usage patterns
-- Skip audit logs
-- Grant admin access freely
-- Allow unrestricted access
+- Hand out `*` (only Super Admin should hold it)
+- Try to stack permissions onto the built-in Admin role (it does not work; the startup sync reverts it)
+- Treat "the frontend hides the button" as a security boundary
+- Run several integrations from one shared account
 
 ## API Access
 
-### Manage Permissions via API
-
-Admin role and permission endpoints live under `/api/v1/admin/roles` and `/api/v1/admin/permissions` and require `admin:role:*` / `admin:permission:*` permissions.
-
-**Role Operations:**
+Role and permission endpoints live under `/api/v1/admin/roles` and `/api/v1/admin/permissions` and require `admin:role:*` / `admin:permission:*`:
 
 ```python
-# List roles
+# List roles (page / page_size / search)
 roles = api.get("/api/v1/admin/roles")
 
-# Create role
+# Create a role
 role = api.post("/api/v1/admin/roles", json={
     "name": "Content Manager",
     "description": "Manages knowledge bases",
-    "permissions": ["team:read", "kb:read", "kb:create", "kb:update", "kb:delete", "kb:test"]
+    "permissions": ["team:read", "kb:read", "kb:create", "kb:update", "kb:delete", "kb:test"],
 })
 
-# Replace a role's permissions (PUT, not PATCH)
+# Replace a role's permissions wholesale (PUT, not PATCH)
 api.put(f"/api/v1/admin/roles/{role_id}/permissions", json={
-    "permissions": ["kb:read", "kb:create"]
+    "permissions": ["kb:read", "kb:create"],
 })
-```
 
-**Permission Operations:**
-
-```python
-# List permissions (optionally filtered by scope)
+# List permissions, optionally filtered by scope
 permissions = api.get("/api/v1/admin/permissions", params={"scope": ["admin", "team"]})
-
-# List permission scopes
 scopes = api.get("/api/v1/admin/permissions/scopes")
 ```
 
-> **Note:** There are no per-user permission endpoints (`/users/{user_id}/permissions`).
+> **Note:** There are no per-user permission endpoints (`/users/{user_id}/permissions`); user permissions can only be replaced wholesale through the `roles` field.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/roles-permissions.png" alt="Roles and permissions management" />
@@ -555,11 +510,15 @@ scopes = api.get("/api/v1/admin/permissions/scopes")
 
 ## Protection Rules
 
-System roles and system permissions cannot be deleted or arbitrarily modified. The super administrator, default team owners, and roles in use cannot be deleted. Permission changes affect subsequent requests; issued JWTs should not be treated as permanent permission caches.
+- System roles (the 5 built-in roles) and system permissions cannot be deleted or renamed, and their permission sets cannot be changed (the startup sync restores the code list).
+- A custom role must be unassigned before deletion, otherwise `role_in_use`.
+- Superuser accounts cannot be deleted (`cannot_delete_superuser`) or deactivated (`cannot_deactivate_superuser`).
+- The default team cannot be deleted (`cannot_delete_default_team`); a team owner cannot leave or be removed — transfer ownership first.
+- Permission changes apply to subsequent requests immediately; issued JWTs are not a permission cache.
 
 ## Related Documentation
 
-- [Permissions & Roles Reference](/en/reference/permissions) — Full permission catalog and sidebar menu mapping
-- [Team Roles](/en/usage/guides/teams/team-roles) — User guide to team roles
-- [API Key Scopes](/en/usage/guides/api-keys/api-key-scopes) — API scope reference
-- [Audit Logs](/en/usage/guides/administration/audit-logs) — Audit log management
+- [Permissions & Roles Reference](/reference/permissions) — the full permission catalog, built-in role matrix, and sidebar mapping
+- [Teams & Members](./teams.mdx) — adding/changing/removing members, leaving, transferring ownership, and the team API
+- [User Management](./user-management.mdx) — creating, activating/deactivating, deleting users, and assigning roles
+- [Audit Logs](./audit-logs.mdx) — audit records of role and membership changes

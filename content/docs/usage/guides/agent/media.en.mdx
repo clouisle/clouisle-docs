@@ -4,7 +4,11 @@ description: Configure Agent file attachments, reference images, and image and v
 icon: Images
 ---
 
-Attachments give the Agent user assets; media generation lets the Agent call authorized image or video models. Both must be explicitly enabled.
+Attachments give the Agent user assets; media generation lets the Agent call authorized image or video models. Both must be explicitly enabled in the Agent orchestration.
+
+<Callout type="info">
+  Media generation covers **images and videos only** — no audio generation or speech synthesis. When a switch is on, the platform injects the `generate_image` / `generate_video` tool into the model; when it is off, the model never sees those tools.
+</Callout>
 
 ## Configure Attachments
 
@@ -31,7 +35,7 @@ Default extensions include PDF, Word, PowerPoint, Excel, TXT, Markdown, CSV, JSO
 1. Turn on **Video Generation** and select a video model.
 2. The default duration is `5` seconds and the default single-run maximum is `10` seconds; both range from `1-30` seconds.
 3. The default aspect ratio is `16:9`.
-4. The status polling interval defaults to `3000ms` and the synchronous wait cap defaults to `120` seconds. After a timeout, a task may return a still-processing status rather than a failure.
+4. The status polling interval defaults to `3000ms` (range `500-30000ms`) and the synchronous wait cap defaults to `120` seconds (range `5-600`). Once the synchronous cap is exceeded, the task may come back as still-processing rather than failed — retrieve it later via the status tool or `GET /api/v1/agents/{agent_id}/media/video-status`.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-media-capabilities.png" alt="Agent attachments and media capabilities" />

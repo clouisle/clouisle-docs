@@ -21,7 +21,7 @@ Clouisle provides a dedicated **Agent Studio** workspace (`/app/apps/{agent_id}`
 2. Fill in the name (`1-100` characters) and description (up to `500` characters).
 3. Select an owning team.
 4. On the Agent Studio orchestration page, select **Agent Settings** in the top-right corner, choose the model, and configure the name, icon, opening message, suggested questions, and visibility.
-5. Set visibility to **Private** or **Team**.
+5. Visibility defaults to **Private** (only the creator can access it); switch it to **Team** as needed.
 
 <TypeTable
   type={{
@@ -30,10 +30,12 @@ Clouisle provides a dedicated **Agent Studio** workspace (`/app/apps/{agent_id}`
     team_id: { description: 'Owning team ID', type: 'string', required: true },
     model_id: { description: 'LLM model (team-granted TeamModel)', type: 'string', required: true },
     system_prompt: { description: 'System prompt that defines agent behavior', type: 'string' },
-    max_iterations: { description: 'Tool-call iteration cap', type: 'number', default: 5 },
+    max_iterations: { description: 'Tool-call iteration cap (each tool call counts as one iteration)', type: 'number', default: 5 },
     visibility: { description: 'Visibility', type: "'private' | 'team'", default: 'private' },
   }}
 />
+
+**Max Iterations** is the Agent setting `max_iterations`: how many tool-call rounds an Agent may run within a single reply. It defaults to `5` and accepts `1-200` (server-validated). Set it too low and complex tasks end early with `max_iterations_reached`; set it too high and a repeatedly failing tool can burn a lot of tokens.
 
 <Callout type="info">
   Agents do not expose per-agent sampling parameters (Temperature, Max Tokens, Top P, Frequency/Presence Penalty). LLM sampling defaults are configured on the model itself via `default_params`. Agents only configure `model_id`, `system_prompt`, `max_iterations`, tool sets, and knowledge base attachments.
@@ -107,6 +109,10 @@ Before enabling attachments, image generation, video generation, or cross-sessio
 | Image Gen | **Image Gen** | Default `1024×1024` (`256-4096`), max `4` per request (`1-10`) |
 | Video Gen | **Video Gen** | Default `5s` (`1-30s`), aspect ratio `16:9` |
 | Memory | **Memory** | Max memories `10` (`1-50`), auto-extract enabled by default |
+
+Media generation covers **images and videos only** (there is no audio/TTS generation). Turning on image or video generation injects the `generate_image` / `generate_video` tool into the model and calls the team-authorized model of that kind; with the switch off the model never sees those tools.
+
+On context: long conversations are compressed with a **single summary** — once a request exceeds the trigger budget, the older history is replaced by one generated summary while the recent stretch stays verbatim. That summary is scoped to the current conversation and is **not** cross-conversation memory, which is a separate persisted **entity/relation graph**.
 
 For full configuration options, see [Attachments and Media](./media) and [Memory and Context](./memory).
 

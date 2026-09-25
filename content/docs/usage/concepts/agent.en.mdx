@@ -8,9 +8,11 @@ An Agent is an AI application for multi-turn conversations. It combines a chat m
 
 ### Orchestration and runtime
 
-The Agent editor page consists of an orchestration form and a live preview. Prompts support `{{variable_name}}`; user variables support text, paragraphs, dropdown options, numbers, and checkboxes. The system variable `{{query}}` represents the current user input.
+The Agent editor page consists of an orchestration form and a live preview. Prompts support `{{variable_name}}`; user variables in the editor can be text, paragraph, dropdown options, number, checkbox, plus array, object, and file/image types (file variables receive attachments). The system variable `{{query}}` represents the current user input.
 
 An Agent performs up to `1-200` tool iterations per turn, with a default of `5`. When the limit is reached, the turn terminates with `max_iterations_reached` instead of calling tools indefinitely.
+
+Runs are asynchronous and durable: each send dispatches an `AgentRun` to the `agent` queue, where the main worker drives the model calls and the tool loop while the client follows the SSE stream and can reconnect after a drop (see [System Architecture](./architecture.mdx)). Tasks are **not retried automatically** — a retry would repeat model and tool calls with side effects — so a worker must consume the `agent` queue, otherwise runs just sit in `queued` with no error.
 
 ### RAG modes
 
@@ -24,11 +26,13 @@ Each linked Knowledge Base can independently configure its retrieval method, Top
 
 ### Conversations, branching, and compression
 
-A conversation is implicitly created with the first message. Users can edit messages or regenerate replies; the system saves versions and maintains the active branch. Long conversations run a context budget check before model calls and can compress old reasoning, tool results, and historical turns while keeping recent raw turns.
+A conversation is created implicitly with the first message (a request without `conversation_id` starts a new one and bumps the Agent and team conversation counters). Users can edit messages or regenerate replies; the system saves versions and maintains the active branch. Long conversations run a context budget check before model calls and can compress old reasoning, tool results, and historical turns while keeping recent raw turns. Request-time compression is on by default (`context_compression_config.enabled`) with a default summary budget of `1000` tokens (configurable `128-8000`); compaction replaces old turns with a "watermarked summary + recent verbatim tail", marking the summarized history via `context_summary_watermark_id` so the most recent turns are never swallowed.
 
 ### Memory
 
-With memory enabled, an Agent can retrieve user information across conversations. Each turn injects up to `10` memory entries by default, configurable from `1-50`; automatic extraction is on by default, and the minimum importance defaults to `medium`. Memory differs from conversation context: conversation context belongs to a single conversation, while memory can be used across conversations.
+Memory is **off** by default (`enable_memory=false`). Once enabled, an Agent can retrieve user information across conversations: each turn injects up to `10` memory entries by default (`max_memories_per_retrieval`, configurable `1-50`), automatic extraction is on by default (`auto_extract`), and the minimum importance for auto-extracted memories defaults to `medium` (one of `low` / `medium` / `high`). Turning automatic extraction off only stops **writes**; already-stored memories are still retrieved and injected.
+
+Memory and conversation context have different scopes: conversation context belongs to a single conversation, while memory persists per **user** — retrieval filters on `user_id` only and does not separate by Agent or team. Memories created in one Agent are therefore visible to another Agent for the same user; be careful when enabling it for shared accounts or one account acting under several identities. Users can review and delete their own memories on the **Memories** page.
 
 ### Publishing and visibility
 

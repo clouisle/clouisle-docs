@@ -42,6 +42,14 @@ curl -X POST "$API_BASE_URL/api/v1/upload/file" \
   -F "file=@/path/to/report.pdf"
 ```
 
+`/upload/image` 与 `/upload/file` 都接受 `category` 查询参数，默认 `general`，常用值还有 `avatar`、`icon`；它决定存储目录并出现在返回的 `url` 中：
+
+```bash
+curl -X POST "$API_BASE_URL/api/v1/upload/image?category=avatar" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "file=@/path/to/avatar.png"
+```
+
 响应中的文件名是生成的存储名。提交聊天附件时，使用响应返回的 `url`、`filename`、`size` 和 `mime_type`，不要根据 `asset_id` 自行拼接 `/upload/files/{asset_id}`。
 
 ```json
@@ -75,7 +83,7 @@ curl -X POST "$API_BASE_URL/api/v1/upload/parse?max_content_length=100000&trunca
 
 知识库文档上传成功后状态为 `pending`。配置分块参数后，调用知识库处理端点开始嵌入和索引。
 
-沙箱产物端点可以使用 JWT 或 `clou_` API Key；内部沙箱请求也可以使用时间戳和签名请求头。大小限制由 `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` 控制。
+沙箱产物端点可以使用 JWT 或 `clou_` API Key；内部沙箱请求也可以改用签名：请求头 `X-Sandbox-Artifact-Timestamp`（Unix 秒）与 `X-Sandbox-Artifact-Signature`，时间戳与当前时间相差超过 `300` 秒即被拒绝。大小限制由站点设置 `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` 控制。
 
 ## 访问控制与错误
 

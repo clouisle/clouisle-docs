@@ -1,18 +1,38 @@
 ---
 title: Workflow Debugging and Monitoring
-description: Use the validation checklist, node traces, and run metrics to locate issues
+description: Use the validation checklist, debug runs, node traces, and run metrics to locate issues
 icon: Bug
 ---
 
-Workflow issues fall into configuration issues, data flow issues, and runtime issues. First check the checklist, then debug run, and finally inspect node traces and service logs.
+Workflow issues fall into configuration issues, data flow issues, and runtime issues. Work through the checklist first, then a debug run, then node traces and run metrics.
 
 ## Configuration Validation
 
-The **Checklist** reports: unselected models, tools, or knowledge bases, inputs/outputs without a source, nonexistent variable references, incomplete conditional branches, empty code or templates, iterations/loops missing start or processing nodes, and missing output nodes.
+The **Checklist** reports each of these before publishing: unselected models, tools, or knowledge bases; inputs/outputs without a source; nonexistent variable references; incomplete conditional branches; a Decision node missing its model, state, or instructions, with an invalid number or uniqueness of options/levels, or with connections pointing at an outdated decision branch handle; empty code or templates; iterations/loops missing their start or processing nodes; and no output node.
+
+The checklist only covers structural problems — it cannot tell you whether a branch is actually reachable. That is what a debug run answers.
 
 ## Debug Runs
 
-Select **Debug Run** and fill in the inputs. Debug runs use the draft and do not change the published version. The run drawer's **Details** shows inputs, outputs, and errors; **Trace** shows each node's status, inputs, outputs, Tokens, duration, and retry count.
+Select **Debug Run** and fill in the inputs. It calls `POST /api/v1/workflows/{workflow_id}/debug`, which needs the `workflow:run` permission plus write access to the workflow, creates a run with `is_debug: true`, and immediately returns a `run_id` and `stream_url`; the actual execution happens in a background task.
+
+<Callout type="info">
+  A debug run uses the **current draft** and never modifies the published version; a production run loads the latest published version's snapshot instead. Publishing is the only thing that moves draft edits onto the production path.
+</Callout>
+
+When the debug run finishes, the run drawer's **Details** shows inputs, outputs, and errors; **Trace** shows each node's status, inputs, outputs, Tokens, duration, and retry count. Connecting to `GET /api/v1/workflows/runs/{run_id}/stream` delivers node events and LLM streaming output in real time.
+
+### Debug runs backfill variable types
+
+After every debug run, the backend infers a type for each output from the node execution records and union-merges it into the draft definition's existing `data.inferredSchema`:
+
+- The editor refetches the workflow when the debug run completes, so the variable picker offers field-level completion after a single trial run instead of forcing you to declare shapes by hand.
+- Internal outputs whose names start with `_` (such as `_iteration_state`, `_loop_complete`) are skipped and never enter the inferred schema.
+- Only debug runs write inference back; production runs deliberately skip it so live traffic shapes cannot drift the editor's type hints.
+
+<Callout type="warn">
+  There are **no breakpoints or single-step debugging**. The codebase contains internal debug-session and breakpoint definitions, but no API route or UI exposes them, so debugging is always a whole run plus post-mortem tracing. To narrow things down, split large logic into several nodes, or temporarily add a Variable Assignment or Answer node to surface an intermediate value.
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-debug-trace.png" alt="Workflow node execution trace" />
@@ -21,24 +41,38 @@ Select **Debug Run** and fill in the inputs. Debug runs use the draft and do not
 
 ## Run Status
 
+Run-level statuses:
+
 | Status | Meaning |
 | --- | --- |
 | `pending` | Created, waiting for execution |
 | `running` | Executing |
+| `waiting` | Stopped at a Pause node, waiting for an approval decision or extra variables |
 | `success` | All flows completed successfully |
 | `failed` | A node or the runtime failed |
 | `cancelled` | Cancelled by the user |
 | `timeout` | Reached the runtime limit |
-| `skipped` | Skipped by a condition or loop |
+
+Node-level statuses add `skipped`: the node was skipped by a condition branch or a loop. Skipped is not a failure and never appears as a run-level status.
 
 ## Monitoring Metrics
 
-The workflow **Monitoring** page shows total runs, success rate, average duration, failure count, status distribution, and run trends over `7d` or `30d`. Run logs support filtering by status, time, and full run ID.
+The workflow **Monitoring** page (`/app/apps/workflow/{id}/monitor`) is powered by two endpoints:
+
+| Endpoint | Contents |
+| --- | --- |
+| `GET /api/v1/workflows/{id}/stats` | Total runs, success count, failure count, timeout count, average duration, and last run time; **not time-bounded**, covering the workflow's whole history |
+| `GET /api/v1/workflows/{id}/stats/trends?period=7d\|30d` | Daily run, success, failure, and average-duration buckets on local-day boundaries; `period` only recognises `30d`, anything else is treated as `7d` |
+
+The Monitoring page switches between `7d` and `30d`, shows cards for total runs, success rate, average duration, and failures, then a trend chart and recent runs. Run logs support filtering by status, time, and full run ID.
+
+Team- and system-level run statistics are available at `GET /api/v1/workflows/runs/stats`; admin-level aggregated metrics (dashboard summary, per-workflow metrics, node-type metrics, running workflows, cache stats and clearing) live under `/api/v1/admin/workflows/metrics/*` and require administrator permissions.
 
 ## Troubleshooting Order
 
 1. Check whether the input variables exist and have the correct types.
-2. Look at the first failed node, not just the final error.
+2. Look at the **first** failed node, not just the final error.
 3. For LLMs, check model authorization, prompt, and Tokens; for HTTP, check the URL, headers, timeout, and response path; for code, check package versions, resource limits, and artifact paths.
-4. For knowledge bases, check whether documents finished processing, whether embedding dimensions match, and whether the retrieval service is available.
-5. If it is a published app, confirm the published version rather than the draft editor.
+4. For a Decision node, check that the model is of type decision and authorized for the team, then read `selected_handle`, `confidence`, and `probabilities` in the trace to tell a threshold problem from an instructions problem (see [Orchestrate a Workflow → Decision Node](./orchestrate.mdx#decision-node)).
+5. For knowledge bases, check whether documents finished processing, whether embedding dimensions match, and whether the retrieval service is available.
+6. If it is a published app, confirm the failure happened on the published version rather than in the draft editor.

@@ -4,11 +4,11 @@ description: 查阅供应商标识、模型类型、凭据、默认端点、Embe
 icon: Network
 ---
 
-Clouisle 通过统一的模型供应商抽象层接入多模态模型，覆盖对话、嵌入（Embedding）、重排序（Rerank）、语音（TTS/STT）以及图像与视频生成。
+Clouisle 通过统一的模型供应商抽象层接入多模态模型，覆盖对话、嵌入（Embedding）、重排序（Rerank）、语音（TTS/STT）、图像与视频生成，以及**决策（Decision）**模型。
 
 ## 供应商标识枚举
 
-系统共定义 22 个模型供应商标识（`ModelProvider`）。下表列出各供应商的后端默认端点；未填写自定义 `base_url` 时，运行时按此默认值解析请求地址。
+系统共定义 23 个模型供应商标识（`ModelProvider`）。下表列出各供应商的后端默认端点；未填写自定义 `base_url` 时，运行时按此默认值解析请求地址。
 
 | 供应商标识 (`provider`) | 显示名称 | 默认 API Base URL |
 | --- | --- | --- |
@@ -33,19 +33,22 @@ Clouisle 通过统一的模型供应商抽象层接入多模态模型，覆盖�
 | `kling` | Kling | `https://api.klingai.com` |
 | `stability` | Stability AI | `https://api.stability.ai` |
 | `midjourney` | Midjourney | 无（需要代理） |
+| `typesafe` | TypeSafe AI | `https://api.typesafe.ai/v1` |
 | `custom` | OpenAI Compatible（自定义） | 无（由接入方提供） |
 
 <Callout type="info">
 针对 `volcengine`，部分模型类型有专属默认端点，优先于上表通用端点：
 - TTS：`https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse`
 - Audio Generation：`https://openspeech.bytedance.com/api/v3/tts/create`
+
+解析优先级为：显式 `base_url` > 供应商 + 模型类型专属端点 > 供应商通用端点。`typesafe` + `decision` 也登记了专属端点（与通用端点相同）。
 </Callout>
 
 ---
 
 ## 模型类型分类 (`ModelType`)
 
-`model_type` 描述模型的能力类别，与供应商相互独立；同一供应商通常只支持其中若干种类型。
+`model_type` 描述模型的能力类别，与供应商相互独立；同一供应商通常只支持其中若干种类型。当前共定义 9 种模型类型：
 
 | 模型类型 (`model_type`) | 说明 |
 | --- | --- |
@@ -57,18 +60,35 @@ Clouisle 通过统一的模型供应商抽象层接入多模态模型，覆盖�
 | `audio_generation` | 提示词生成音频 |
 | `text_to_image` | 文本生成图片 |
 | `text_to_video` | 文本生成视频 |
+| `decision` | 类型化决策模型（choice / score / 是-否），不生成文本 |
+
+---
+
+## 决策模型与 TypeSafe AI
+
+`decision` 类型是**非生成式**模型：它把一个「状态」对照若干类型化问题求值，返回带概率分布的类型化答案，全程不产出文本。它专供工作流的[决策节点](/reference/workflow-nodes)使用。
+
+- **唯一供应商**：`decision` 类型目前只接受 `typesafe` 供应商；提交 `decision` 模型时若 `provider` 不是 `typesafe`，创建/更新接口会返回校验错误（`model_type_not_supported`）。
+- **默认端点**：`https://api.typesafe.ai/v1`。运行时请求发往 `{base_url}/v1/systemone`；适配器会保证路径包含 `/v1` 段，因此把 `base_url` 配成 `https://api.typesafe.ai`（不含 `/v1`）或 `https://api.typesafe.ai/v1` 都会解析到 `https://api.typesafe.ai/v1/systemone`。
+- **鉴权**：API Key 以 `Authorization: Bearer <key>` 发送。
+- **模型 ID**：例如 `jev-1.13.0`，或 `jev-latest` 跟随供应商当前版本。模型发现（`POST /api/v1/admin/models/discover`，需 `admin:model:create`）对 TypeSafe 使用 `/v1/models` 路径，并自动避免与已含 `/v1` 的 `base_url` 重复拼接版本段。
+- **端点白名单**：`https://api.typesafe.ai` 已在默认**模型端点白名单**内；若经由自建网关转发，需先将该网关 Origin 登记到**站点设置 > 安全**。
+
+<Callout type="warn" title="decision 与 typesafe 的方向性约束">
+校验是「类型 → 供应商」单向的：`decision` 类型必须由 `typesafe` 提供。反向并不成立——`typesafe` 供应商在配置层未被强制限定为 `decision`，但把它配成其他类型（如 `chat`）在运行时会因无对应适配器而失败。请只把 TypeSafe 用于 `decision` 类型。
+</Callout>
 
 ---
 
 ## Embedding 模型的供应商支持范围
 
-`model_type: embedding` 并非对所有供应商标识都可用。后端 Embedding 适配器按供应商分派到三条路径：
+`model_type: embedding` 并非对所有供应商标识都可用。创建/更新模型时会校验（`EMBEDDING_SUPPORTED_PROVIDERS`），后端 Embedding 适配器再按供应商分派到两条路径：
 
 | 适配器路径 | 覆盖的供应商 | 行为说明 |
 | --- | --- | --- |
 | `OpenAICompatibleEmbeddingAdapter` | `openai`、`openai_responses`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`custom` | 直接调用 OpenAI 兼容的 `/embeddings` 端点，捕获上游 `usage` |
-| `FallbackEmbeddingAdapter` | `google`、`azure_openai` 及其他未列入上行的供应商 | 通过 LangChain Embeddings 实现生成向量，`usage` 为空 |
-| 不支持 | `anthropic` | 后端不提供 embedding 适配器；创建 `model_type: embedding` 且 `provider: anthropic` 的模型会在运行时抛出 `Unsupported provider for embedding` |
+| `FallbackEmbeddingAdapter` | `google`、`azure_openai` | 通过 LangChain Embeddings 实现生成向量，`usage` 为空 |
+| 不支持 | `anthropic`、`typesafe`、`runway`、`pika`、`luma`、`kling`、`stability`、`midjourney` 等 | 不在 `EMBEDDING_SUPPORTED_PROVIDERS` 内，创建时即被拒绝；`anthropic` 即使绕过校验也会在运行时报 `Unsupported provider for embedding` |
 
 关于 Embedding 适配器的详细机制（降级策略、Token 计量、动态维度、Qdrant 集合划分），参见[Embedding 适配器与向量维度](/reference/embedding-adapters)。
 
@@ -79,9 +99,9 @@ Clouisle 通过统一的模型供应商抽象层接入多模态模型，覆盖�
 | 字段 | 类型 | 必填 | 默认值 | 说明与校验规则 |
 | --- | --- | --- | --- | --- |
 | `name` | string | 是 | 无 | 模型显示名称，`1-100` 字符 |
-| `provider` | enum | 是 | 无 | 供应商标识（见上述 22 个枚举值） |
+| `provider` | enum | 是 | 无 | 供应商标识（见上述 23 个枚举值） |
 | `model_id` | string | 是 | 无 | 上游服务商实际模型 ID，`1-100` 字符 |
-| `model_type` | enum | 是 | 无 | 模型类型（见上述 8 种类型） |
+| `model_type` | enum | 是 | 无 | 模型类型（见上述 9 种类型） |
 | `provider_display_name` | string/null | 否 | `null` | 面向终端用户的供应商显示名称 |
 | `base_url` | string/null | 否 | `null` | 自定义 API URL（最长 512 字符），受端点白名单策略约束 |
 | `api_key` | string/null | 否 | `null` | 访问密钥（本地供应商如 Ollama 可为空）；服务端密文加密存储 |
@@ -102,14 +122,16 @@ Clouisle 通过统一的模型供应商抽象层接入多模态模型，覆盖�
 ### 端点白名单策略 (`model_endpoint_allowlist`)
 
 所有外发至模型服务商的请求地址均经过系统端点白名单强校验：
-- 系统内置预置 19 个官方服务商 Origin（如 `https://api.openai.com`、`https://api.deepseek.com` 等）。
+- 系统内置预置 20 个官方服务商 Origin（含 `https://api.typesafe.ai`），例如 `https://api.openai.com`、`https://api.deepseek.com`、`https://api.anthropic.com`、`https://generativelanguage.googleapis.com` 等。
+- 白名单最多 200 条（`MODEL_ENDPOINT_ALLOWLIST_MAX_ENTRIES`）。
 - 若管理员配置了自定义私有 Base URL（如自建 vLLM、私有 Ollama 节点），必须在**站点设置 > 模型端点白名单**中显式登记其完整 Origin（`scheme + host + port`）。
 - 校验阶段忽略请求路径、查询参数与凭据，但非标准端口（如 `:11434`）会严格参与匹配。
 
 ### 连通性测试接口
 
-在管理台添加或保存模型时，可调用测试端点验证连通性：
+在管理台添加或保存模型时，可调用测试端点 `POST /api/v1/admin/models/{model_id}/test` 验证连通性：
 - 测试请求使用管理员即时提交的凭据进行上游轻量调用；凭据在测试时不会自动入库。
+- 对 `decision` 类型，测试会构造一次最小决策求值而非对话请求。
 - 返回结构包含：
   - `success` (bool)：连通性是否正常
   - `message` (string)：成功信息或上游异常详情

@@ -25,7 +25,8 @@ icon: Settings2
 管理员端点需要 JWT 或具备对应权限的 API Key：
 
 - `admin:settings:read`：读取设置
-- `admin:settings:update`：更新和重置设置
+- `admin:settings:update`：更新、重置和触发通知渠道测试
+- `audit:export`：审计日志归档（`archive-audit-logs` 两个端点）
 
 公开设置端点无需认证。管理 API 通常由管理后台使用，不应作为匿名公共 API。
 
@@ -36,7 +37,7 @@ curl -X GET "https://your-domain.com/api/v1/admin/site-settings?category=general
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
 ```
 
-`category` 可选，例如 `general`、`security`、`email`、`storage`、`notification` 或 `memory`。单个设置响应包含 `key`、`value`、`value_type`、`category`、`description` 和 `is_public`。
+`category` 可选，取值包括 `general`、`security`、`email`、`storage`、`notification`、`memory`、`audit`、`sso`、`retrieval`、`dingtalk`、`wechat`、`feishu`、`slack`、`webhook`。单个设置响应包含 `key`、`value`、`value_type`、`category`、`description` 和 `is_public`。
 
 ## 更新设置
 
@@ -108,7 +109,7 @@ GET /api/v1/admin/site-settings/auto-notifications
 PUT /api/v1/admin/site-settings/auto-notifications
 ```
 
-通知测试端点包括 `test-email`、`test-dingtalk`、`test-wechat`、`test-feishu`、`test-webhook` 和 `test-slack`。`test-email` 接收 `{ "to_email": "admin@example.com" }`，其他测试端点无需请求体。
+通知测试端点包括 `test-email`、`test-dingtalk`、`test-wechat`、`test-feishu`、`test-webhook` 和 `test-slack`，均需 `admin:settings:update`。`test-email` 接收 `{ "email": "admin@example.com" }`，且要求 `smtp_enabled` 为 `true`，否则返回 `smtp_not_configured`；其他测试端点无需请求体，但渠道必须已启用并完成配置，否则返回 `*_not_configured`。
 
 ## 审计日志归档
 
@@ -117,7 +118,7 @@ POST /api/v1/admin/site-settings/archive-audit-logs
 GET  /api/v1/admin/site-settings/archive-audit-logs/{task_id}
 ```
 
-启动端点返回后台任务 ID，再使用查询端点读取归档状态。
+启动端点返回后台任务 ID，再使用查询端点读取归档状态。两个端点都需要 `audit:export` 权限；启动端点在排队成功后返回 `{ "task_id": "...", "status": "pending" }`。
 
 ## 常见错误
 

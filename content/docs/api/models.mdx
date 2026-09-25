@@ -20,7 +20,7 @@ icon: Cpu
 | POST | `/api/v1/admin/models/{model_id}/set-default` | 设为默认模型 | admin:model:update |
 | POST | `/api/v1/admin/models/{model_id}/test` | 测试已保存模型连通性 | admin:model:update |
 | POST | `/api/v1/admin/models/test` | 测试模型配置（不保存） | admin:model:create |
-| POST | `/api/v1/admin/models/discover` | 发现提供商可用模型 | admin:model:read |
+| POST | `/api/v1/admin/models/discover` | 发现提供商可用模型 | admin:model:create |
 
 <Callout type="warn">
   `/api/v1/admin/models/*` 是管理后台使用的受保护端点，需要对应的管理员权限范围（scope）。
@@ -36,13 +36,13 @@ icon: Cpu
 GET /api/v1/models/providers
 ```
 
-无需认证。返回系统支持的所有 LLM 提供商。
+无需认证。返回系统支持的全部 **23 个**提供商及其默认配置。
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/models/providers"
 ```
 
-**成功响应（200 OK）：**
+**成功响应（200 OK，节选）：**
 
 ```json
 {
@@ -55,28 +55,66 @@ curl -X GET "https://your-domain.com/api/v1/models/providers"
       "icon": "openai"
     },
     {
+      "code": "openai_responses",
+      "name": "OpenAI Responses",
+      "base_url": "https://api.openai.com/v1",
+      "icon": "openai"
+    },
+    {
       "code": "anthropic",
       "name": "Anthropic",
       "base_url": "https://api.anthropic.com",
       "icon": "anthropic"
     },
     {
-      "code": "azure",
-      "name": "Azure OpenAI",
-      "base_url": null,
-      "icon": "azure"
+      "code": "typesafe",
+      "name": "TypeSafe AI",
+      "base_url": "https://api.typesafe.ai/v1",
+      "icon": "typesafe"
     }
   ],
   "msg": "success"
 }
 ```
 
+完整提供商清单（`code` 即创建模型时的 `provider` 取值）：
+
+| `code` | `name` | 默认 `base_url` |
+| --- | --- | --- |
+| `openai` | OpenAI | `https://api.openai.com/v1` |
+| `openai_responses` | OpenAI Responses | `https://api.openai.com/v1` |
+| `anthropic` | Anthropic | `https://api.anthropic.com` |
+| `google` | Google AI | `https://generativelanguage.googleapis.com/v1beta` |
+| `azure_openai` | Azure OpenAI | `null` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` |
+| `moonshot` | Moonshot | `https://api.moonshot.cn/v1` |
+| `zhipu` | Zhipu AI | `https://open.bigmodel.cn/api/paas/v4` |
+| `qwen` | Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `baichuan` | Baichuan | `https://api.baichuan-ai.com/v1` |
+| `minimax` | MiniMax | `https://api.minimax.chat/v1` |
+| `volcengine` | Volcengine | `https://ark.cn-beijing.volces.com/api/v3` |
+| `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` |
+| `xai` | xAI (Grok) | `https://api.x.ai/v1` |
+| `ollama` | Ollama | `http://localhost:11434` |
+| `runway` | Runway | `https://api.dev.runwayml.com` |
+| `pika` | Pika | `https://api.pika.art/v1` |
+| `luma` | Luma AI | `https://api.lumalabs.ai/dream-machine/v1` |
+| `kling` | Kling | `https://api.klingai.com` |
+| `stability` | Stability AI | `https://api.stability.ai` |
+| `midjourney` | Midjourney | `null` |
+| `typesafe` | TypeSafe AI | `https://api.typesafe.ai/v1` |
+| `custom` | OpenAI Compatible | `null` |
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `code` | string | 提供商标识符 |
 | `name` | string | 显示名称 |
-| `base_url` | string | 默认 API 地址（无则为 `null`） |
+| `base_url` | string | 默认 API 地址（无默认值时为 `null`，如 `azure_openai`、`midjourney`、`custom`） |
 | `icon` | string | 图标标识符 |
+
+<Callout type="info">
+  `openai_responses` 走 OpenAI Responses API（而非 Chat Completions），`typesafe` 用于 `decision` 类型模型，`custom` 表示任意的 OpenAI 兼容端点。
+</Callout>
 
 ### 获取模型类型列表
 
@@ -103,11 +141,14 @@ curl -X GET "https://your-domain.com/api/v1/models/types"
     { "code": "stt", "name": "STT", "description": "语音识别" },
     { "code": "audio_generation", "name": "Audio Generation", "description": "音频生成" },
     { "code": "text_to_image", "name": "Text to Image", "description": "文生图" },
-    { "code": "text_to_video", "name": "Text to Video", "description": "文生视频" }
+    { "code": "text_to_video", "name": "Text to Video", "description": "文生视频" },
+    { "code": "decision", "name": "Decision", "description": "决策模型" }
   ],
   "msg": "success"
 }
 ```
+
+`decision` 是**非生成式**的类型化决策模型（choice/score/yes-no 判定），只能由 `typesafe` 提供商提供；用其他提供商创建 `decision` 模型会返回 `1001 model_type_not_supported`。
 
 ### 获取可用模型
 
@@ -277,7 +318,7 @@ curl -X GET "https://your-domain.com/api/v1/admin/models?page=1&page_size=20" \
 | `provider` | string | 提供商标识符 |
 | `provider_display_name` | string | 可选的用户侧提供商/网关名称 |
 | `model_id` | string | 模型标识符（如 `gpt-4-turbo-preview`） |
-| `model_type` | string | 模型类型：`chat`、`embedding`、`rerank`、`tts`、`stt`、`audio_generation`、`text_to_image`、`text_to_video` |
+| `model_type` | string | 模型类型：`chat`、`embedding`、`rerank`、`decision`、`tts`、`stt`、`audio_generation`、`text_to_image`、`text_to_video` |
 | `base_url` | string | 自定义 API 地址 |
 | `has_api_key` | boolean | 是否已配置 API 密钥（密钥本身隐藏） |
 | `context_length` | integer | 上下文长度 |
@@ -337,7 +378,7 @@ POST /api/v1/admin/models
 | `name` | string | 是 | 显示名称（最多 100 字符） |
 | `provider` | string | 是 | 提供商标识符（必须是支持的提供商） |
 | `model_id` | string | 是 | 模型标识符（最多 100 字符） |
-| `model_type` | string | 是 | 模型类型 |
+| `model_type` | string | 是 | 模型类型；`decision` 必须搭配 `typesafe` 提供商，`embedding` 也仅支持特定提供商，违反时返回 `1001 model_type_not_supported` |
 | `provider_display_name` | string | 否 | 可选的用户侧提供商或网关名称 |
 | `base_url` | string | 否 | 自定义 API 地址（最多 512 字符） |
 | `api_key` | string | 否 | API 密钥（本地提供商可选） |
@@ -583,13 +624,21 @@ curl -X POST "https://your-domain.com/api/v1/admin/models/test" \
 }
 ```
 
+<Callout type="info" title="decision 模型的测试行为">
+  当 `model_type` 为 `decision` 时，两个测试端点都会构造一个内置的判定请求（`state` 为一段客服场景描述，`questions` 中有一个 `noul` 类型的问题），通过 Decision 适配器调用提供商；只有返回非空答案才算成功，否则返回 `1001 model_test_empty_decision_result`。`decision` 只支持 `typesafe` 提供商，其他提供商会先被 `1001 model_type_not_supported` 拒绝。
+</Callout>
+
+<Callout type="warn">
+  `POST /api/v1/admin/models/test` 会在测试前做 endpoint 策略校验（SSRF 白名单）。自定义 `base_url` 不在允许列表内时会直接被拒绝，而不是发起请求。
+</Callout>
+
 ### 发现提供商模型
 
 ```
 POST /api/v1/admin/models/discover
 ```
 
-需要 `admin:model:read` 权限。列出提供商暴露的模型，不持久化提供的密钥。
+需要 `admin:model:create` 权限。列出提供商暴露的模型，不持久化提供的密钥。
 
 ```json
 {
@@ -598,6 +647,23 @@ POST /api/v1/admin/models/discover
   "api_key": "sk-..."
 }
 ```
+
+支持的发现提供商及请求路径：
+
+| `provider` | 发现路径 | 认证方式 |
+| --- | --- | --- |
+| `openai`、`openai_responses`、`anthropic`、`baichuan`、`minimax`、`siliconflow`、`xai`、`custom` | `/v1/models` | `Authorization: Bearer <api_key>` |
+| `deepseek` | `/models` | `Authorization: Bearer <api_key>` |
+| `google` | `/v1beta/models` | 查询参数 `key=<api_key>` |
+| `zhipu` | `/api/paas/v4/models` | `Authorization: Bearer <api_key>` |
+| `qwen` | `/compatible-mode/v1/models` | `Authorization: Bearer <api_key>` |
+| `volcengine` | `/api/v3/models` | `Authorization: Bearer <api_key>` |
+| `ollama` | `/api/tags` | 无需密钥 |
+| `typesafe` | 见下方说明 | `Authorization: Bearer <api_key>` |
+
+`typesafe` 的路径基于配置的 `base_url` 拼接：若 `base_url` 的路径以 `/v1` 结尾，则在**该路径后追加** `/models`（即 `<配置路径>/models`）；若 `base_url` 还有其他非空路径，则把完整路径 `/v1/models` 接到其后；否则使用默认的 `/v1/models`。因此 TypeSafe 的发现请求会打到**配置的基础路径**下，而不是固定的 `/v1/models`。
+
+不在支持列表中的提供商会返回 `model_discovery_not_supported`；`base_url` 非法或不在 SSRF 允许列表内分别返回 `model_discovery_base_url_invalid`、`model_endpoint_not_allowlisted`；需要密钥但未提供时返回 `model_discovery_api_key_required`。失败时 HTTP 状态仍为 `200`，但 `data.success` 为 `false`。
 
 **成功响应（200 OK）：**
 

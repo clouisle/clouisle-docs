@@ -50,8 +50,8 @@ uv run --project backend pytest
 ### 2. 聊天
 
 - **目的**：练习 Agent 聊天、会话生命周期、附件、运行时变量与生成链接确认
-- **路由**：`/chat/[id]`、`/chat/[id]?conversation=[conversationId]`、`/run/[id]?type=agent`、`/run/[id]?type=workflow`、`/run/[id]?type=workflow&debug=true`、`/embed/agent/[id]`、`/app/apps/[id]/api`、`/app/apps/[id]/monitor`
-- **地标**：`New Chat`、`No conversations`、`Rename Conversation`、`Delete Conversation`、`How can I help you today?`、`Type a message...`、`Send`、`Stop`、`Attach file`、`Fill in Variables`、`Start Chat`、`Open link?`、`This link was generated in the chat. Please confirm before opening it.`
+- **路由**：`/chat/[id]`、`/chat/[id]?conversation=[conversationId]`、`/run/[id]?type=agent`、`/run/[id]?type=workflow`、`/run/[id]?type=workflow&run=[runId]`、`/embed/agent/[id]`、`/app/apps/[id]/api`、`/app/apps/[id]/monitor`
+- **地标**：`New Chat`、`No conversations yet`、`Rename Conversation`、`Delete Conversation`、`Where should we start?`、`Type a message...`、`Send`、`Stop`、`Attach file`、`Fill in Variables`、`Start Chat`、`Open link?`、`This link was generated in the chat. Please confirm before opening it.`
 - **正常场景**：打开已知 Agent；开始新聊天；完成各类变量输入；发送无害提示；重命名测试会话；重新生成助手回复；编辑用户消息创建下游回复；切换响应版本
 - **错误/访问场景**：未登录打开聊天；省略嵌入 Agent Token；使用未知 Agent/资源 ID；省略必填变量发送
 
@@ -61,7 +61,7 @@ uv run --project backend pytest
 - **路由**：`/app/apps`、`/app/apps/workflow/[id]`、`/app/apps/workflow/[id]/monitor`、`/app/apps/workflow/[id]/logs`、`/app/apps/workflow/[id]/api`、`/run/[id]?type=workflow`、`/embed/workflow/[id]`
 - **地标**：`Workflow Editor`、`Nodes`、`Start`、`End`、`Run`、`Publish`、`Published`、`Unpublished`、`Checklist`、`Resolve all issues before publishing`、`All checks passed`、`Test Run`、`Debug (use draft)`、`API Documentation`、`Webhook URL`、`API Key Required`、`Workflow Monitor`、`No workflow runs yet`
 - **正常场景**：为测试团队创建命名工作流；添加/配置最小有效图；配置 LLM 节点（加载模型、选择模型、编辑提示词、切换记忆模式、设置高级参数与响应模式、添加输出变量）；配置 Agent 节点；配置子工作流节点
-- **错误/访问场景**：尝试发布不完整的图；发布前尝试非调试运行；无应用访问权限访问；未配置的 Answer/Condition 节点显示 `Click to configure`
+- **错误/访问场景**：尝试发布不完整的图；发布前尝试非调试运行；无应用访问权限访问；未配置的 Answer 节点显示 `Click to configure output variables`、Condition 节点显示 `Click to configure condition`
 
 ### 4. 知识库
 
@@ -92,7 +92,7 @@ uv run --project backend pytest
 - **目的**：验证仪表盘路由、导航、角色/权限控制与代表性管理员授权边界
 - **路由**：`/dashboard`、`/dashboard/observability`、`/users`、`/roles`、`/permissions`、`/models`、`/apps`、`/capabilities`、`/capabilities/code`、`/app/capabilities`、`/app/capabilities/code`、`/api-keys`、`/memories`、`/audit-logs`、`/site-settings` 及其子路由
 - **地标**：侧边栏项 `Dashboard`、`Teams`、`Knowledge Bases`、`Activity Log`、`Users`、`Roles`、`Permissions`、`API Keys`、`Models`、`Apps`、`Capabilities`、`Notifications`、`Site Settings`、`Audit Logs`、`Observability`、`Memories`、`Log out`；仪表盘时间范围 `Last 7 Days`、`Last 30 Days`、`Last 90 Days`、`All Time`
-- **正常场景**：授权管理员导航到代表性仪表盘页面；验证平台记忆图的加载、空与填充状态；在 `/users` 验证用户列表、搜索/筛选、分页、创建/编辑/状态变更/批量删除；在 `/site-settings/security` 使用可销毁值练习注册/审批/邮箱验证/账户删除/密码策略/TOTP/会话/CORS
+- **正常场景**：授权管理员导航到代表性仪表盘页面；验证平台记忆图的加载、空与填充状态；在 `/users` 验证用户列表、搜索/筛选、分页、创建/编辑/状态变更/批量删除；在 `/site-settings/security` 使用可销毁值练习注册/审批/邮箱验证/账户删除/密码策略/TOTP/会话/模型端点白名单
 - **错误/访问场景**：缺少映射权限访问每个相关路由；强制记忆图加载失败并验证恢复；强制列表或状态更新请求失败并验证重试/恢复不显示过期成功
 
 ## 可复用的安全 Agent 浏览器测试提示词

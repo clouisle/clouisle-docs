@@ -1,16 +1,56 @@
 ---
 title: 配置单点登录
-description: 配置 OIDC、OAuth2、SAML 2.0 或 CAS 登录连接
+description: 配置 OIDC、SAML 2.0 或 CAS 登录连接并管理 SSO 用户生命周期
 icon: KeyRound
 ---
 
-SSO 连接由超级管理员在**站点设置** > **SSO**管理。不同连接的字段取决于协议；保存前先准备身份提供商的回调地址、客户端凭据和证书/元数据。
+SSO 由超级管理员在**站点设置** → **SSO** 中管理：先打开全局开关，再逐个添加提供商。每个提供商的协议配置是一段 JSON，字段随协议不同；保存前先准备好身份提供商的回调地址、客户端凭据与证书。
+
+<Callout type="info">
+  前置条件：
+  1. 站点设置中 `sso_enabled` 已开启（默认关闭），否则登录页不会请求提供商列表。
+  2. 操作者具备 `admin:sso:read`（查看）或 `admin:sso:update`（创建、编辑、删除、测试、解绑）权限。
+  3. 身份提供商能访问 Clouisle 的**后端公网地址**，否则回调无法到达（见下一节）。
+</Callout>
 
 ## 回调地址
 
-回调地址格式为 `{API_BASE_URL}/api/v1/sso/callback/{provider_name}`。`provider_name` 必须与在 Clouisle 中设置的提供商名称一致；回调地址不匹配是 SSO 登录失败最常见的原因。
+注册到身份提供商的回调地址格式为：
 
-## 协议字段
+```
+{BACKEND_ORIGIN}/api/v1/sso/callback/{provider_name}
+```
+
+`BACKEND_ORIGIN` 取**请求本身的对外来源地址**——即浏览器实际访问到后端的那一个域名（经反向代理时使用代理转发的对外地址）。这里的 `:3000` 会被自动改写成 `:8000`。它**不是** `API_BASE_URL`（服务内部地址），也不受 `FRONTEND_URL` 影响：用错会导致回调 404 或跳回错误域名。
+
+<Callout type="note">
+  代码中保留了一个 `BACKEND_URL` 覆盖入口，但该配置项并未在配置类中声明，**用环境变量 `BACKEND_URL` 无法覆盖**——回调来源始终由请求决定。请确保身份提供商能访问到该对外域名。
+</Callout>
+
+`{provider_name}` 必须与 Clouisle 中登记的提供商名称**完全一致**，大小写敏感。回调地址不匹配是 SSO 登录失败最常见的原因。
+
+## 添加提供商
+
+在**站点设置** → **SSO** 点击**添加提供商**，对话框分为**基本信息 / 配置 / 属性映射**三个标签：
+
+| 字段 | 必填 | 约束 |
+| --- | --- | --- |
+| **提供商名称** | 是 | `^[a-z][a-z0-9_-]*$`：小写字母开头，仅含小写字母、数字、`-`、`_`；最长 `100`；全局唯一（重复返回 `6305`） |
+| **协议** | 是 | `oidc`（OAuth2/OIDC）/ `saml2`（SAML 2.0）/ `cas`（CAS） |
+| **显示名称** | 是 | 列表与关联账号卡片中的名称，最长 `100` |
+| **按钮文本** | 否 | 登录页按钮文案，最长 `50`，如「使用 Google 继续」 |
+| **图标 URL** | 否 | 必须是 `http://` 或 `https://` 开头，最长 `512` |
+| **启用** | — | 关闭后该提供商不出现在登录页 |
+| **允许注册** | — | 该提供商是否允许自动创建用户 |
+| **需要审批** | — | 该提供商新建的用户是否需要管理员审批 |
+
+<Callout type="warn">
+  **提供商名称与协议在创建后不可修改**（编辑对话框中这两项为禁用状态）。命名请与身份提供商中的配置保持一致，改名等于重建提供商。
+</Callout>
+
+## 协议配置
+
+**配置**标签是一段自由 JSON 文本，切换协议时会填入该协议的模板。字段名必须与下表一致，拼写错误不会报错，只会在登录时抛出配置异常。
 
 ### OAuth2 / OIDC
 
@@ -18,12 +58,27 @@ SSO 连接由超级管理员在**站点设置** > **SSO**管理。不同连接�
 | --- | --- | --- |
 | `client_id` | 是 | 提供商颁发的 Client ID |
 | `client_secret` | 是 | 提供商颁发的 Client Secret |
-| `authorization_url` | 是 | 提供商授权端点 |
-| `token_url` | 是 | Token 交换端点 |
-| `userinfo_url` | 是 | 用户信息端点 |
-| `scopes` | 否 | 空格分隔的 scope（默认 `openid email profile`） |
+| `authorization_url` | 是 | 授权端点 |
+| `token_url` | 是 | 换取令牌的端点 |
+| `userinfo_url` | 是 | 用户信息端点（登录时读取的就是它的返回体） |
+| `scopes` | 否 | 空格分隔的 scope，默认 `openid email profile` |
 
-常见提供商端点：GitHub 为 `https://github.com/login/oauth/authorize` / `…/login/oauth/access_token` / `https://api.github.com/user`；Google 为 `https://accounts.google.com/o/oauth2/v2/auth` / `https://oauth2.googleapis.com/token` / `https://openidconnect.googleapis.com/v1/userinfo`。
+登录使用授权码 + PKCE（`S256`）流程，并生成 `nonce`。常见提供商的端点：
+
+```json
+{
+  "client_id": "your-github-client-id",
+  "client_secret": "your-github-client-secret",
+  "authorization_url": "https://github.com/login/oauth/authorize",
+  "token_url": "https://github.com/login/oauth/access_token",
+  "userinfo_url": "https://api.github.com/user",
+  "scopes": "read:user user:email"
+}
+```
+
+<Callout type="note">
+  当前实现**没有 `issuer_url` 字段，也不做 ID Token 签名/JWKS 校验**：用户信息一律取自 `userinfo_url` 的响应（`validate_id_token` 方法存在但没有调用方）。因此 `client_secret` 是否正确只有在真正换令牌时才会暴露，见[测试连接](#测试连接)。
+</Callout>
 
 ### SAML 2.0
 
@@ -31,55 +86,106 @@ SSO 连接由超级管理员在**站点设置** > **SSO**管理。不同连接�
 | --- | --- | --- |
 | `sp_entity_id` | 是 | Service Provider Entity ID（本实例标识） |
 | `idp_entity_id` | 是 | IdP Entity ID |
-| `sso_url` | 是 | IdP 单点登录 URL |
-| `x509_cert` | 是 | IdP X.509 证书（PEM，不含头尾） |
-| `acs_url` | 是 | Assertion Consumer Service URL（`{API_BASE_URL}/api/v1/sso/callback/{provider_name}`） |
-| `slo_url` | 否 | SP 单点登出 URL |
-| `idp_slo_url` | 否 | IdP 单点登出 URL |
-| `name_id_format` | 否 | NameID 格式（默认 `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified`） |
+| `sso_url` | 是 | IdP 单点登录 URL（HTTP-Redirect 绑定） |
+| `x509_cert` | 是 | IdP X.509 证书，PEM 内容但**不含** `-----BEGIN/END CERTIFICATE-----` 头尾 |
+| `acs_url` | 是 | ACS 地址；运行时会用实际回调地址覆盖它，仅作为占位/参考 |
+| `slo_url` | 否 | SP 单点登出地址 |
+| `idp_slo_url` | 否 | IdP 单点登出地址 |
+| `name_id_format` | 否 | NameID 格式，默认 `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified` |
+
+```json
+{
+  "sp_entity_id": "clouisle",
+  "idp_entity_id": "https://idp.example.com/metadata",
+  "sso_url": "https://idp.example.com/sso",
+  "x509_cert": "MIIC...省略...",
+  "acs_url": "https://your-domain.com/api/v1/sso/callback/azure-ad"
+}
+```
+
+`strict` 模式开启，SAML 响应必须通过签名校验；IdP 与 Clouisle 的时钟偏差过大会直接判定失败。
+
+<Callout type="warn">
+  `slo_url` / `idp_slo_url` 只会被写入 SAML 配置，**当前没有实现 SP 发起的单点登出流程**——用户在 IdP 侧登出不会同步注销 Clouisle 会话。
+</Callout>
 
 ### CAS
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `server_url` | 是 | CAS 服务器基地址 |
-| `service_url` | 是 | CAS 校验用 Service URL |
-| `version` | 否 | CAS 协议版本 `1`/`2`/`3`（默认 `3`） |
+| `version` | 否 | 协议版本 `1` / `2` / `3`，默认 `3`，决定校验端点（`/validate`、`/serviceValidate`、`/p3/serviceValidate`） |
+| `service_url` | 否 | **不会生效**：`service` 参数始终使用运行时的回调地址 |
+
+CAS 用户标识取自校验响应中的 `<cas:user>`；版本 `3` 还会读取 `<cas:attributes>` 中的属性供[属性映射](#属性映射)使用。
 
 ## 属性映射
 
-属性映射把提供商返回的用户字段映射到 Clouisle 用户字段：`email`、`username`、`avatar_url`。简单嵌套对象用点号路径：
+**属性映射**标签同样是一段 JSON，把提供商返回的数据映射到 Clouisle 需要的字段：
+
+| Clouisle 字段 | 用途 |
+| --- | --- |
+| `email` | 账户邮箱（**必需**，缺失会导致登录失败，见下） |
+| `username` | 用户名，重复时会自动加数字后缀 |
+| `avatar_url` | 头像地址 |
+
+两种路径写法：
+
+- **点号路径**（默认）：`{"email": "email", "username": "profile.name"}` 读取嵌套对象。
+- **JSONPath**：以 `$` 开头，适合数组或过滤，`{"email": "$.emails[0].value"}`；多个匹配时取第一个。
+
+添加提供商时的默认值：
 
 ```json
 {
   "email": "email",
-  "username": "profile.name",
-  "avatar_url": "profile.picture"
+  "username": "name",
+  "avatar_url": "picture"
 }
 ```
 
-复杂结构（数组、过滤）用 `$` 开头的 JSONPath 表达式；多个匹配时取第一个。
+GitHub 的返回字段与 OIDC 标准不同，需要改成 `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`。
+
+<Callout type="warn">
+  映射结果会与提供商**原始返回字段合并，同名字段以原始值为准**。也就是说映射只对「原始返回里不存在同名键」的字段生效；若提供商已返回 `email`，映射里的 `email` 会被覆盖。排查字段错位时请先打印原始响应。
+</Callout>
+
+<Callout type="error">
+  最终数据里必须有非空的 `email`，否则新用户创建会失败并返回校验错误（`email_required`）。OIDC 的 `sub`/`id`、SAML 的 NameID、CAS 的 `<cas:user>` 会作为提供商用户标识；标识为空同样会导致登录失败。
+</Callout>
+
+## 测试连接
+
+列表中的**测试连接**调用 `POST /api/v1/admin/sso/providers/{id}/test`：
+
+- 它在服务端**仅本地构造**一次授权地址（用一个占位回调地址），验证配置里必需的键是否齐全，然后返回该地址的前 100 个字符。
+- 它**不会**访问身份提供商，因此 client secret 错误、回调地址不匹配、证书过期这类问题它都**测不出来**——必须用真实登录验证。
+- 返回 `status: error` 只说明键缺失或值无法构造授权地址。
 
 ## 管理权限与 API
 
-列出提供商需要 `admin:sso:read`；创建、更新、删除、测试提供商及解绑用户 SSO 连接需要 `admin:sso:update`（`Admin` 角色默认只有 `admin:sso:read`，`admin:sso:update` 仅超级管理员）。公开端点 `GET /api/v1/sso/providers` 返回启用的提供商列表（用于登录页按钮）。
+| 操作 | 端点 | 权限 |
+| --- | --- | --- |
+| 列出全部提供商（含 config） | `GET /api/v1/admin/sso/providers` | `admin:sso:read` |
+| 创建 / 更新 / 删除 | `POST` / `PUT` / `DELETE /api/v1/admin/sso/providers[/{id}]` | `admin:sso:update` |
+| 测试配置 | `POST /api/v1/admin/sso/providers/{id}/test` | `admin:sso:update` |
+| 解绑任意用户的连接 | `DELETE /api/v1/admin/sso/connections/{connection_id}` | `admin:sso:update` |
+| 登录页可用的提供商列表 | `GET /api/v1/sso/providers` | 公开 |
+| 发起登录 / 回调 | `GET /api/v1/sso/login/{provider_name}`、`GET /api/v1/sso/callback/{provider_name}` | 公开 |
+| 解绑自己的连接 | `DELETE /api/v1/sso/connections/{connection_id}` | 已登录用户 |
 
-```http
-GET    /api/v1/sso/admin/providers
-POST   /api/v1/sso/admin/providers
-PUT    /api/v1/sso/admin/providers/{provider_id}
-DELETE /api/v1/sso/admin/providers/{provider_id}
-POST   /api/v1/sso/admin/providers/{provider_id}/test
-```
+<Callout type="note">
+  `GET /api/v1/sso/providers` 在 `sso_enabled=false` 时**即使提供商是启用状态也返回空数组**——登录页没有按钮时，先检查全局开关。
+</Callout>
 
 ## 通用流程
 
-1. 启用 SSO。
-2. 选择协议并填写提供商名称、显示名称和按钮文案。
-3. 配置客户端 ID、客户端密钥、Issuer/授权地址、Token 地址、用户信息映射或 SAML 元数据。
-4. 设置自动创建、邮箱匹配和审批策略。
-5. 保存后复制 Clouisle 显示的回调地址到身份提供商。
-6. 在隐身窗口测试新用户、已存在用户和失败回调。
+1. 在站点设置中启用 SSO，并按需调整全局策略（允许密码登录、自动创建、需要审批、按邮箱匹配）。
+2. 添加提供商：填写基本信息，选择协议。
+3. 在**配置**标签填入该协议的 JSON。
+4. 在**属性映射**标签把邮箱、用户名、头像对应到提供商字段。
+5. 保存后，把 Clouisle 展示的回调地址填入身份提供商的白名单/重定向地址。
+6. 用隐身窗口验证三种情况：新用户、已存在用户、错误回调。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/sso-connection-form.png" alt="SSO 连接配置" />
@@ -88,11 +194,72 @@ POST   /api/v1/sso/admin/providers/{provider_id}/test
 
 ## 用户生命周期
 
-- **自动创建**开启时，首次 SSO 登录可创建用户。
-- **通过邮箱匹配**开启时，SSO 邮箱可关联现有账户。
-- **需要审批**开启时，新账户保持待审批。
-- **允许密码登录**关闭时，站点进入 SSO-only 模式。
+全局设置与提供商开关是**或**的关系，最终判定如下：
+
+| 结果 | 判定规则 |
+| --- | --- |
+| 关联已有账户 | `sso_match_by_email=true`（默认）且返回邮箱能匹配到现有用户；关联时同时确保该用户加入默认团队 |
+| 新建账户 | 全局 `sso_auto_create_users` **或** 提供商「允许注册」任一开启 |
+| 新建被拒 | 全局自动创建关闭**且**提供商「允许注册」也关闭 → `6302`（`sso_registration_disabled`） |
+| 需要审批 | 全局 `sso_require_approval` **或** 提供商「需要审批」任一开启 → 账户为 `pending` 且不可登录 |
+| SSO-only | 全局 `sso_allow_password_login=false` → 密码登录返回 `6306` |
+
+新建的 SSO 用户具有以下特征：
+
+- **没有本地密码**（`hashed_password` 为空字符串），因此无法用密码登录。
+- 邮箱直接标记为已验证（信任提供商的邮箱）。
+- 用户名取映射出的 `username`；缺失时用邮箱 `@` 前的部分，再缺失时用 `user_<提供商用户标识前 8 位>`；重名会自动追加数字后缀。
+- 角色取提供商的 `default_role_id`（**仅 API 可设置，界面上没有该字段**），未设置时回退到全局默认角色；随后按 `default_team_id` 加入默认团队。
 
 ## 常见错误
 
-`SSO_INVALID_CONFIGURATION`（`6304`）表示配置缺失或格式错误；`SSO_AUTHENTICATION_FAILED`（`6303`）表示身份提供商拒绝或回调校验失败；会话过期返回 `6301`。先检查 Issuer、回调 URL、时钟、证书和邮箱映射。
+| 代码 | 含义 |
+| --- | --- |
+| `6300` | 提供商不存在 |
+| `6301` | SSO 登录会话过期（会话有效期 **10 分钟**，用户中途放弃授权即会过期） |
+| `6302` | 该提供商不允许注册（自动创建与「允许注册」均已关闭） |
+| `6303` | 提供商拒绝认证或回调校验失败 |
+| `6304` | 配置缺失/协议不受支持 |
+| `6305` | 提供商名称已存在 |
+| `6306` | 站点为 SSO-only，密码登录被禁用 |
+
+回调失败时后端会重定向到 `/sso-callback?error=...`，其中 `error` 可能是 `sso_provider_not_found`、`sso_session_expired`、`sso_login_failed`，账户被停用或待审批时分别是 `inactive`、`pending_approval`。
+
+## 故障排除
+
+### 登录页没有 SSO 按钮
+
+1. 检查 `sso_enabled` 是否为 `true`。
+2. 检查该提供商是否**启用**。
+3. 直接请求 `GET /api/v1/sso/providers` 确认返回内容（为空则前端不会渲染按钮）。
+
+### 回调报错 / 停在同一页面
+
+1. 核对回调地址的**域名与提供商名称**是否与配置完全一致。
+2. 确认 `BACKEND_URL` 或反向代理转发的对外地址是身份提供商可达的公网地址。
+3. 检查授权码是否已过期（用户停留过久 → `6301`）。
+4. 查看审计日志中的 `sso_login_failed` 记录与错误信息。
+
+### 登录成功但字段错位
+
+1. 按[属性映射](#属性映射)确认路径写法（点号 vs `$` JSONPath）。
+2. 注意同名原始字段会覆盖映射值。
+3. GitHub 等非 OIDC 标准字段需显式映射（`login`、`avatar_url`）。
+
+### SAML 校验失败
+
+1. 证书必须是 PEM 内容且**去掉头尾行**。
+2. 确认 IdP 与服务器时间同步（偏差过大会被判定为无效响应）。
+3. 确认 `idp_entity_id` 与 IdP 元数据中的 Entity ID 完全一致。
+
+### 关闭密码登录后无人能进后台
+
+这是把站点切成 SSO-only 的典型事故：请先确认至少一个超级管理员已绑定 SSO；若已锁死，可在服务端直接把 `sso_allow_password_login` 改回 `true` 后重启。
+
+## 相关文档
+
+- [SSO API](/api/sso) — 端点、请求体与响应字段
+- [登录与账户安全](./authentication.mdx) — 登录保护与 SSO 首次登录行为
+- [个人账户设置](./profile.mdx) — 解除关联与防自锁保护
+- [站点设置参考](/reference/site-settings) — `sso_*` 键的默认值
+- [环境变量](/self-host/configuration/environment-variables) — `FRONTEND_URL`、`PUBLIC_API_URL` 与 `API_V1_STR` 的作用与区别

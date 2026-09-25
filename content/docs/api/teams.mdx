@@ -1,62 +1,102 @@
 ---
 title: Teams API
-description: 管理与团队成员
+description: 管理团队信息、成员角色、所有权移交与团队模型授权
 icon: UsersRound
 ---
 
-## 端点
+Teams API 覆盖三类接口：**平台侧团队与成员管理**（`/api/v1/teams`）、**管理后台团队管理**（`/api/v1/admin/teams`，创建与删除只在这里），以及**团队模型授权**（`/api/v1/teams/{team_id}/models*`，仅超级管理员可写）。
 
-| 方法 | 路径 | 用途 | 权限 |
-| --- | --- | --- | --- |
-| GET | `/api/v1/teams/my` | 列出当前用户所属团队 | `team:read` |
-| GET | `/api/v1/teams/{team_id}` | 获取团队详情（含成员列表） | `team:read` |
-| POST | `/api/v1/admin/teams` | 创建团队 | `admin:team:create` |
-| PUT | `/api/v1/teams/{team_id}` | 更新团队信息 | `team:update` |
-| DELETE | `/api/v1/admin/teams/{team_id}` | 删除团队 | `admin:team:delete` |
-| POST | `/api/v1/teams/{team_id}/members` | 添加团队成员 | `team:manage` |
-| PUT | `/api/v1/teams/{team_id}/members/{user_id}` | 更新成员角色 | `team:manage` |
-| DELETE | `/api/v1/teams/{team_id}/members/{user_id}` | 移除团队成员 | `team:manage` |
+<Callout type="warn" title="没有平台侧创建/删除团队接口">
+  平台路由只有 `GET /api/v1/teams/my`、`GET|PUT /api/v1/teams/{team_id}`、成员管理、`leave` 与 `transfer-ownership`。**没有** `POST /api/v1/teams`，也**没有** `DELETE /api/v1/teams/{team_id}`；创建与删除团队属于管理后台，分别在 `POST /api/v1/admin/teams` 与 `DELETE /api/v1/admin/teams/{team_id}`。
+</Callout>
 
-## 基础 URL
+## 角色与权限模型
+
+| 角色 | 说明 |
+| --- | --- |
+| `owner` | 团队所有者，每个团队一个。可改成员角色、移交所有权、更新团队；不能直接退出，必须先移交 |
+| `admin` | 团队管理员。可更新团队、增删成员（改为 `admin` 需要被操作者已具备 `team:manage` 全局权限） |
+| `member` | 普通成员。默认角色，按全局权限执行操作 |
+| `viewer` | 只读成员。仅允许读取类权限（`team:read`、`agent:read`、`workflow:read`、`kb:read`、`tool:read`、`conversation:read` 等）；任何写操作都会被拒绝 |
+
+权限码与操作的关系：
+
+| 权限码 | 覆盖的操作 |
+| --- | --- |
+| `team:read` | 查看团队详情、查看成员、退出团队（自我移除） |
+| `team:update` | 更新团队名称、描述、头像 |
+| `team:manage` | 添加/移除成员、修改成员角色、移交所有权 |
+| `admin:team:read` | 后台列出全部团队 |
+| `admin:team:create` | 后台创建团队 |
+| `admin:team:delete` | 后台删除团队 |
+
+校验顺序（`check_team_permission`）对每个平台端点一致：
+
+1. 团队存在，否则 `404` / `4004`。
+2. 超级管理员直接通过，跳过后续检查。
+3. 必须是团队成员，否则 `403` / `3002`。
+4. 需要管理动作时（`team:update`、`team:manage` 或端点显式要求），角色必须是 `owner` 或 `admin`，否则 `403` / `3003`。
+5. `viewer` 角色只能执行只读权限，否则 `403` / `3000`。
+6. 最后校验用户的全局权限码，缺失则 `403` / `3000`。
+
+<Callout type="info">
+  第 3 步也意味着「非本团队成员」看不到团队详情：即使团队对管理员可见，普通用户仍需先成为成员。全员可见的团队列表请用后台接口。
+</Callout>
+
+## 基础 URL 与认证
 
 - 平台接口：`/api/v1/teams`
 - 管理接口：`/api/v1/admin/teams`
+- 团队模型授权：`/api/v1/teams/{team_id}/models*`
 
-## 认证
+所有团队端点都需要经过认证的 **JWT 用户会话**，不接受 API Key 认证。
 
-所有团队端点都需要经过认证的 JWT 用户会话，不接受 API Key 认证。
+## 端点总览
 
-**所需权限范围：**
+### 平台路由
 
-| 范围 | 说明 |
-| --- | --- |
-| `team:read` | 查看团队信息 |
-| `team:update` | 更新团队详情 |
-| `team:manage` | 管理团队成员和成员操作 |
-| `admin:team:create` | 创建团队（管理员） |
-| `admin:team:delete` | 删除团队（管理员） |
+| 方法 | 路径 | 用途 | 权限 / 角色 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/my` | 列出当前用户所属团队及其角色 | 登录即可 |
+| GET | `/api/v1/teams/{team_id}` | 团队详情（含成员列表） | `team:read` |
+| PUT | `/api/v1/teams/{team_id}` | 更新团队信息 | `team:update` + owner/admin |
+| POST | `/api/v1/teams/{team_id}/members` | 添加成员 | `team:manage` + owner/admin |
+| PUT | `/api/v1/teams/{team_id}/members/{user_id}` | 修改成员角色 | `team:manage` + owner/admin，且调用者为 owner（或超级管理员） |
+| DELETE | `/api/v1/teams/{team_id}/members/{user_id}` | 移除成员（支持自我移除） | 自我移除需 `team:read`；移除他人需 `team:manage` + owner/admin |
+| POST | `/api/v1/teams/{team_id}/leave` | 退出团队 | `team:read` |
+| POST | `/api/v1/teams/{team_id}/transfer-ownership` | 移交所有权 | `team:manage` + owner（或超级管理员） |
+
+### 管理后台路由
+
+| 方法 | 路径 | 用途 | 权限码 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/admin/teams` | 分页列出全部团队 | `admin:team:read` |
+| POST | `/api/v1/admin/teams` | 创建团队 | `admin:team:create` |
+| DELETE | `/api/v1/admin/teams/{team_id}` | 删除团队 | `admin:team:delete` |
+
+后台接口没有 `GET /admin/teams/{team_id}` 与 `PUT /admin/teams/{team_id}`：查看与更新仍走平台路由（需要团队成员身份）。
 
 ## 列出我的团队
-
-获取当前用户所属的所有团队，以及用户在每个团队中的角色。
 
 ```
 GET /api/v1/teams/my
 ```
+
+不需要权限码，返回当前用户的全部成员关系，按 `TeamMember` 记录顺序：
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/teams/my" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-**成功响应 (200 OK)：**
+**成功响应（200 OK）：**
 
 ```json
 {
   "code": 0,
   "data": [
     {
-      "id": "team-123",
+      "id": "8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f",
       "name": "Marketing Team",
       "description": "Marketing and content creation team",
       "avatar_url": null,
@@ -68,66 +108,56 @@ curl -X GET "https://your-domain.com/api/v1/teams/my" \
 }
 ```
 
-<Callout type="info">
-  没有 `GET /api/v1/teams` 列出所有团队的端点。管理员可通过 `GET /api/v1/admin/teams`（分页，支持按名称或描述 `search`，默认 `page_size` 50）列出所有团队，需要 `admin:team:read` 权限。
-</Callout>
+返回的是**数组**（不是分页信封）。没有 `GET /api/v1/teams` 列出全部团队；需要全量列表时使用后台接口：
+
+```
+GET /api/v1/admin/teams?page=1&page_size=50&search=marketing
+```
+
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | 页码 |
+| `page_size` | integer | `50` | 每页条数（注意后台默认是 50，不是平台接口常见的 20） |
+| `search` | string | — | 按团队名称或描述模糊匹配 |
 
 ## 获取团队详情
-
-获取指定团队的详细信息，包括成员列表。
 
 ```
 GET /api/v1/teams/{team_id}
 ```
 
-**路径参数：**
+| 路径参数 | 类型 | 必填 |
+| --- | --- | --- |
+| `team_id` | string (UUID) | 是 |
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `team_id` | string | 是 | 团队 UUID |
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/teams/team-123" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**成功响应 (200 OK)：**
+**成功响应（200 OK）：**
 
 ```json
 {
   "code": 0,
   "data": {
-    "id": "team-123",
+    "id": "8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f",
     "name": "Marketing Team",
     "description": "Marketing and content creation team",
     "avatar_url": null,
     "is_default": false,
     "owner": {
-      "id": "user-456",
+      "id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
       "username": "alice",
       "email": "alice@example.com",
-      "avatar_url": "https://example.com/avatars/alice.jpg"
+      "avatar_url": "https://example.com/avatars/alice.png"
     },
     "created_at": "2026-01-15T10:00:00Z",
     "updated_at": "2026-02-11T15:30:00Z",
     "members": [
       {
-        "id": "membership-001",
-        "user_id": "user-456",
+        "id": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e",
+        "user_id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
         "username": "alice",
         "email": "alice@example.com",
-        "avatar_url": "https://example.com/avatars/alice.jpg",
+        "avatar_url": "https://example.com/avatars/alice.png",
         "role": "owner",
         "joined_at": "2026-01-15T10:00:00Z"
-      },
-      {
-        "id": "membership-002",
-        "user_id": "user-789",
-        "username": "bob",
-        "email": "bob@example.com",
-        "avatar_url": null,
-        "role": "member",
-        "joined_at": "2026-01-16T10:00:00Z"
       }
     ]
   },
@@ -135,306 +165,251 @@ curl -X GET "https://your-domain.com/api/v1/teams/team-123" \
 }
 ```
 
-## 创建团队
-
-创建新团队（仅管理员）。
-
-```
-POST /api/v1/admin/teams
-```
-
-**请求体：**
-
-```json
-{
-  "name": "Sales Team",
-  "description": "Sales and customer relations team",
-  "avatar_url": null
-}
-```
-
-**请求字段：**
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `name` | string | 是 | 团队名称 |
-| `description` | string | 否 | 团队描述 |
-| `avatar_url` | string | 否 | 团队头像 URL |
-
-```bash
-curl -X POST "https://your-domain.com/api/v1/admin/teams" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Sales Team",
-    "description": "Sales and customer relations team"
-  }'
-```
-
-**成功响应 (200 OK)：**
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "team-456",
-    "name": "Sales Team",
-    "description": "Sales and customer relations team",
-    "avatar_url": null,
-    "is_default": false,
-    "owner": null,
-    "created_at": "2026-02-11T16:00:00Z",
-    "updated_at": "2026-02-11T16:00:00Z"
-  },
-  "msg": "Team created successfully"
-}
-```
+成员信息里没有独立的成员列表端点，完整成员列表**只在**这个响应中返回；`members` 未分页，成员很多的团队要自行截取。
 
 ## 更新团队
-
-更新团队信息。
 
 ```
 PUT /api/v1/teams/{team_id}
 ```
 
-**路径参数：**
+需要 `team:update` 权限码，并且调用者必须是团队 `owner` 或 `admin`。所有字段可选，只传要修改的字段。
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `team_id` | string | 是 | 团队 UUID |
-
-**请求体：** 所有字段均为可选，只需包含要更新的字段。
-
-```json
-{
-  "name": "Updated Team Name",
-  "description": "Updated description",
-  "avatar_url": null
-}
-```
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `name` | string | 团队名称，需全局唯一 |
+| `description` | string | 团队描述 |
+| `avatar_url` | string | 团队头像 URL |
 
 ```bash
-curl -X PUT "https://your-domain.com/api/v1/teams/team-123" \
+curl -X PUT "https://your-domain.com/api/v1/teams/8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Updated Team Name"
-  }'
+  -d '{"name": "Growth Team"}'
 ```
 
-**成功响应 (200 OK)：**
+响应返回更新后的团队对象（含 `owner`，不含 `members`）。重名返回 HTTP `400` / `5102`（`TEAM_NAME_EXISTS`）。
 
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "team-123",
-    "name": "Updated Team Name",
-    "description": null,
-    "avatar_url": null,
-    "is_default": false,
-    "owner": {
-      "id": "user-456",
-      "username": "alice",
-      "email": "alice@example.com",
-      "avatar_url": null
-    },
-    "created_at": "2026-01-15T10:00:00Z",
-    "updated_at": "2026-02-11T16:05:00Z"
-  },
-  "msg": "Team updated successfully"
-}
-```
-
-## 删除团队
-
-永久删除团队（仅管理员）。
-
-```
-DELETE /api/v1/admin/teams/{team_id}
-```
-
-**路径参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `team_id` | string | 是 | 团队 UUID |
-
-```bash
-curl -X DELETE "https://your-domain.com/api/v1/admin/teams/team-123" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
-```
-
-**成功响应 (200 OK)：**
-
-```json
-{
-  "code": 0,
-  "data": null,
-  "msg": "Team deleted successfully"
-}
-```
+<Callout type="info">
+  只有显式传入的字段会被修改：传 `"description": null` 也会被当作「未提供」而跳过，因此当前无法用它清空描述或头像。
+</Callout>
 
 ## 添加团队成员
-
-向团队添加成员。
 
 ```
 POST /api/v1/teams/{team_id}/members
 ```
 
-**路径参数：**
+需要 `team:manage` 权限码，且调用者为 `owner`/`admin`。
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `team_id` | string | 是 | 团队 UUID |
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `user_id` | string (UUID) | 二选一 | — | 目标用户 UUID |
+| `identifier` | string | 二选一 | — | 用户名精确匹配，或邮箱（大小写不敏感）精确匹配 |
+| `role` | string | 否 | `member` | 成员角色：`member`、`admin`、`viewer` |
 
-**请求体：**
-
-```json
-{
-  "user_id": "user-999",
-  "role": "member"
-}
-```
-
-**请求字段：**
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `user_id` | string | 是 | 要添加的用户 UUID |
-| `role` | string | 否 | 成员角色：`admin`、`member`、`viewer`（默认 `member`） |
+`user_id` 与 `identifier` 至少提供一个，都不提供返回 HTTP `400` / `1001`。
 
 ```bash
-curl -X POST "https://your-domain.com/api/v1/teams/team-123/members" \
+curl -X POST "https://your-domain.com/api/v1/teams/8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f/members" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user-999",
-    "role": "member"
-  }'
+  -d '{"identifier": "carol@example.com", "role": "member"}'
 ```
 
-**成功响应 (200 OK)：**
+三条业务规则：
 
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "membership-003",
-    "user_id": "user-999",
-    "username": "carol",
-    "email": "carol@example.com",
-    "avatar_url": null,
-    "role": "member",
-    "joined_at": "2026-02-11T16:00:00Z"
-  },
-  "msg": "Member added successfully"
-}
-```
+1. 目标用户必须存在，否则 HTTP `404` / `4001`。
+2. 目标用户不能已经是成员，否则 HTTP `400` / `5103`（`ALREADY_TEAM_MEMBER`）。
+3. 不能直接添加 `owner`：返回 HTTP `400` / `5206`（`CANNOT_ADD_AS_OWNER`），所有权只能通过移交接口改变。
+4. 添加为 `admin` 时，目标用户必须已经具备全局 `team:manage` 权限，否则 HTTP `403` / `3000`（并回传 `permission` 字段说明缺哪个权限码）。
 
-## 更新团队成员角色
+**成功响应（200 OK）：** 返回新建的成员记录（`id`、`user_id`、`username`、`email`、`avatar_url`、`role`、`joined_at`）。同时会向被添加者与整个团队发送站内通知。
 
-更新团队成员的角色。
+## 修改成员角色
 
 ```
 PUT /api/v1/teams/{team_id}/members/{user_id}
 ```
 
-**路径参数：**
+| 路径参数 | 类型 | 必填 |
+| --- | --- | --- |
+| `team_id` | string (UUID) | 是 |
+| `user_id` | string (UUID) | 是 |
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `team_id` | string | 是 | 团队 UUID |
-| `user_id` | string | 是 | 用户 UUID |
-
-**请求体：**
+请求体：
 
 ```json
-{
-  "role": "admin"
-}
+{ "role": "admin" }
 ```
 
-```bash
-curl -X PUT "https://your-domain.com/api/v1/teams/team-123/members/user-999" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "role": "admin"
-  }'
-```
+`role` 必填。约束：
 
-**成功响应 (200 OK)：**
+- 只有 `owner`（或超级管理员）能修改角色；`admin` 调用返回 HTTP `403` / `3004`（`TEAM_OWNER_REQUIRED`）。
+- 不能修改 `owner` 自己的角色（HTTP `400` / `5207`，`CANNOT_CHANGE_OWNER_ROLE`）。
+- 不能把成员直接提升为 `owner`（HTTP `400` / `5208`，`CANNOT_PROMOTE_TO_OWNER`），请使用移交所有权。
+- 设为 `admin` 时，目标用户必须已有全局 `team:manage` 权限，否则 HTTP `403` / `3000`。
+- 目标用户不存在返回 `404` / `4001`；成员记录不存在返回 `404` / `4005`。
 
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "membership-003",
-    "user_id": "user-999",
-    "username": "carol",
-    "email": "carol@example.com",
-    "avatar_url": null,
-    "role": "admin",
-    "joined_at": "2026-02-11T16:00:00Z"
-  },
-  "msg": "Member role updated successfully"
-}
-```
+响应返回更新后的成员记录，`role` 为新角色，并通知被修改者。
 
 ## 移除团队成员
-
-从团队中移除成员。
 
 ```
 DELETE /api/v1/teams/{team_id}/members/{user_id}
 ```
 
-**路径参数：**
+| 路径参数 | 类型 | 必填 |
+| --- | --- | --- |
+| `team_id` | string (UUID) | 是 |
+| `user_id` | string (UUID) | 是 |
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `team_id` | string | 是 | 团队 UUID |
-| `user_id` | string | 是 | 用户 UUID |
+权限取决于目标是不是自己：
 
-```bash
-curl -X DELETE "https://your-domain.com/api/v1/teams/team-123/members/user-999" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+- **自我移除**（`user_id` 等于当前用户）：只需 `team:read`，相当于退出团队。
+- **移除他人**：需要 `team:manage` 且调用者为 `owner`/`admin`。
 
-**成功响应 (200 OK)：**
+`owner` 不能被移除（HTTP `400` / `5209`，`CANNOT_REMOVE_OWNER`）；目标用户不存在返回 `404` / `4001`；成员记录不存在返回 `404` / `4005`。
+
+**成功响应（200 OK）：**
 
 ```json
 {
   "code": 0,
-  "data": null,
-  "msg": "Member removed successfully"
+  "data": { "user_id": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e" },
+  "msg": "Team member removed successfully"
 }
 ```
 
-## 未实现功能
+被移除者与团队都会收到通知。
+
+## 退出团队
+
+```
+POST /api/v1/teams/{team_id}/leave
+```
+
+需要 `team:read`（普通成员与 `viewer` 均可调用）。
+
+- 不是团队成员返回 HTTP `404` / `3002`（`NOT_TEAM_MEMBER`）。
+- `owner` 不能退出，返回 HTTP `400` / `5210`（`OWNER_CANNOT_LEAVE`），必须先移交所有权。
+
+**成功响应（200 OK）：**
+
+```json
+{ "code": 0, "data": { "team_id": "8f14e45f-..." }, "msg": "You have left the team" }
+```
+
+## 移交所有权
+
+```
+POST /api/v1/teams/{team_id}/transfer-ownership?new_owner_id=<新所有者 UUID>
+```
 
 <Callout type="warn">
-  以下功能尚未实现，属于 Roadmap 规划：
-  - **列出团队成员**：没有独立的 `GET /teams/{team_id}/members` 端点。完整成员列表包含在 `GET /api/v1/teams/{team_id}` 的响应中（参见 [获取团队详情](#获取团队详情)）。
-  - **团队统计**：没有团队统计端点。
+  `new_owner_id` 是**查询参数**，不是请求体字段。写成 JSON body 会被忽略并返回 `422`（缺少必填查询参数 `new_owner_id`）。
 </Callout>
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/teams/8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f/transfer-ownership?new_owner_id=b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+约束：
+
+1. 调用者需要 `team:manage` 权限码且为团队 `owner`/`admin`，并额外要求 `owner` 角色（超级管理员可绕过 `owner` 要求）。
+2. `new_owner_id` 对应的用户**必须已经是本团队成员**，否则 HTTP `404` / `4005`。
+3. 新所有者必须具备全局 `team:manage` 权限，否则 HTTP `403` / `3000`。
+4. 不能把所有权移交给当前 `owner` 自己，返回 HTTP `400` / `5208`（`CANNOT_PROMOTE_TO_OWNER`）。
+
+成功后新所有者角色变为 `owner`，原所有者自动降为 `admin`，`team.owner` 字段同步更新；双方会收到所有权变更通知。响应返回更新后的团队对象。
+
+<Callout type="info">
+  超级管理员可以把一个没有任何 `team:manage` 权限的成员设为 owner 吗？不能——第 3 条对被移交给的人同样生效，因此**超级管理员也无法绕过**新所有者的权限要求。
+</Callout>
+
+## 管理后台：创建与删除团队
+
+### 创建团队
+
+```
+POST /api/v1/admin/teams
+```
+
+需要 `admin:team:create`。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 团队名称，需全局唯一 |
+| `description` | string | 否 | 描述 |
+| `avatar_url` | string | 否 | 头像 URL |
+
+创建者会成为该团队的 `owner` 并写入一条 `owner` 成员记录，因此新团队立即有且只有一个所有者。团队名重复返回 HTTP `400` / `5102`。
+
+### 删除团队
+
+```
+DELETE /api/v1/admin/teams/{team_id}
+```
+
+需要 `admin:team:delete`。团队不存在返回 `404` / `4004`；默认团队（`is_default = true`）不可删除，返回 HTTP `400` / `5205`（`CANNOT_DELETE_DEFAULT_TEAM`）。
+
+响应 `data` 是**被删除的团队对象**（用于审计回显），不是 `null`。
+
+<Callout type="error">
+  删除团队会一并移除其成员关系与相关授权。团队里的 Agent、工作流、知识库等资源不会自动转移，请在删除前迁移或归档。
+</Callout>
+
+## 团队模型授权
+
+团队能使用哪些模型由团队模型授权记录决定，读写权限不同：
+
+| 方法 | 路径 | 用途 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/{team_id}/models` | 列出已授权模型（可带 `model_type` 过滤） | 超级管理员或团队成员 |
+| POST | `/api/v1/teams/{team_id}/models` | 授权单个模型并设置配额 | **仅超级管理员** |
+| PUT | `/api/v1/teams/{team_id}/models/{model_id}` | 修改授权配额与启用状态 | **仅超级管理员** |
+| DELETE | `/api/v1/teams/{team_id}/models/{model_id}` | 撤销单个模型授权 | **仅超级管理员** |
+| POST | `/api/v1/teams/{team_id}/models/batch` | 批量授权 | **仅超级管理员** |
+| DELETE | `/api/v1/teams/{team_id}/models/batch` | 批量撤销 | **仅超级管理员** |
+| GET | `/api/v1/teams/{team_id}/available-models` | 列出**已授权且启用**的模型（供调用方选择） | 超级管理员或团队成员 |
+| GET | `/api/v1/teams/{team_id}/models/quota` | 查询每个模型的配额与用量 | 超级管理员或团队成员 |
+
+三个读取端点对非超级管理员要求「是团队成员」，不要求具体权限码。列表按 `priority` 倒序返回，`priority` 越高的授权越靠前。
+
+字段、配额计算与批量请求体详见 [Team Models API](./team-models)。
 
 ## 错误码
 
-| 代码 | 消息 | 说明 |
+| HTTP | code | 场景 |
 | --- | --- | --- |
-| `4004` | Team not found | 团队不存在 |
-| `3000` | Permission denied | 权限不足 |
-| `3002` | Not team member | 用户不是团队成员 |
-| `1001` | Validation failed | 请求数据无效 |
-| `5102` | Name already exists | 团队名称已存在 |
-| `5103` | Already team member | 用户已是团队成员 |
+| `400` | `1001` | 请求校验失败（缺少 `user_id` 与 `identifier` 等） |
+| `403` | `3000` | 缺少权限码、`viewer` 执行写操作，或目标用户缺少 `team:manage` |
+| `403` | `3002` | 不是团队成员 |
+| `403` | `3003` | 需要团队 `owner` 或 `admin` 角色 |
+| `403` | `3004` | 需要团队 `owner` 角色（修改角色、移交所有权） |
+| `404` | `3002` | `POST /teams/{team_id}/leave` 时不是团队成员 |
+| `404` | `4001` | 目标用户不存在 |
+| `404` | `4004` | 团队不存在 |
+| `404` | `4005` | 团队成员记录不存在（含移交时目标不是成员） |
+| `400` | `5102` | 团队名已存在 |
+| `400` | `5103` | 用户已是团队成员 |
+| `400` | `5205` | 不能删除默认团队 |
+| `400` | `5206` | 不能直接添加为 owner |
+| `400` | `5207` | 不能修改 owner 的角色 |
+| `400` | `5208` | 不能直接提升为 owner（含移交给当前 owner） |
+| `400` | `5209` | 不能移除 owner |
+| `400` | `5210` | owner 必须先移交所有权才能退出 |
 
-<Callout type="info">
-  这些端点没有实现单独的速率限制，端点上没有速率限制中间件。
+## 尚未提供的能力
+
+<Callout type="warn">
+  以下是当前版本的边界，请据此设计客户端：
+
+  - **没有独立的成员列表接口**：`GET /teams/{team_id}/members` 不存在，成员列表只在 `GET /teams/{team_id}` 响应中返回。
+  - **没有团队统计接口**：团队维度的用量统计请走模型配额接口或后台统计。
+  - **平台侧不能创建/删除团队**：只能通过 `/api/v1/admin/*`。
+  - **不能通过接口修改团队默认标记**：`is_default` 只读。
 </Callout>
 
 ## 代码示例
@@ -442,105 +417,98 @@ curl -X DELETE "https://your-domain.com/api/v1/teams/team-123/members/user-999" 
 ### Python
 
 ```python
+import os
 import requests
 
-def list_my_teams(token):
-    """列出当前用户所属的团队。"""
-    url = "https://your-domain.com/api/v1/teams/my"
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
+BASE = "https://your-domain.com/api/v1"
+TOKEN = os.environ["USER_TOKEN"]
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
-    response = requests.get(url, headers=headers)
+
+def list_my_teams() -> list[dict]:
+    """列出我加入的团队及我在其中的角色。"""
+    result = requests.get(f"{BASE}/teams/my", headers=HEADERS).json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
+
+
+def add_member(team_id: str, identifier: str, role: str = "member") -> dict:
+    """通过邮箱精确匹配添加成员。"""
+    response = requests.post(
+        f"{BASE}/teams/{team_id}/members",
+        headers=HEADERS,
+        json={"identifier": identifier, "role": role},
+    )
     result = response.json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
 
-    if result['code'] == 0:
-        return result['data']
-    else:
-        raise Exception(f"Error: {result['msg']}")
 
-def add_team_member(token, team_id, user_id, role="member"):
-    """向团队添加成员。"""
-    url = f"https://your-domain.com/api/v1/teams/{team_id}/members"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "user_id": user_id,
-        "role": role
-    }
-
-    response = requests.post(url, headers=headers, json=data)
+def transfer_ownership(team_id: str, new_owner_id: str) -> dict:
+    """移交所有权（new_owner_id 是查询参数）。"""
+    response = requests.post(
+        f"{BASE}/teams/{team_id}/transfer-ownership",
+        headers=HEADERS,
+        params={"new_owner_id": new_owner_id},
+    )
     result = response.json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
 
-    if result['code'] == 0:
-        return result['data']
-    else:
-        raise Exception(f"Error: {result['msg']}")
 
-# 使用示例
-teams = list_my_teams("YOUR_TOKEN")
-for team in teams:
-    print(f"Team: {team['name']} (role: {team['role']})")
-
-member = add_team_member("YOUR_TOKEN", "team-123", "user-999", "member")
-print(f"Added member: {member['user_id']}")
+# 使用
+for team in list_my_teams():
+    print(f"{team['name']} — 我的角色: {team['role']}")
 ```
 
 ### JavaScript
 
 ```javascript
+const BASE = 'https://your-domain.com/api/v1';
+
 async function listMyTeams(token) {
-  const response = await fetch(
-    'https://your-domain.com/api/v1/teams/my',
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    }
-  );
-
+  const response = await fetch(`${BASE}/teams/my`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   const result = await response.json();
-
-  if (result.code === 0) {
-    return result.data;
-  } else {
-    throw new Error(result.msg);
-  }
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
 }
 
-async function addTeamMember(token, teamId, userId, role = 'member') {
-  const response = await fetch(
-    `https://your-domain.com/api/v1/teams/${teamId}/members`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        role: role,
-      }),
-    }
-  );
-
+async function addMember(token, teamId, identifier, role = 'member') {
+  const response = await fetch(`${BASE}/teams/${teamId}/members`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ identifier, role }),
+  });
   const result = await response.json();
-
-  if (result.code === 0) {
-    return result.data;
-  } else {
-    throw new Error(result.msg);
-  }
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
 }
 
-// 使用示例
-const teams = await listMyTeams('YOUR_TOKEN');
-teams.forEach(team => {
-  console.log(`Team: ${team.name} (role: ${team.role})`);
-});
+async function leaveTeam(token, teamId) {
+  const response = await fetch(`${BASE}/teams/${teamId}/leave`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const result = await response.json();
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
+}
 
-const member = await addTeamMember('YOUR_TOKEN', 'team-123', 'user-999', 'member');
-console.log('Added member:', member.user_id);
+// 使用
+const teams = await listMyTeams(process.env.USER_TOKEN);
+teams.forEach((team) => console.log(`${team.name} — my role: ${team.role}`));
 ```
+
+## 相关文档
+
+- [Team Models API](./team-models)：团队模型授权字段、配额与批量操作
+- [Users API](./users)：管理员创建用户与角色分配
+- [API 错误与重试](./errors)：`3002`-`3004`、`5206`-`5210` 的统一处理

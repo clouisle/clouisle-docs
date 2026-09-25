@@ -1,16 +1,123 @@
 ---
-title: 管理 API 边界
-description: 了解管理后台端点的权限边界和使用建议
+title: 管理 API 参考
+description: 管理后台端点的分组、权限码与调用边界
 icon: ShieldCheck
 ---
 
-管理路由挂载在 `/api/v1/admin` 下，覆盖仪表盘、观测、审计日志、用户、角色、权限、模型、SSO、通知、团队、记忆、Agent、工具、Skills、工作流和包管理。
+管理路由挂载在 `/api/v1/admin` 下，覆盖仪表盘、观测、审计日志、会话、用户、角色、权限、站点设置、模型、SSO、通知、团队、记忆、Agent、工具、Skills、工作流、工作流指标、TOTP、包管理和知识库。它们由管理后台使用，响应遵循统一的 `code`/`data`/`msg` 结构，不是面向匿名调用的公共 API。
 
-这些端点由管理后台使用，通常需要 `admin:*` 全局权限或超级管理员身份；具体资源还会执行团队和作用域检查。它们不是面向匿名调用的公共 API。
+## 权限模型
+
+每个端点通过依赖声明所需的权限码（`admin:*` 或 `audit:*`）：
+
+- **超级管理员直接放行**：拥有 `is_superuser` 的账号跳过所有权限码校验。
+- **其他调用者按权限码判定**：账号必须通过角色持有该端点声明的权限码。权限码由启动时同步的系统权限定义管理，可在**角色**中自由组合（见 `/api/v1/admin/roles`、`/api/v1/admin/permissions`）。
+- **API Key 同权校验**：API Key 按其绑定用户的权限集合校验，因此不要给 API Key 授予不必要的 `admin:*` 权限。
+- **知识库分组是例外**：`/api/v1/admin/knowledge-bases` 复用平台知识库路由，但会按请求路径前缀把权限码切换为 `admin:knowledge-base:{read,test,create,update,delete}`，并跳过团队成员校验，使管理视图可以跨团队读取和修改知识库。
+
+<Callout type="warn">
+  管理端点的鉴权是后端强制的。前端隐藏入口不构成安全边界，第三方集成必须按权限码申请最小权限。
+</Callout>
+
+## 分组与权限码
+
+| 分组 | 挂载前缀 | 权限码 |
+| --- | --- | --- |
+| 仪表盘 | `/api/v1/admin/dashboard` | `admin:dashboard:access` |
+| 观测 | `/api/v1/admin/observability` | `admin:dashboard:access` |
+| 审计日志 | `/api/v1/admin/audit-logs` | `audit:read`（查询）、`audit:export`（导出、归档） |
+| 会话 | `/api/v1/admin/conversations` | `admin:conversation:read`、`admin:conversation:delete` |
+| 用户 | `/api/v1/admin/users` | `admin:user:read`、`admin:user:create`、`admin:user:update`、`admin:user:delete` |
+| 角色 | `/api/v1/admin/roles` | `admin:role:read`、`admin:role:create`、`admin:role:update`、`admin:role:delete` |
+| 权限 | `/api/v1/admin/permissions` | `admin:permission:read`、`admin:permission:create`、`admin:permission:update`、`admin:permission:delete` |
+| 站点设置 | `/api/v1/admin/site-settings` | `admin:settings:read`、`admin:settings:update`（归档审计日志另需 `audit:export`） |
+| 模型 | `/api/v1/admin/models` | `admin:model:read`、`admin:model:create`、`admin:model:update`、`admin:model:delete` |
+| SSO | `/api/v1/admin/sso` | `admin:sso:read`、`admin:sso:update` |
+| 通知 | `/api/v1/admin/notifications` | `admin:notification:create`（创建）、`admin:notification:delete`（删除）；列表按全局管理权限或授权团队收敛 |
+| 团队 | `/api/v1/admin/teams` | `admin:team:read`、`admin:team:create`、`admin:team:delete` |
+| 记忆 | `/api/v1/admin/memories` | `admin:memory:read`、`admin:memory:update`、`admin:memory:delete` |
+| Agent | `/api/v1/admin/agents` | `admin:app:read`、`admin:app:create`、`admin:app:update`、`admin:app:delete`、`admin:app:publish`、`admin:app:duplicate` |
+| 工具 | `/api/v1/admin/tools` | `admin:capability:read`、`admin:capability:create`、`admin:capability:update`、`admin:capability:delete`、`admin:capability:execute` |
+| Skills | `/api/v1/admin/skills` | `admin:capability:read`、`admin:capability:create`、`admin:capability:update`、`admin:capability:delete`、`admin:capability:execute` |
+| 工作流 | `/api/v1/admin/workflows` | `admin:app:read`、`admin:app:create`、`admin:app:update`、`admin:app:delete`、`admin:app:publish`、`admin:app:duplicate` |
+| 工作流指标 | `/api/v1/admin/workflows/metrics` | `admin:dashboard:access`（清缓存需 `admin:settings:update`） |
+| TOTP | `/api/v1/admin/totp` | `admin:dashboard:access` |
+| 包管理 | `/api/v1/admin/packages` | 需已认证用户（导入/导出按资源自身的访问规则校验） |
+| 知识库 | `/api/v1/admin/knowledge-bases` | `admin:knowledge-base:read`、`admin:knowledge-base:test`、`admin:knowledge-base:create`、`admin:knowledge-base:update`、`admin:knowledge-base:delete` |
+
+<Callout type="info">
+  Agent、工作流两组共用同一套 `admin:app:*` 权限码，工具与 Skills 两点共用同一套 `admin:capability:*` 权限码；授予其中一组会同时影响另一组。
+</Callout>
+
+## 常用端点
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/admin/dashboard/stats` | 系统总览统计（用户、团队、Agent、工作流、会话、token） |
+| GET | `/api/v1/admin/dashboard/stats/trends` | 系统增长趋势 |
+| GET | `/api/v1/admin/observability/overview` | 运行观测总览 |
+| GET | `/api/v1/admin/observability/timeouts` | 超时统计 |
+| GET | `/api/v1/admin/audit-logs` | 分页查询审计日志 |
+| GET | `/api/v1/admin/audit-logs/export` | 导出审计日志 |
+| GET | `/api/v1/admin/roles` | 列出角色 |
+| PUT | `/api/v1/admin/roles/{role_id}/permissions` | 覆盖角色的权限集合 |
+| GET | `/api/v1/admin/permissions/scopes` | 列出权限作用域选项 |
+| GET | `/api/v1/admin/users/stats` | 用户统计 |
+| POST | `/api/v1/admin/users/{user_id}/deactivate` | 停用用户 |
+| GET | `/api/v1/admin/teams` | 列出全部团队 |
+| GET | `/api/v1/admin/memories/entities` | 列出记忆实体 |
+| GET | `/api/v1/admin/memories/relations` | 列出记忆关系 |
+| GET | `/api/v1/admin/agents/filters` | Agent 筛选选项 |
+| POST | `/api/v1/admin/agents/{agent_id}/publish` | 发布 Agent |
+| GET | `/api/v1/admin/tools/config` | 列出全局工具配置 |
+| GET | `/api/v1/admin/skills/filters` | Skill 筛选选项 |
+| GET | `/api/v1/admin/workflows/filters` | 工作流筛选选项 |
+| GET | `/api/v1/admin/totp/stats` | TOTP 使用统计 |
+| GET | `/api/v1/admin/notifications` | 管理视图通知列表 |
+| GET | `/api/v1/admin/knowledge-bases` | 跨团队知识库列表 |
+
+## 工作流指标
+
+工作流执行指标**不在** `/api/v1/workflows` 下，而在管理前缀下的 `/api/v1/admin/workflows/metrics/*`。其路由自带 `/workflows/metrics` 前缀，因此与管理工作流的 `/api/v1/admin/workflows` CRUD 共存而不冲突。
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/admin/workflows/metrics/dashboard` | 指标看板总览（含运行中的工作流） | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/workflows/{workflow_id}` | 单个工作流的执行指标 | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/nodes` | 全部节点类型指标 | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/nodes/{node_type}` | 指定节点类型指标 | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/running` | 当前运行中的工作流列表 | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/cache` | 指标缓存统计 | `admin:dashboard:access` |
+| DELETE | `/api/v1/admin/workflows/metrics/cache` | 清空指标缓存 | `admin:settings:update` |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/workflows/metrics/dashboard" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+## 调用示例
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/users?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
 
 ## 集成建议
 
-- 第三方应用优先使用 Agent、工作流、会话和知识库资源端点。
-- 管理自动化必须固定 Clouisle 版本，记录所需权限，并在升级前检查 OpenAPI Schema。
-- API Key 不应授予不必要的 `admin:*` 权限。
-- 审计和用户管理操作包含敏感数据，应使用短期密钥和最小限速。
+- 第三方应用优先使用 Agent、工作流、会话和知识库资源端点，而不是管理端点。
+- 管理自动化必须固定 Clouisle 版本，记录所需权限码，并在升级前检查 OpenAPI Schema。
+- 审计和用户管理操作包含敏感数据，应使用短期密钥并配合最小限速。
+- 只有确实需要跨团队运维时才授予 `admin:*`；日常使用应通过团队角色授予平台权限（如 `workflow:read`、`kb:read`）。
+
+## 常见错误
+
+| HTTP / code | 含义 |
+| --- | --- |
+| `401 / 2000` | 缺少认证 |
+| `403 / 3000` | 缺少对应权限码 |
+| `404 / 4000` | 资源不存在 |
+| `1001` | 请求参数校验失败 |
+
+---
+
+**Last Updated**: 2026-09-26

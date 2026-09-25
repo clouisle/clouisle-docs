@@ -4,16 +4,17 @@ description: Create external API tools or restricted code tools, configure param
 icon: CodeXml
 ---
 
-Clouisle provides two types of tools: **Built-in tools** (registered by the platform, no creation needed) and **Custom tools** (created by teams). Built-in tools cover time, math, web, file, and media capabilities — see [Built-in Tools](/en/usage/guides/tools/built-in). Custom tools belong to the current team, support HTTP API and Code types, and can be configured, tested, and shared with other teams.
+Clouisle groups tools into three kinds: **Built-in tools** (registered by the platform, no creation needed — see [Built-in Tools](/en/usage/guides/tools/built-in)), **MCP servers** (connect an external MCP Server — see [MCP Servers](/en/usage/guides/tools/mcp)), and **Custom tools** (created by teams). Custom tools belong to the current team, support the HTTP API, Code, and Database types, and can be configured, tested, and shared with other teams.
 
 ## Tool Types
 
-Custom tools come in two types:
+The **Create Tool** menu under **Capabilities** > **Tools** offers four entries (MCP servers have their own page):
 
 | Type | Description | Use Cases |
 | --- | --- | --- |
-| **HTTP API** | Call external HTTP endpoints, supports GET/POST and other methods | Query CRM, create tickets, call third-party APIs |
+| **HTTP API** | Call external HTTP endpoints, supporting GET/POST/PUT/PATCH/DELETE | Query CRM, create tickets, call third-party APIs |
 | **Code Tool** | Execute Python or JavaScript in a restricted sandbox | Data transformation, text processing, custom calculations |
+| **Database Tool** | Connect to an external relational/cache database, inspect the schema, then run **read-only** queries | Let the Agent answer questions from business data |
 
 ## Naming Rules
 
@@ -28,8 +29,12 @@ Tool names can only contain letters, digits, and underscores, and must start wit
 5. The timeout defaults to `30` seconds, range `1-300` seconds.
 6. After saving, select **Run Test** and confirm the result path and error behavior.
 
-<Callout type="warn">
-  Custom HTTP tools do not support `{{variable}}` substitution in the URL path or URL string. Keep the endpoint URL static and pass variables through **Query Parameters**, **Request Headers**, or **Body Template** fields.
+<Callout type="warn" title="The URL must be static">
+  A custom HTTP tool's **URL allows no placeholders at all**: if the URL contains `{param}`, `{{param}}`, or a bare `{{` / `}}`, execution is rejected outright (`http_tool_url_templates_not_supported`). Put variables in the **Query Parameters**, **Request Headers**, or **Body Template** fields — those three support `{{param}}` substitution.
+</Callout>
+
+<Callout type="info">
+  The URL also passes an SSRF check (a domain/IP allowlist that blocks private addresses); the request is only issued when it passes.
 </Callout>
 
 ### HTTP Tool Configuration Example: Customer Lookup
@@ -132,6 +137,33 @@ Artifact paths must be under `/workspace` and can be marked optional.
   <img src="https://rustfs-endpoint.yhnotes.com/content/custom-tool-http-dialog.png" alt="Create an HTTP tool" />
   <figcaption>Create an HTTP tool</figcaption>
 </figure>
+
+## Creating Database Tools
+
+A database tool lets an Agent query an external database directly. The connection details (host, port, credentials, connection URL) stay **hidden from the model** — the Agent only sees the tool name and description, so the description should say what the database holds and which questions it answers.
+
+1. Under **Capabilities** > **Tools**, select **Create Tool** > **Database Tool**.
+2. Pick the database type: `postgresql`, `mysql`, `redis`, or `mongodb`.
+3. Fill in the connection, using either mode:
+   - **Field mode**: host (`host`), port (`port`), database (`database`), username (`username`), password (`password`), SSL.
+   - **Connection URL mode**: fill in `url` directly (common for Redis / MongoDB); Redis can also set the logical database index `db`, and MongoDB can set the auth database `auth_source`.
+4. Set the **query timeout** (`timeout`, default `15`s, range `1-120`) and the **maximum returned rows** (`max_limit`, default `100`, range `1-1000`).
+5. Select **Test connection** (which calls `POST /api/v1/admin/tools/database/test-connection` and also passes the SSRF check), then save once it succeeds.
+
+### Actions the Agent can call
+
+| Action | Parameters | Description |
+| --- | --- | --- |
+| `schema` (default) | `tables` (optional list), `include_samples` (optional) | Read the table structure so the model first learns which tables and columns exist |
+| `query` | `sql` (required), `limit` (optional, default `50`, capped by `max_limit`) | Execute a **read-only** SQL statement |
+
+<Callout type="warn">
+  Database tools allow read-only queries only: non-query statements (`INSERT` / `UPDATE` / `DELETE` / DDL) and dangerous keywords are rejected by `validate_readonly_sql`, and only one statement is permitted per call. Use an HTTP API or code tool when you need writes.
+</Callout>
+
+<Callout type="error">
+  Connection details are stored server-side and never sent to the model, but always use a **read-only** database account with least privilege. Testing connectivity also requires the `tool:create` permission.
+</Callout>
 
 ## Editing and Deleting Tools
 
@@ -323,6 +355,7 @@ The Tools API supports full CRUD operations, primarily for user-side tool manage
 | GET | `/api/v1/tools/name/{tool_name}?team_id={team_id}` | Get tool details by name |
 | POST | `/api/v1/tools/test` | Single test execution |
 | POST | `/api/v1/tools/execute-code` | Run code directly in sandbox |
+| POST | `/api/v1/tools/database/test-connection` | Test database-tool connectivity (requires `tool:create`; also mounted under `/api/v1/admin/tools`) |
 | POST | `/api/v1/tools?team_id={team_id}` | Create custom tool |
 | PUT | `/api/v1/tools/{tool_id}` | Update tool configuration |
 | DELETE | `/api/v1/tools/{tool_id}` | Delete custom tool |

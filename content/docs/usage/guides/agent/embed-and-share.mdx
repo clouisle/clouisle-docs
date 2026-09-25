@@ -1,19 +1,19 @@
 ---
 title: 独立运行与网页嵌入
-description: 使用独立 Run 页面分享 Agent，或通过浮层气泡与 Iframe 嵌入第三方网站
+description: 通过 Chat / Run 页面使用 Agent，或用官方 embed.js SDK 将 Agent 嵌入第三方网站
 icon: Share2
 ---
 
-Agent 配置并发布后，Clouisle 提供了两种分发与使用方式：
+Agent 配置并发布后，Clouisle 提供两种分发方式：
 
-1. **独立运行页（`/run/{agent_id}`）**：专为团队成员与登录用户设计的全屏无干扰对话界面。
-2. **嵌入式网页挂件（`/embed/agent/{agent_id}/...`）**：使用团队 API 密钥（`clou_...`）将 Agent 安全嵌入 SaaS 应用、文档站点或公司官网。
+1. **站内运行页**：面向登录用户的完整对话界面。Agent 用 **对话（Chat）**（`/chat/{agent_id}`），工作流用 **运行（Run）**（`/run/{workflow_id}?type=workflow`）。
+2. **网页嵌入**：用团队 API 密钥（`clou_...`）把已发布的 Agent 或工作流嵌入外部网站，支持浮层气泡、全屏和内联三种形态。
 
 ---
 
-## 1. 独立运行页（`/run/{agent_id}`）
+## 1. 站内运行页
 
-独立 Run 视图去除了 Studio 编辑器侧边栏和抽屉等构建期元素，专注于高效完成任务与深度分析：
+运行页去除了 Studio 编辑器侧边栏和抽屉，专注于完成任务与多轮推理：
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -37,78 +37,160 @@ Agent 配置并发布后，Clouisle 提供了两种分发与使用方式：
 ```
 
 ### 进入运行页
-- 在**应用**列表（`/app/apps`）中，悬浮在任意已发布的 Agent 卡片上并点击**运行**。
-- 或直接访问 URL：`https://<your-domain>/run/{agent_id}`。
+
+1. 前往**应用**（`/app/apps`）。
+2. 悬浮到应用卡片，打开右上角 **...** 菜单：
+   - **Agent** 选择 **对话（Chat）**，新标签页打开 `/chat/{agent_id}`。
+   - **工作流** 选择 **运行（Run）**，新标签页打开 `/run/{workflow_id}?type=workflow`。
+3. 也可直接访问 `/run/{id}`：这是统一运行路由，默认按 Agent 处理，带 `?type=workflow` 时切换为工作流。
 
 ### 功能特性
+
 - **无干扰画布**：专为复杂交互、大文档分析和多轮迭代推理优化。
 - **动态变量输入**：若 Agent 配置了必填变量（如 `client_id`、`locale`），运行页会在启动会话前弹出结构化输入栏。
 - **完整能力支持**：支持文件附件上传、图片查看器、文档预览、`ask_user` 人机交互表单以及消息版本分支切换。
 
 ---
 
-## 2. 嵌入式聊天挂件
+## 2. 网页嵌入：开启与配置
 
-Clouisle 支持通过**悬浮气泡**或**内联 Iframe**将已发布的 Agent 嵌入外部网页。
+嵌入通过 iframe 承载同一个应用/工作流运行页，因此**必须先发布**目标对象。
 
-### 开启网页嵌入
+### 开启步骤
 
 1. 在 **Agent Studio**（`/app/apps/{agent_id}`）中打开目标 Agent。
-2. 确认 Agent 处于**已发布（Published）**状态。
+2. 确认 Agent 处于**已发布（Published）**状态——未发布时抽屉顶部显示黄色提示且无法保存。
 3. 点击顶部工具栏的 **嵌入（Embed）** 按钮，打开嵌入配置抽屉。
-4. 开启**启用嵌入**开关。
-5. 选择或生成具备 Agent 对话权限的团队 API 密钥（`clou_...`）。
+4. 打开**启用嵌入**开关。
+5. 在代码片段区域粘贴一个团队 API 密钥（`clou_...`），它会自动填入下方代码片段。
 
-### 配置参数
+### 抽屉里的配置项
 
-| 参数 | 说明 | 示例 |
-|---|---|---|
-| **允许的域名** | 限制挂件加载的浏览器来源域名（基于 `Origin` / `Referer` 校验） | `https://example.com, https://app.example.com` |
-| **挂件模式** | 选择悬浮启动气泡或内联 Iframe | `Floating Bubble` 或 `Inline Iframe` |
-| **主题与强调色** | 自定义挂件主题色，适配品牌视觉 | `#2563eb` 或跟随系统亮暗模式 |
-| **气泡位置** | 悬浮气泡在屏幕上的放置位置 | `右下角 (Bottom Right)` 或 `左下角 (Bottom Left)` |
-| **默认展开** | 页面加载后是否自动展开对话窗口 | `true` / `false` |
+| 配置项 | 说明 | 默认值 |
+| --- | --- | --- |
+| **启用嵌入** | 允许通过 iframe 将此应用嵌入外部网站 | 关闭 |
+| **允许的域名** | 限制挂件可加载的来源；留空允许所有域名，支持通配符子域名，可用逗号或换行分隔 | 空（允许所有） |
+| **显示头部**（Show header） | 在嵌入页顶部显示应用图标与名称 | 开启 |
+| **显示历史**（Show history） | 在嵌入页展示历史记录侧栏（保存在浏览器本地） | 开启 |
+| **允许新对话**（Allow new） | 允许访客发起新的对话/运行 | 开启 |
+| **主题** | 挂件主题：`auto` / `light` / `dark` | `auto` |
+| **主色** | 品牌强调色，`#RGB` 或 `#RRGGBB` | 空（气泡按钮用 `#6366f1`） |
+| **气泡位置** | 悬浮气泡的位置：`bottom-right` / `bottom-left` | `bottom-right` |
+| **气泡问候语** | 气泡首次展开前的提示文案 | 空 |
+
+<Callout type="warn" title="允许的域名">
+  留空 = 允许所有来源；一旦填写，后端会用请求头的 `Origin`（无则 `Referer`）校验主机名，不在列表中的来源会被 `403 embed_domain_not_allowed` 拒绝。支持 `https://example.com`、`*.example.com`（匹配子域名）以及带端口的形式；域名格式在保存时校验，非法值会直接报错。请求头里既没有 `Origin` 也没有 `Referer` 时会放行（便于本地调试）。
+</Callout>
+
+配置以 `embed_config` JSON 保存在 Agent/工作流上（字段：`enabled`、`show_header`、`show_history`、`allow_new`、`allowed_domains`、`theme.mode`、`theme.primary_color`、`bubble.position`、`bubble.icon`、`bubble.greeting`）。其中 `bubble.icon` 当前没有对应的编辑控件，保存后不产生可见效果。
 
 ---
 
-## 3. 集成代码示例
+## 3. 集成代码
 
-### 方式 A：悬浮挂件脚本（推荐）
+抽屉底部的三个页签（**气泡 / 全屏 / 移动端**）决定生成哪种代码片段；三种形态都指向同一个 iframe 页面 `/embed/agent/{agent_id}` 或 `/embed/workflow/{workflow_id}`。
 
-在网站 HTML 的 `</body>` 闭合标签前插入以下脚本：
+### 方式 A：气泡模式（推荐）
+
+气泡模式需要引入官方 SDK `/embed.js`，再调用 `Clouisle.init(...)`：
 
 ```html
-<!-- Clouisle Agent 嵌入挂件 -->
-<script
-  src="https://<your-domain>/embed/clouisle-chat.js"
-  data-agent-id="550e8400-e29b-41d4-a716-446655440000"
-  data-api-key="clou_a1b2c3d4e5f6..."
-  data-theme="auto"
-  data-position="bottom-right"
-  async
-></script>
+<script src="https://<your-domain>/embed.js"></script>
+<script>
+  Clouisle.init({
+    type: 'agent',
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    token: 'clou_a1b2c3d4e5f6...',
+    mode: 'bubble',
+    theme: 'auto',
+    primaryColor: '#2563eb',
+    position: 'bottom-right',
+    greeting: '你好！有什么可以帮你的？',
+  });
+</script>
 ```
 
-### 方式 B：内联 Iframe 嵌入
+`Clouisle.init` 参数（`id` 与 `token` 必填，缺任意一个 SDK 会在控制台报错并放弃渲染）：
 
-直接在页面指定容器中嵌入对话视图：
+| 参数 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `type` | `'agent' \| 'workflow'` | `'agent'` | 嵌入对象类型，决定 iframe 路径 |
+| `id` | `string` | — | Agent / 工作流 UUID，**必填** |
+| `token` | `string` | — | 团队 API 密钥（`clou_...`），**必填** |
+| `mode` | `'bubble' \| 'fullscreen' \| 'mobile'` | `'bubble'` | 呈现形态 |
+| `theme` | `'light' \| 'dark' \| 'auto'` | `'auto'` | 嵌入页亮暗主题，`auto` 跟随系统 |
+| `primaryColor` | `string` | 空 | 气泡按钮主色（仅气泡模式生效），自动选择黑/白前景色 |
+| `position` | `'bottom-right' \| 'bottom-left'` | `'bottom-right'` | 气泡与聊天窗的贴边方向 |
+| `greeting` | `string` | 空 | 气泡旁的问候提示，点击可展开对话 |
+| `container` | `string`（CSS 选择器） | `body` | 仅全屏模式使用；未找到容器时控制台报错并放弃 |
+
+气泡模式提供 `Clouisle.open()`、`Clouisle.close()`、`Clouisle.destroy()` 控制当前实例；重复调用 `init` 会先销毁上一个实例。SDK 还会监听 iframe 内发出的 `clouisle:close` 消息来收起气泡。
+
+### 方式 B：全屏 / 移动端模式（纯 iframe）
+
+全屏与移动端模式不需要 JS，抽屉直接生成一个指向 `/embed/...` 的 `iframe`：
 
 ```html
+<!-- 全屏：嵌入页面某个容器内 -->
 <iframe
-  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&theme=light"
-  width="100%"
-  height="700px"
-  frameborder="0"
-  allow="microphone; camera; clipboard-write"
-  style="border-radius: 12px; border: 1px solid #e5e7eb;"
+  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&mode=fullscreen"
+  style="width: 100%; height: 100%; border: none;"
+  allow="clipboard-write"
 ></iframe>
 ```
+
+```html
+<!-- 移动端：铺满整个视口 -->
+<iframe
+  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&mode=mobile"
+  style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; border: none; z-index: 9999;"
+  allow="clipboard-write"
+></iframe>
+```
+
+全屏模式也可用 SDK 指定容器：`Clouisle.init({ type: 'agent', id: '...', token: '...', mode: 'fullscreen', container: '#chat' })`。
+
+### iframe 查询参数
+
+SDK 与抽屉生成的 URL 使用以下查询参数（`/embed/{type}/{id}`）：
+
+| 参数 | 说明 |
+| --- | --- |
+| `token` | 团队 API 密钥；也可改用 `Authorization: Bearer <key>` 请求头 |
+| `mode` | `fullscreen`（缺省值）或 `bubble`；`mobile` 与 `fullscreen` 都用铺满容器的方式呈现 |
+| `theme` | `light` / `dark`；缺省或 `auto` 时跟随系统 |
+| `color` | 主色（SDK 会带上，但当前嵌入页未读取，因此不影响 iframe 内部配色） |
+
+<Callout type="info">
+  iframe 内的历史记录保存在浏览器本地；`show_history` 关闭时嵌入页不显示历史侧栏，`allow_new` 关闭时访客无法新建对话。
+</Callout>
 
 ---
 
 ## 4. 安全与访问控制
 
-- **API 密钥鉴权**：嵌入挂件通过查询参数 `token` 或 `Authorization: Bearer <key>` 传递的团队 API 密钥认证。
-- **来源域名校验**：配置 `allowed_domains` 时，后端会校验浏览器请求头的 `Origin` 与 `Referer`。
-- **速率限制**：嵌入对话同样继承平台的全局速率限制与模型配额保护。
-- **权限隔离**：嵌入会话无法访问内部团队模型管理、站点配置或管理员专属端点。
+- **只接受 API 密钥**：`/api/v1/embed/**` 端点只接受 `clou_...` API 密钥（`token` 查询参数或 `Authorization: Bearer`），不接受用户 JWT。
+- **密钥归属于用户**：每个 API 密钥都绑定创建它的用户（`APIKey.user`），嵌入会话以该用户身份执行查询。
+- **`scopes` 当前不生效**：API 密钥的 `scopes` 字段会被保存和返回，但鉴权逻辑不读取它，不能用来收窄权限。
+- **靠绑定收窄访问范围**：密钥通过 `agents` / `workflows` 多对多关系绑定可访问对象——绑定了就**只能**访问绑定的对象；**未绑定任何对象的密钥可访问全部**（向后兼容），因此务必把用于嵌入的密钥绑定到目标 Agent/工作流。
+- **三道服务端校验**：目标必须命中密钥绑定（否则 `403 api_key_no_agent_access`）、必须已发布（否则以 `404` 返回 `agent_not_found`）、必须启用嵌入（否则 `403 embed_not_enabled`），再叠加域名校验。
+- **速率限制**：密钥上的 `rate_limit`（默认 `1000` 次/分钟，`0` 表示不限）当前**未在请求路径中强制**；嵌入会话实际受模型供应商的速率限制与团队模型配额约束。
+- **权限隔离**：嵌入会话无法访问团队模型管理、站点配置或管理员专属端点。
+
+## API 端点
+
+嵌入端点位于 `/api/v1/embed`，仅接受 API 密钥认证：
+
+```http
+# Agent
+GET  /api/v1/embed/agents/{agent_id}/info
+POST /api/v1/embed/agents/{agent_id}/chat/stream
+POST /api/v1/embed/agents/{agent_id}/chat/runs
+GET  /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream
+GET  /api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages
+POST /api/v1/embed/agents/{agent_id}/upload/file
+
+# 工作流
+GET  /api/v1/embed/workflows/{workflow_id}/info
+POST /api/v1/embed/workflows/{workflow_id}/run
+```

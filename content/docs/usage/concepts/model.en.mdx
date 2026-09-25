@@ -1,21 +1,44 @@
 ---
 title: Model
-description: Understand model registry, capability flags, and team authorization
+description: Understand the two-level model structure, type matching, credential and endpoint resolution, and team quota semantics
 icon: Cpu
 ---
 
-Models use two-level management: administrators save provider connections and model capabilities in the global model registry; then a team owner or administrator authorizes models to specific teams. Platform users only see models authorized and enabled for the current team.
+Models are the shared foundation called by Agent chat, knowledge base embeddings, and workflow media nodes. Clouisle splits "provider connection" from "what a team may use" into two levels: administrators maintain the global registry, and teams only see the authorized subset.
+
+### Two-level structure
+
+- The **global model registry** (administrator): each entry is one concrete model carrying `provider`, `model_id`, `model_type`, `base_url`, an encrypted `api_key`, pricing, and capability flags. `provider`, `model_id`, and `model_type` are immutable after creation.
+- **Team model authorization** (`TeamModel`): a separate record for the team + model pair, carrying four quotas, an enable switch, a priority, and rolling daily/monthly usage.
+
+The point of the split: one upstream key is registered once, yet can be rate-limited per team, disabled per team, and revoked for one team without affecting others.
+
+<Callout type="warn">
+Granting, changing quotas, enabling/disabling a grant, and revoking a grant are **superuser-only**; the backend handlers depend directly on `get_current_active_superuser`, so a team administrator gets a 403 on submit. The authorization list a team administrator sees on the **Teams** page is read-only.
+</Callout>
 
 ### Model types
 
-Clouisle supports `chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, and `text_to_video`. Different resources need matching types: Agents use chat models, Knowledge Bases use embedding and optional rerank models, and media nodes use image or video models.
+`ModelType` has 9 values: `chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, `text_to_video`, and `decision`.
+
+The type determines the call protocol and must match the provider: Agents use `chat`, knowledge bases use `embedding` (optionally `rerank`), media nodes use `text_to_image` / `text_to_video`, and the workflow Decision node uses `decision`. `decision` is TypeSafe's non-generative protocol and works with the `typesafe` provider **only**; `embedding` likewise has a whitelist of 15 providers. Creation validates only these two combinations, so other mismatches surface on the first real call — see the full support matrix in [Providers, model types, and model discovery](../guides/models/providers.mdx#model-types).
 
 ### Credentials and endpoints
 
-API Keys are stored by the backend; reading a model only returns `has_api_key`, never plaintext credentials. Administrators can test the connection before saving; supported OpenAI-compatible endpoints are limited by the site's **model endpoint whitelist**.
+The backend stores `api_key` encrypted, and every read endpoint returns only `has_api_key` without echoing the plaintext. Every provider except `ollama` requires a key, and `openai` (the `sk-` prefix) and `anthropic` (the `sk-ant-` prefix) have their format validated before saving.
 
-### Team quota
+The effective request address resolves in order: the model's `base_url` → the type-specific default endpoint → the provider default. This is why a `volcengine` TTS model and a chat model hit different hosts. Every outbound address must match the **Model Endpoint Allowlist** in site settings (exact `scheme + host + port`, path ignored), otherwise saving, testing, and runtime calls are all rejected.
 
-Authorization can configure daily/monthly Token and request limits; `null` means unlimited, and `0` is a valid zero limit. The higher the priority value, the earlier same-type models are sorted. Exceeding the quota returns business error `6103`.
+### Capability flags
 
-Related content: [Manage models](../guides/models/manage-models.mdx), [Model provider reference](/reference/model-providers).
+The `function_call`, `vision`, `streaming`, and `json_mode` flags in `capabilities` directly drive runtime behavior: a chat model without `function_call` **cannot call tools**, so its Agent has no tools at all. Confirm the model genuinely supports function calling before enabling tools rather than just ticking the flag.
+
+### Team quotas
+
+A grant can set daily/monthly token and request limits; `null` means unlimited and `0` is a valid zero limit. Enforcement differs: token limits reject when `used + estimate > limit`, request limits reject when `used >= limit`. Usage resets lazily on the first check after each new day/month. Over quota returns business error `6103` (HTTP `429`, message "model quota exceeded").
+
+### Priority and default models
+
+A grant's `priority` defaults to `0` and only affects ordering among same-type models (larger first), never availability. The global registry separately has `is_default`: at most one default per `model_type`, and setting a new default clears the old flag for that type. Selectors without an explicit model and knowledge base embeddings fall back to it.
+
+Related content: [Register models and authorize teams](../guides/models/manage-models.mdx), [Providers and model discovery](../guides/models/providers.mdx), [Model provider reference](/reference/model-providers).

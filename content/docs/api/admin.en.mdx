@@ -1,16 +1,123 @@
 ---
-title: Admin API Boundaries
-description: Understand the permission boundaries and usage guidance for admin panel endpoints
+title: Admin API Reference
+description: Admin panel endpoint groups, permission codes, and usage boundaries
 icon: ShieldCheck
 ---
 
-Admin routes are mounted under `/api/v1/admin` and cover dashboards, observability, audit logs, users, roles, permissions, models, SSO, notifications, teams, memory, Agents, tools, Skills, workflows, and package management.
+Admin routes are mounted under `/api/v1/admin` and cover dashboards, observability, audit logs, conversations, users, roles, permissions, site settings, models, SSO, notifications, teams, memory, Agents, tools, Skills, workflows, workflow metrics, TOTP, packages, and knowledge bases. They are used by the admin panel and return the unified `code`/`data`/`msg` envelope. They are not public APIs for anonymous calls.
 
-These endpoints are used by the admin panel and usually require `admin:*` global permissions or super administrator identity; specific resources also run team and scope checks. They are not public APIs for anonymous calls.
+## Permission Model
+
+Every endpoint declares the permission code it requires (`admin:*` or `audit:*`) through a dependency:
+
+- **Superusers bypass everything**: an account with `is_superuser` skips all permission-code checks.
+- **Everyone else is judged by permission code**: the account must hold the endpoint's declared code through a role. Codes come from the system permission definitions synced at startup and can be freely combined in **roles** (see `/api/v1/admin/roles` and `/api/v1/admin/permissions`).
+- **API Keys carry the same checks**: an API Key is validated against its bound user's permission set, so never grant an API Key unnecessary `admin:*` permissions.
+- **Knowledge bases are the exception**: `/api/v1/admin/knowledge-bases` reuses the platform knowledge-base routes, but switches the required code to `admin:knowledge-base:{read,test,create,update,delete}` based on the request path prefix and skips team-membership checks so the admin view can work across teams.
+
+<Callout type="warn">
+  Authorization is enforced server-side. Hiding a menu entry in the UI is not a security boundary; third-party integrations must request the minimum permission codes.
+</Callout>
+
+## Groups and Permission Codes
+
+| Group | Mounted prefix | Permission codes |
+| --- | --- | --- |
+| Dashboard | `/api/v1/admin/dashboard` | `admin:dashboard:access` |
+| Observability | `/api/v1/admin/observability` | `admin:dashboard:access` |
+| Audit logs | `/api/v1/admin/audit-logs` | `audit:read` (queries), `audit:export` (export, archive) |
+| Conversations | `/api/v1/admin/conversations` | `admin:conversation:read`, `admin:conversation:delete` |
+| Users | `/api/v1/admin/users` | `admin:user:read`, `admin:user:create`, `admin:user:update`, `admin:user:delete` |
+| Roles | `/api/v1/admin/roles` | `admin:role:read`, `admin:role:create`, `admin:role:update`, `admin:role:delete` |
+| Permissions | `/api/v1/admin/permissions` | `admin:permission:read`, `admin:permission:create`, `admin:permission:update`, `admin:permission:delete` |
+| Site settings | `/api/v1/admin/site-settings` | `admin:settings:read`, `admin:settings:update` (archiving audit logs additionally needs `audit:export`) |
+| Models | `/api/v1/admin/models` | `admin:model:read`, `admin:model:create`, `admin:model:update`, `admin:model:delete` |
+| SSO | `/api/v1/admin/sso` | `admin:sso:read`, `admin:sso:update` |
+| Notifications | `/api/v1/admin/notifications` | `admin:notification:create` (create), `admin:notification:delete` (delete); listing narrows to global admin access or an authorized team |
+| Teams | `/api/v1/admin/teams` | `admin:team:read`, `admin:team:create`, `admin:team:delete` |
+| Memories | `/api/v1/admin/memories` | `admin:memory:read`, `admin:memory:update`, `admin:memory:delete` |
+| Agents | `/api/v1/admin/agents` | `admin:app:read`, `admin:app:create`, `admin:app:update`, `admin:app:delete`, `admin:app:publish`, `admin:app:duplicate` |
+| Tools | `/api/v1/admin/tools` | `admin:capability:read`, `admin:capability:create`, `admin:capability:update`, `admin:capability:delete`, `admin:capability:execute` |
+| Skills | `/api/v1/admin/skills` | `admin:capability:read`, `admin:capability:create`, `admin:capability:update`, `admin:capability:delete`, `admin:capability:execute` |
+| Workflows | `/api/v1/admin/workflows` | `admin:app:read`, `admin:app:create`, `admin:app:update`, `admin:app:delete`, `admin:app:publish`, `admin:app:duplicate` |
+| Workflow metrics | `/api/v1/admin/workflows/metrics` | `admin:dashboard:access` (clearing the cache needs `admin:settings:update`) |
+| TOTP | `/api/v1/admin/totp` | `admin:dashboard:access` |
+| Packages | `/api/v1/admin/packages` | Requires an authenticated user (import/export validate against each resource's own access rules) |
+| Knowledge bases | `/api/v1/admin/knowledge-bases` | `admin:knowledge-base:read`, `admin:knowledge-base:test`, `admin:knowledge-base:create`, `admin:knowledge-base:update`, `admin:knowledge-base:delete` |
+
+<Callout type="info">
+  The Agents and Workflows groups share the same `admin:app:*` codes, and Tools and Skills share the same `admin:capability:*` codes. Granting one group therefore affects the other.
+</Callout>
+
+## Common Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/admin/dashboard/stats` | System-wide totals (users, teams, Agents, workflows, conversations, tokens) |
+| GET | `/api/v1/admin/dashboard/stats/trends` | System growth trends |
+| GET | `/api/v1/admin/observability/overview` | Runtime observability overview |
+| GET | `/api/v1/admin/observability/timeouts` | Timeout statistics |
+| GET | `/api/v1/admin/audit-logs` | Paginated audit-log query |
+| GET | `/api/v1/admin/audit-logs/export` | Export audit logs |
+| GET | `/api/v1/admin/roles` | List roles |
+| PUT | `/api/v1/admin/roles/{role_id}/permissions` | Replace a role's permission set |
+| GET | `/api/v1/admin/permissions/scopes` | List permission scope options |
+| GET | `/api/v1/admin/users/stats` | User statistics |
+| POST | `/api/v1/admin/users/{user_id}/deactivate` | Deactivate a user |
+| GET | `/api/v1/admin/teams` | List all teams |
+| GET | `/api/v1/admin/memories/entities` | List memory entities |
+| GET | `/api/v1/admin/memories/relations` | List memory relations |
+| GET | `/api/v1/admin/agents/filters` | Agent filter options |
+| POST | `/api/v1/admin/agents/{agent_id}/publish` | Publish an Agent |
+| GET | `/api/v1/admin/tools/config` | List global tool configurations |
+| GET | `/api/v1/admin/skills/filters` | Skill filter options |
+| GET | `/api/v1/admin/workflows/filters` | Workflow filter options |
+| GET | `/api/v1/admin/totp/stats` | TOTP usage statistics |
+| GET | `/api/v1/admin/notifications` | Admin-view notification list |
+| GET | `/api/v1/admin/knowledge-bases` | Cross-team knowledge-base list |
+
+## Workflow Metrics
+
+Workflow execution metrics are **not** under `/api/v1/workflows`; they live under the admin prefix at `/api/v1/admin/workflows/metrics/*`. The router carries its own `/workflows/metrics` prefix, so it coexists with the `/api/v1/admin/workflows` CRUD routes without colliding.
+
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET | `/api/v1/admin/workflows/metrics/dashboard` | Metrics dashboard summary (includes running workflows) | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/workflows/{workflow_id}` | Execution metrics for one workflow | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/nodes` | Metrics for every node type | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/nodes/{node_type}` | Metrics for one node type | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/running` | Currently running workflows | `admin:dashboard:access` |
+| GET | `/api/v1/admin/workflows/metrics/cache` | Metrics cache statistics | `admin:dashboard:access` |
+| DELETE | `/api/v1/admin/workflows/metrics/cache` | Clear the metrics cache | `admin:settings:update` |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/workflows/metrics/dashboard" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+## Request Example
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/users?page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
 
 ## Integration Guidance
 
-- Third-party apps should prefer the Agent, workflow, conversation, and knowledge base resource endpoints.
-- Admin automation must pin the Clouisle version, record required permissions, and check the OpenAPI Schema before upgrading.
-- API Keys should not be granted unnecessary `admin:*` permissions.
-- Audit and user management operations contain sensitive data; use short-lived keys and minimal rate limits.
+- Third-party apps should prefer the Agent, workflow, conversation, and knowledge base resource endpoints over admin endpoints.
+- Admin automation must pin the Clouisle version, record the required permission codes, and check the OpenAPI Schema before upgrading.
+- Audit and user management operations contain sensitive data; use short-lived keys together with minimal rate limits.
+- Grant `admin:*` only when cross-team operations are genuinely required; day-to-day work should use team roles with platform permissions such as `workflow:read` or `kb:read`.
+
+## Common Errors
+
+| HTTP / code | Meaning |
+| --- | --- |
+| `401 / 2000` | Authentication is missing |
+| `403 / 3000` | The required permission code is missing |
+| `404 / 4000` | Resource does not exist |
+| `1001` | Request validation failed |
+
+---
+
+**Last Updated**: 2026-09-26

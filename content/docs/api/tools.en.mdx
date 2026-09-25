@@ -9,6 +9,10 @@ icon: Wrench
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/v1/tools` | List all tools |
+| GET | `/api/v1/tools/filters` | Get filter options (types, categories, statuses, teams, creators) |
+| GET | `/api/v1/tools/legacy?team_id={team_id}` | Legacy team tool list (grouped by kind) |
+| GET | `/api/v1/tools/builtin` | List every builtin tool |
+| GET | `/api/v1/tools/file-parsers?team_id={team_id}` | List tools usable as file-upload parsers |
 | GET | `/api/v1/tools/id/{tool_id}` | Get tool details by ID |
 | GET | `/api/v1/tools/name/{tool_name}?team_id={team_id}` | Get tool details by name |
 | POST | `/api/v1/tools/test` | Test a tool once (no standalone execute endpoint) |
@@ -16,6 +20,13 @@ icon: Wrench
 | POST | `/api/v1/tools?team_id={team_id}` | Create a custom tool |
 | PUT | `/api/v1/tools/{tool_id}` | Update tool configuration |
 | DELETE | `/api/v1/tools/{tool_id}` | Delete a custom tool |
+| POST | `/api/v1/tools/{tool_id}/toggle` | Toggle a tool's enabled state |
+| POST | `/api/v1/tools/{tool_id}/duplicate` | Duplicate a tool (the copy starts disabled) |
+| GET | `/api/v1/tools/config?team_id={team_id}` | List tool configurations (credentials) |
+| GET | `/api/v1/tools/config/{tool_name}?team_id={team_id}` | Get one tool configuration |
+| POST | `/api/v1/tools/config?team_id={team_id}` | Create a tool configuration |
+| PUT | `/api/v1/tools/config/{tool_name}?team_id={team_id}` | Update a tool configuration |
+| DELETE | `/api/v1/tools/config/{tool_name}?team_id={team_id}` | Delete a tool configuration |
 | POST | `/api/v1/tools/{tool_id}/share` | Share a tool with another team |
 | GET | `/api/v1/tools/{tool_id}/shares` | List shares for a tool |
 | DELETE | `/api/v1/tools/{tool_id}/share/{team_id}` | Revoke a team's share |
@@ -114,6 +125,68 @@ curl -X GET "https://your-domain.com/api/v1/tools?category=search" \
   "msg": "success"
 }
 ```
+
+## Tool Filter Options
+
+```
+GET /api/v1/tools/filters
+```
+
+Requires `tool:read`. Returns the filter options for the tools the caller can access, for building list-page filters.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "types": [
+      { "value": "builtin", "label": "builtin" },
+      { "value": "custom", "label": "custom" },
+      { "value": "mcp", "label": "mcp" }
+    ],
+    "categories": [{ "value": "search", "label": "search" }],
+    "statuses": [
+      { "value": "enabled", "label": "enabled" },
+      { "value": "disabled", "label": "disabled" }
+    ],
+    "teams": [{ "value": "team-123", "label": "Engineering" }],
+    "creators": [{ "value": "alice", "label": "alice" }]
+  },
+  "msg": "success"
+}
+```
+
+`categories` is every defined tool category combined with any custom category present on accessible tools; `teams` lists teams the user can access; `creators` lists the distinct creator names of accessible tools.
+
+## List Legacy Team Tools
+
+```
+GET /api/v1/tools/legacy?team_id={team_id}
+```
+
+Legacy compatibility endpoint returning a team's tools grouped by kind (`builtin` / `custom` / `mcp`). New integrations should prefer [List Tools](#list-tools).
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `team_id` | string | Yes | - | Team UUID |
+| `include_shared` | boolean | No | `true` | Include tools shared with the team by other teams |
+
+`builtin` always contains the full builtin tool list; `custom` and `mcp` contain the team's own tools (excluding other members' private tools) and, when `include_shared=true`, tools shared into the team.
+
+## List Builtin Tools
+
+```
+GET /api/v1/tools/builtin
+```
+
+Returns every builtin tool (including the sandbox tools `artifact`, `bash`, `edit`, `read`, `write`). Builtin tools have no database record, so their objects have `id: null` and `custom_type: null`.
+
+## List File Parsers
+
+```
+GET /api/v1/tools/file-parsers?team_id={team_id}
+```
+
+Returns the tools usable as document parsers for file uploads: builtin parsers (such as `markitdown`) plus the team's enabled custom tools with `category=file`. Requires `tool:read` and team membership.
 
 ## Get Tool Details
 
@@ -365,13 +438,17 @@ Create a custom tool. `team_id` is a required query parameter.
 | `icon` | string | No | Icon (emoji or URL, max 100 chars) |
 | `category` | string | No | Tool category (default: `other`) |
 | `type` | string | No | Tool type: `builtin`, `custom`, `mcp` (default: `custom`) |
-| `custom_type` | string | No | Custom tool type: `http`, `code`, `mcp` (only for `type=custom`) |
+| `custom_type` | string | No | Custom tool type: `http`, `code`, `database` (only for `type=custom`) |
+| `visibility` | string | No | Tool visibility: `private` or `team` (default: `private`) |
 | `parameters` | array | No | Parameter definitions (`name`, `type`, `description`, `required`, `enum`, `default`) |
 | `http_config` | object | No | HTTP config (`method`, `url`, `headers`, `query_params`, `body_template`, `content_type`, `form_fields`, `timeout`, `response_path`) |
-| `code_config` | object | No | Code config (`language`, `code`, `command`, `python_packages`, `js_packages`, `artifacts`, `limits`) |
+| `code_config` | object | No | Code config (`language`, `code`, `command`, `python_packages`, `js_packages`, `python_package_index_url`, `node_package_registry_url`, `artifacts`, `limits`) |
+| `database_config` | object | No | Database config (`db_type`, `host`, `port`, `database`, `username`, `password`, `ssl`, `url`, `db`, `auth_source`, `timeout`, `max_limit`) |
 | `mcp_config` | object | No | MCP Server config (`transport`, `command`, `args`, `env`, `url`, `headers`) |
 | `credentials` | object | No | Tool credentials |
 | `is_enabled` | boolean | No | Enabled status (default: true) |
+
+`name` must match `^[a-zA-Z][a-zA-Z0-9_]*$` (starts with a letter, letters/digits/underscores only), otherwise `1001 tool_name_invalid_format`; a duplicate name within the team returns `5001 tool_name_exists`.
 
 ### Request Example
 
@@ -510,6 +587,45 @@ curl -X DELETE "https://your-domain.com/api/v1/tools/tool-789" \
 }
 ```
 
+## Toggle Tool
+
+```
+POST /api/v1/tools/{tool_id}/toggle
+```
+
+Flips a tool's enabled state. There is no request body. Only database-backed tools (`custom`, `mcp`) can be toggled; builtin tools are always enabled. The caller must be the tool creator or a team admin and hold `tool:update`.
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/tools/tool-789/toggle" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**Success (200 OK):** returns the updated `ToolDetailOut` with `is_enabled` flipped and `msg` set to `"Tool updated successfully"`.
+
+## Duplicate Tool
+
+```
+POST /api/v1/tools/{tool_id}/duplicate
+```
+
+Copies a tool within its owning team. Requires `tool:create` and the **admin** role in the tool's team.
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/tools/tool-789/duplicate" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Copy rules:
+
+- Visibility is always `private` and `is_enabled` is always `false` (enable it manually after copying).
+- The name gets a `_copy` suffix, falling back to `_copy_1`, `_copy_2`, … until unique.
+- The display name gets a ` (Copy)` suffix.
+- `code_config`, `database_config`, `mcp_config`, and `credentials` are copied.
+
+<Callout type="warn">
+  Duplication copies `credentials`, so the copy inherits the original tool's secrets. Rotate or delete unneeded credentials after copying.
+</Callout>
+
 ## Cross-Team Tool Sharing
 
 Share custom or MCP tools with other teams within the workspace. Sharing requires `admin` or `owner` role in the tool's owner team; a tool cannot be shared with its own team.
@@ -555,6 +671,51 @@ GET /api/v1/tools/shared-with-me?team_id={team_id}
 ```
 DELETE /api/v1/tools/{tool_id}/share/{team_id}
 ```
+
+## Tool Configuration (Credentials)
+
+Tool configurations store credentials (API keys, tokens) for builtin or database tools, either globally (superusers only) or per team.
+
+```
+GET    /api/v1/tools/config?team_id={team_id}
+GET    /api/v1/tools/config/{tool_name}?team_id={team_id}
+POST   /api/v1/tools/config?team_id={team_id}
+PUT    /api/v1/tools/config/{tool_name}?team_id={team_id}
+DELETE /api/v1/tools/config/{tool_name}?team_id={team_id}
+```
+
+| Parameter | Location | Required | Description |
+| --- | --- | --- | --- |
+| `team_id` | Query | No | Team UUID; omit to operate on the global configuration (superusers only) |
+| `tool_name` | Path | Yes (get/put/delete) | Tool name, e.g. `web_search` |
+
+Create body:
+
+```json
+{
+  "tool_name": "web_search",
+  "credentials": {
+    "TAVILY_API_KEY": "tvly-..."
+  }
+}
+```
+
+Update body contains only `credentials`:
+
+```json
+{
+  "credentials": {
+    "TAVILY_API_KEY": "tvly-updated"
+  }
+}
+```
+
+Permissions and behavior:
+
+- With `team_id`, create/update/delete require the team **admin** role and reads require team membership.
+- Without `team_id`, both reads and writes are limited to superusers.
+- Reading a team configuration for a known builtin tool name that has no record yet creates an empty configuration automatically; an unknown name returns `404`.
+- Deleting returns `data: null`.
 
 ## MCP & Database Tool Diagnostics
 
@@ -632,8 +793,9 @@ Returns `400` with `msg` set to the failure reason (such as `database_connection
 | `4004` | Team not found | Target team does not exist |
 | `3000` | Permission denied | Insufficient permissions (sharing requires team admin) |
 | `3003` | Team admin required | Admin role required in the tool owner team |
-| `5001` | Already exists | Tool already shared or tool name taken |
-| `1001` | Validation failed | Invalid request data |
+| `5001` | Already exists | A tool with the same name already exists in the team |
+| `5104` | Duplicate name | The tool is already shared with that team, or the tool configuration already exists |
+| `1001` | Validation failed | Invalid request data (including an invalid tool-name format) |
 | `1002` | Bad request | Sharing to the tool's own team or failed connection test |
 
 > **Note:** No per-endpoint rate limits are implemented. There is no rate-limit middleware on these endpoints. Codes `6300`-`6306` are reserved for SSO errors and are not used by the Tools API.

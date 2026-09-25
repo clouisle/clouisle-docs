@@ -12,40 +12,77 @@ Agent 创建和更新接口对应编辑器中的基础设置与编排卡片。�
 | --- | --- | --- | --- |
 | `name` | string | 必填 | Agent 名称，`1-100` 字符 |
 | `description` | string 或 null | null | 最长 `500` 字符 |
-| `model_id` | UUID | null | 当前团队授权的对话模型 |
+| `icon` | string 或 null | null | emoji 或 URL，最长 `500` 字符 |
+| `avatar_url` | string 或 null | null | 头像 URL，最长 `500` 字符 |
+| `model_id` | UUID | null | 当前团队授权的对话模型（`team_models.id`）；为空时由用户选择 |
 | `system_prompt` | string 或 null | null | 支持 `{{变量名}}` |
 | `max_iterations` | integer | `5` | 工具调用轮次，`1-200` |
-| `visibility` | `private` 或 `team` | `team`（创建接口） | 访问范围 |
-| `status` | `draft` 或 `published` | `draft` | 发布接口切换状态 |
+| `visibility` | `private` 或 `team` | `private` | 访问范围；`private` 仅创建者可访问 |
+| `status` | `draft` 或 `published` | `draft` | 由发布接口切换 |
+| `hide_tool_calls` | boolean | `false` | 在对话界面隐藏工具调用详情 |
+| `hide_message_actions` | boolean | `false` | 隐藏 Token 用量/速度等消息统计 |
+| `hide_reasoning` | boolean | `false` | 隐藏推理过程/思维链 |
+| `opening_message` | string 或 null | null | 会话开场白 |
+| `suggested_questions` | string[] | `[]` | 建议问题列表 |
+| `powered_by_text` | string 或 null | null | 对话页脚署名，最长 `200` 字符 |
+
+<Callout type="info" title="visibility 默认是 private">
+创建接口与数据模型的 `visibility` 默认值均为 `private`（仅创建者可访问），而不是 `team`。若要允许同团队成员访问，需要显式设为 `team`。
+</Callout>
 
 ## RAG 与工具
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `rag_mode` | `off`、`auto` 或 `agentic` | `agentic` | 关闭、自动检索或 Agent 决策检索 |
-| `knowledge_base_configs` | array | `[]` | 每项含知识库、检索方式、Top K 和阈值 |
-| `tools_config` | array | `[]` | 内置、custom、MCP 或 Skill |
-| `variables` | array | `[]` | 用户输入字段 |
-| `enable_user_input_request` | boolean | `false` | 允许对话中请求结构化输入 |
+| `knowledge_base_configs` | array | `[]` | 每项含 `knowledge_base_id`、`retrieval_top_k`（默认 `5`，`1-100`）、`score_threshold`（默认 `0.3`，`0-1`）、`search_mode`（`vector`/`fulltext`/`hybrid`，默认 `hybrid`） |
+| `tools_config` | array | `[]` | 工具类型：`builtin`、`custom`、`mcp` 或 `skill` |
+| `variables` | array | `[]` | 用户输入字段；`name` 为 `1-50` 字符，`type` 取 `text`、`paragraph`、`select`、`number`、`checkbox` |
+| `enable_user_input_request` | boolean | `false` | 允许模型调用 `ask_user` 工具向用户请求结构化输入 |
 
-## 记忆、压缩与附件
+## 记忆与上下文压缩
 
 | 字段 | 类型 | 默认值 | 限制/说明 |
 | --- | --- | --- | --- |
 | `enable_memory` | boolean | `false` | 开启跨会话记忆 |
-| `max_memories_per_retrieval` | integer | `10` | `1-50` |
-| `auto_extract` | boolean | `true` | 自动提取重要信息 |
-| `context_compression_config.enabled` | boolean | `true` | 请求前上下文压缩 |
-| `recent_raw_turns` | integer | `3` | `1-12` |
-| `warning_ratio` / `auto_compact_trigger_ratio` / `blocking_ratio` | number | `0.7 / 0.8 / 0.92` | `0.1-1.0`；目标比率必须低于触发比率 |
-| `enable_attachments` | boolean | `false` | 允许文件和图片 |
-| `max_file_size` | bytes | `10MB` | `1KB-50MB` |
-| `max_files` | integer | `5` | `1-10` |
-| `max_content_length` | integer | `100000` | `1000-500000` 字符 |
+| `memory_config.max_memories_per_retrieval` | integer | `10` | `1-50` |
+| `memory_config.auto_extract` | boolean | `true` | 自动从对话中提取并保存记忆 |
+| `memory_config.importance_threshold` | `low`、`medium`、`high` | `medium` | 自动提取记忆的最低重要度 |
+| `context_compression_config.enabled` | boolean | `true` | 模型调用前的请求时上下文压缩 |
+| `context_compression_config.summary_max_tokens` | integer | `1000` | 生成摘要的目标 Token 预算，`128-8000` |
+| `context_compression_config.emit_sse_events` | boolean | `true` | 触发摘要时通过 SSE 事件通知前端 |
+
+## 附件
+
+| 字段 | 类型 | 默认值 | 限制/说明 |
+| --- | --- | --- | --- |
+| `enable_attachments` | boolean | `false` | 允许上传文件和图片 |
+| `attachment_config.max_file_size` | bytes | `10485760`（`10MB`） | `1024`（`1KB`）–`52428800`（`50MB`） |
+| `attachment_config.max_files` | integer | `5` | 每条消息最多文件数，`1-10` |
+| `attachment_config.max_content_length` | integer | `100000` | 解析后内容长度上限（字符），`1000-500000` |
+| `attachment_config.truncate_strategy` | string | `end` | 截断策略：`end`（保留开头）、`start`（保留结尾）、`middle`（保留头尾） |
+| `attachment_config.allowed_extensions` | string[] | 见下 | 允许的扩展名 |
+
+默认允许的扩展名：`.pdf`、`.docx`、`.doc`、`.pptx`、`.ppt`、`.xlsx`、`.xls`、`.txt`、`.md`、`.csv`、`.json`、`.html`。
 
 ## 媒体生成
 
-图片默认 `1024×1024`、单次最多 `4` 张；视频默认 `5` 秒、最大 `10` 秒、宽高比 `16:9`，轮询间隔 `3000ms`、同步等待 `120s`。所有媒体模型都必须由当前团队授权。
+| 字段 | 类型 | 默认值 | 限制/说明 |
+| --- | --- | --- | --- |
+| `enable_image_generation` | boolean | `false` | 开启生图工具 |
+| `image_generation_config.default_width` / `default_height` | integer | `1024` | `256-4096` |
+| `image_generation_config.max_images` | integer | `4` | 单次工具调用最多图片数，`1-10` |
+| `image_generation_config.allow_reference_images` | boolean | `true` | 允许参考图/编辑流程 |
+| `image_generation_config.require_confirmation` | boolean | `false` | 生成前是否需要显式确认 |
+| `enable_video_generation` | boolean | `false` | 开启生视频工具 |
+| `video_generation_config.default_duration` | float | `5.0` 秒 | `1-30` |
+| `video_generation_config.max_duration` | float | `10.0` 秒 | 单次工具调用最大时长，`1-30` |
+| `video_generation_config.default_aspect_ratio` | string | `"16:9"` | 默认视频比例 |
+| `video_generation_config.poll_interval_ms` | integer | `3000` | 供应商任务状态轮询间隔（毫秒），`500-30000` |
+| `video_generation_config.poll_timeout_s` | integer | `120` | 同步等待上限（秒），`5-600`；超时后返回 pending |
+| `video_generation_config.require_confirmation` | boolean | `false` | 生成前是否需要显式确认 |
+
+所有图片/视频模型都必须由当前团队授权，且可通过 `allowed_providers` 限定可用供应商。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-config-reference.png" alt="Agent 配置字段总览" />

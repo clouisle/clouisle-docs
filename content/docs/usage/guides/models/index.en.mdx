@@ -1,10 +1,13 @@
 ---
 title: Models Guide
-description: Configure providers, test connections, authorize teams, and manage model quotas
+description: Configure provider endpoints, register and test models, and authorize teams with quotas
 icon: Cpu
 ---
 
+Models are the shared foundation behind Agents, knowledge bases, and workflows. Clouisle uses **two-level management**: an administrator registers providers, endpoints, credentials, and capability flags in the global model registry, then authorizes models to specific teams with token and request quotas.
+
 <Cards>
-  <Card title="Providers and Models" href="/usage/guides/models/providers">Understand how administrators register models, endpoints, credentials, and capability flags.</Card>
-  <Card title="Manage Team Models" href="/usage/guides/models/manage-models">Authorize models, enable or disable them, and set priority and quotas.</Card>
+  <Card title="Providers, Model Types, and Discovery" href="/usage/guides/models/providers">Look up the 23 provider identifiers, default endpoints, providers supported per model type, and the paths and auth rules for remote model discovery.</Card>
+  <Card title="Register Models and Authorize Teams" href="/usage/guides/models/manage-models">Register global models, test connections, set capability flags, and authorize teams with quotas and priority.</Card>
+  <Card title="Model" href="/usage/concepts/model">Understand the two-level structure, credential and endpoint resolution, quota semantics, and error codes.</Card>
 </Cards>

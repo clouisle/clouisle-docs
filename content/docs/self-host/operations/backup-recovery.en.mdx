@@ -16,15 +16,119 @@ A recoverable Clouisle backup includes at least PostgreSQL, Qdrant, upload stora
 | `.env`/Kubernetes Secret | Connection and signing configuration | Store encrypted; never commit to the repository |
 | Redis | Celery/cache/session | Decide according to task recovery requirements |
 
-## Recovery Order
+## Backup commands
 
-1. Restore PostgreSQL and dependent extensions.
+This is an **online, best-effort** multi-store backup, not a transactionally consistent snapshot; schedule downtime separately when strict cross-store consistency is required. Run these commands from the directory containing `docker-compose.yml` and `.env`; `-T` is required for cron/non-interactive runs.
+
+```bash
+# Stop the writers first to reduce write volume during the backup
+docker compose stop worker sandbox-worker beat
+
+# PostgreSQL: custom-format dump
+docker compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" -Fc "${POSTGRES_DB:-clouisle}" \
+  > "postgres_$(date +%Y%m%d_%H%M%S).dump"
+
+# Redis (optional; authenticates when REDIS_PASSWORD is set)
+docker compose exec -T redis sh -c 'redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} --rdb -' \
+  > "redis_$(date +%Y%m%d_%H%M%S).rdb"
+
+# Uploads: mounted only on api, so stream the volume contents directly
+docker compose exec -T api tar -czf - -C /app uploads \
+  > "uploads_$(date +%Y%m%d_%H%M%S).tar.gz"
+
+# Start the workers again once the backup finishes
+docker compose start worker sandbox-worker beat
+```
+
+Qdrant needs a snapshot created and downloaded for **every existing collection**. The supplied image is `qdrant/qdrant:v1.18.3`; recovery must use a version with compatible snapshot API semantics. When `QDRANT_API_KEY` is enabled, export it in your shell first (Compose does not inject `.env` into your shell):
+
+```bash
+QDRANT_URL="${QDRANT_URL:-http://localhost:6333}"
+QDRANT_AUTH=()
+[ -n "${QDRANT_API_KEY:-}" ] && QDRANT_AUTH=(--header "api-key: $QDRANT_API_KEY")
+
+# List every collection, put one returned name into COLLECTION, then repeat per collection
+curl --fail "${QDRANT_URL}/collections" "${QDRANT_AUTH[@]}"
+COLLECTION='replace-with-a-name-returned-above'
+
+curl --fail --request POST "${QDRANT_URL}/collections/${COLLECTION}/snapshots" "${QDRANT_AUTH[@]}"
+curl --fail "${QDRANT_URL}/collections/${COLLECTION}/snapshots" "${QDRANT_AUTH[@]}"
+SNAPSHOT_NAME='replace-with-the-name-returned-above'
+curl --fail "${QDRANT_URL}/collections/${COLLECTION}/snapshots/${SNAPSHOT_NAME}" \
+  "${QDRANT_AUTH[@]}" --output "${COLLECTION}_${SNAPSHOT_NAME}.snapshot"
+```
+
+Knowledge-base vector collections are usually named `kb_dim_<dimension>` and memory vectors `memory_entities_dim_<dimension>`. The default `http://localhost:6333` only works while the Qdrant host-port mapping is published; if production removed it, temporarily bind `127.0.0.1:6333:6333` or use a network-attached helper, then remove the mapping again.
+
+The Kubernetes equivalents (namespace `clouisle`):
+
+```bash
+kubectl -n clouisle exec -i statefulset/postgres -- pg_dump -U postgres -Fc clouisle > postgres.dump
+kubectl -n clouisle exec -i deployment/api -- tar -czf - -C /app uploads > uploads.tar.gz
+
+# The Qdrant image may not ship curl: port-forward in one terminal, run the snapshot commands above
+# in the other with QDRANT_URL=http://127.0.0.1:6333
+kubectl -n clouisle port-forward statefulset/qdrant 6333:6333
+```
+
+## Restore order and commands
+
+Restore order:
+
+1. Restore PostgreSQL and its extensions (`pg_search`, `pg_stat_statements`).
 2. Restore Qdrant collections and uploaded files.
 3. Restore Secrets and environment variables; confirm `SECRET_KEY` stays consistent.
-4. Start the API; confirm health and database migrations.
+4. Start the API; confirm health and schema initialization.
 5. Start Worker, Sandbox Worker, and the single Beat.
 6. Check document status, vector dimensions, Agents, Workflows, and API Keys.
 7. Run one Knowledge Base retrieval and one Agent/Workflow smoke request.
+
+Keep application services stopped while restoring PostgreSQL and Qdrant, but leave the database and Qdrant services themselves running; start the application only after both stores are restored.
+
+```bash
+# Compose
+docker compose stop api worker sandbox-worker beat
+docker compose exec -T db pg_restore -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-clouisle}" \
+  --clean --if-exists < postgres.dump
+
+# Kubernetes
+kubectl -n clouisle scale deployment api worker sandbox-worker beat --replicas=0
+kubectl -n clouisle exec -i statefulset/postgres -- pg_restore -U postgres -d clouisle --clean --if-exists < postgres.dump
+```
+
+Upload the snapshot for every backed-up collection (the upload restores the collection; do not send an extra `/recover` request):
+
+```bash
+COLLECTION='replace-with-a-backed-up-collection-name'
+SNAPSHOT_FILE='replace-with-the-matching-snapshot.snapshot'
+curl --fail --request POST \
+  "${QDRANT_URL}/collections/${COLLECTION}/snapshots/upload" \
+  "${QDRANT_AUTH[@]}" \
+  --form "snapshot=@${SNAPSHOT_FILE}"
+```
+
+Finally start only the API to restore the uploads archive, then restore each workload's replica count (the supplied manifest defaults to `api=2`, `worker=2`, `sandbox-worker=1`, `beat=1`):
+
+```bash
+# Compose
+docker compose start api
+docker compose exec -T api tar -xzf - -C /app < uploads.tar.gz
+docker compose start worker sandbox-worker beat
+
+# Kubernetes
+kubectl -n clouisle scale deployment api --replicas=2
+kubectl -n clouisle rollout status deployment/api
+kubectl -n clouisle exec -i deployment/api -- tar -xzf - -C /app < uploads.tar.gz
+kubectl -n clouisle scale deployment worker --replicas=2
+kubectl -n clouisle scale deployment sandbox-worker --replicas=1
+kubectl -n clouisle scale deployment beat --replicas=1
+```
+
+After restoring, verify `GET /api/v1/health`, login, a Knowledge Base search, one upload, and a representative Workflow. Redis queue state is optional; when it is not restored, re-submit the jobs that were pending at the moment of failure.
+
+## Automation
+
+Schedule the Compose commands with host cron, or run equivalent commands in a Kubernetes CronJob that mounts an explicitly provisioned backup destination and reads credentials from a Secret. Keep encrypted, off-site copies, define retention, and run regular restore drills in a scratch environment.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/backup-restore-checklist.svg" alt="Backup and recovery checklist" />

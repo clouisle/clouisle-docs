@@ -4,35 +4,51 @@ description: 启用和配置 Clouisle 自带的工具能力
 icon: Wrench
 ---
 
-内置工具由平台注册，不需要创建或删除。部分工具需要站点级或团队级配置。
+内置工具由平台注册，不需要创建或删除。在**能力** > **工具**中选择工具即可测试；需要凭据的工具会在列表里显示"需要配置"，选择**配置**填写团队凭据。工具详情会展示参数名、类型、必填、枚举和默认值。
+
+## 可选内置工具
+
+以下工具会出现在工具目录中，可直接绑定到 Agent：
 
 | 工具标识 | 用途 | 额外配置 |
 | --- | --- | --- |
-| `get_current_time` | 获取当前时间 | 无 |
-| `format_datetime` | 格式化日期时间 | 无 |
-| `calculate` | 数学计算 | 无 |
-| `unit_convert` | 单位转换 | 无 |
-| `web_search` | 网页搜索 | `TAVILY_API_KEY` |
-| `fetch_webpage` | 抓取网页 | 无 |
-| `markitdown` | 文件/文档转换 | 无 |
-| `generate_image` | 图片生成 | 图片模型 |
-| `generate_video` | 视频生成 | 视频模型 |
-| `artifact` / `bash` / `edit` / `read` / `write` | 沙箱产物与文件操作 | 沙箱运行时 |
+| `get_current_time` | 获取指定时区的当前日期、时间、星期和时间戳（`timezone_name`，默认 `UTC`） | 无 |
+| `format_datetime` | 用 `strftime` 格式化时间戳（`timestamp` 缺省用当前时间，`format_string` 默认 `%Y-%m-%d %H:%M:%S`） | 无 |
+| `calculate` | 数学计算（`expression`） | 无 |
+| `unit_convert` | 单位换算（`value`、`from_unit`、`to_unit`） | 无 |
+| `web_search` | 网页搜索（`query` 必填，`num_results` 默认 `5`、最大 `10`） | `TAVILY_API_KEY` / `BOCHA_API_KEY`（可选） |
+| `fetch_webpage` | 抓取网页并提取正文（`url` 必填，`max_length` 默认 `5000` 字符） | 无 |
+| `rss_feed_reader` | 解析 RSS / Atom 订阅源（`url` 必填，`limit` 默认 `10`、最大 `30`） | 无 |
+| `markitdown` | 将上传的 PDF / Word / Excel / PPT / 文本文件转换为文本（`files_url` 必填，URL 数组） | 无 |
+| `artifact` / `bash` / `edit` / `read` / `write` | 代码沙箱中的产物管理与文件读写 | 沙箱运行时 |
+
+<Callout type="info" title="web_search 的搜索引擎">
+  `web_search` 的搜索引擎默认为 `auto`：优先使用已配置 Key 的商业引擎——有 `TAVILY_API_KEY` 用 Tavily，有 `BOCHA_API_KEY` 用博查（Bocha），都没有则用**免 Key** 的 DuckDuckGo。也可显式指定 `tavily` / `bocha` / `duckduckgo`；`auto` 模式下商业引擎失败会自动回退到 DuckDuckGo。凭据来自服务端团队配置，不要写进 Agent 提示词。
+</Callout>
+
+### 由能力开关注入的工具
+
+以下工具**不会**出现在工具目录里，也无法通过 `tools_config` 手动绑定——它们由 Agent 上的独立能力开关自动注入：
+
+| 工具标识 | 触发开关 | 说明 |
+| --- | --- | --- |
+| `ask_user` | **用户输入**（`enable_user_input_request`） | 向用户发起交互式提问表单，等待用户作答后继续 |
+| `generate_image` | **生图**（`enable_image_generation`） | 调用已授权的图片模型生成图片 |
+| `generate_video` | **生视频**（`enable_video_generation`） | 调用已授权的视频模型生成视频 |
 
 ### 记忆工具
 
-
-启用 Agent 记忆后，模型可以读取用户记忆图，并在允许时写入记忆。关闭自动提取时，读取工具仍然可用；写入工具受 Agent 记忆配置控制。
+启用 Agent 记忆后（`enable_memory`），以下 5 个记忆工具会被注入。`auto_extract` 只控制写入，关闭后仍保留读取工具：
 
 | 工具 | 用途 | 限制 |
 | --- | --- | --- |
-| `search_memory` | 查找相关记忆实体 | `top_k` 限制在 `1-10`，支持时间窗口和实体类型 |
-| `get_memory_subgraph` | 读取关联实体和关系 | 最多 5 个种子，深度 `1-3`，方向 `incoming`、`outgoing` 或 `both` |
+| `search_memory` | 查找相关记忆实体 | `query` 必填；`top_k` 默认 `5`，强制收敛到 `1-10`；支持 `time_window_days` 和 `entity_type` 过滤 |
+| `get_memory_subgraph` | 读取关联实体和关系 | `entity_ids` 最多 `5` 个（可用实体名或 ID）；`max_depth` `1-3`，默认 `1`；`direction` 为 `incoming` / `outgoing` / `both`（默认 `both`） |
+| `create_memory_entity` | 新建记忆实体 | 写入工具，关闭 `auto_extract` 后不可用 |
+| `create_memory_relation` | 新建实体间关系 | 写入工具，关闭 `auto_extract` 后不可用 |
+| `update_memory_entity` | 更新实体描述或属性 | 写入工具，关闭 `auto_extract` 后不可用 |
 
-先用 `search_memory` 找候选实体；只有回答依赖关系时再调用 `get_memory_subgraph`。
-
-
-在**能力** > **工具**中选择内置工具进行测试。需要配置的工具会显示“需要配置”，选择**配置**填写团队凭据。工具详情会显示参数名、类型、必填、枚举和默认值。
+先用 `search_memory` 找候选实体；只有回答依赖关系时再调用 `get_memory_subgraph`。详见[记忆与上下文](/usage/guides/agent/memory)。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/builtin-tools-list.png" alt="内置工具列表" />
@@ -40,5 +56,9 @@ icon: Wrench
 </figure>
 
 <Callout type="warn">
-  `web_search` 的凭据来自服务端配置，不应写入 Agent 提示词。沙箱工具的执行结果和产物也应按团队权限访问。
+  沙箱工具（`bash` / `read` / `edit` / `write` / `artifact`）的执行结果与产物应按团队权限访问，不要对外分享内部下载地址。
+</Callout>
+
+<Callout type="info">
+  内置工具不能删除，也不能共享给其他团队；只有自定义工具支持启用/禁用与跨团队共享。
 </Callout>

@@ -8,14 +8,22 @@ Clouisle's persistent data lives across PostgreSQL, Qdrant, Redis, and upload st
 
 ## Storage Backends
 
-Site settings support **local filesystem** and **object storage**. Local mode fits a single API replica; when the API scales to multiple replicas, a `ReadWriteMany` shared volume is required. Object storage fits multi-replica and cross-node deployments, but you must configure the endpoint, bucket, region, access key, Secret Key, security, and path style.
+Site settings (**Site Settings** > **Storage**) support **local filesystem** and **object storage** upload backends, switched by `upload_storage_backend` (default `local`). Local mode fits a single API replica; when the API scales to multiple replicas, a `ReadWriteMany` shared volume is required. Object storage fits multi-replica and cross-node deployments.
+
+Object storage requires these site settings (all database fields, not environment variables): `object_storage_endpoint`, `object_storage_bucket`, `object_storage_region`, `object_storage_access_key`, `object_storage_secret_key`. `object_storage_force_path_style` defaults to `true` (S3-compatible services usually need path style) and `object_storage_secure` defaults to `true` (HTTPS when the endpoint has no scheme).
+
+Two capacity settings live in the same category: `kb_document_max_upload_size_mb` (Knowledge Base per-file limit, default `50`, range `1`–`1024`) and `audit_log_retention_days` (audit retention, default `365`, range `30`–`3650`, with archives under `audit_log_archive_path`, default `/var/log/clouisle/audit_archives`).
 
 ## Compose Volumes
 
-- `postgres_data`: business, audit, configuration, and metadata.
-- `qdrant_data`: vector collections.
-- `redis_data`: Redis persisted data and task/session state.
-- `uploads_data`: user uploads and sandbox artifacts.
+| Volume | Service | Content |
+| --- | --- | --- |
+| `postgres_data` | `db` (`/var/lib/postgresql/data`) | Business, audit, configuration, and metadata |
+| `qdrant_data` | `qdrant` (`/qdrant/storage`) | Vector collections |
+| `redis_data` | `redis` (`/data`) | Redis persisted data and task/session state |
+| `uploads_data` | `api` (`/app/uploads`) | User uploads and sandbox artifacts |
+
+Kubernetes has the matching three PVCs: `postgres-data` (`10Gi`, `RWO`), `qdrant-data` (`10Gi`, `RWO`), and `uploads-data` (`10Gi`, `RWX`, mounted only by `api`). The single-file manifest gives Redis an `emptyDir` (no persistence); Helm defaults to a `5Gi` PVC for Redis.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/storage-settings-and-volumes.svg" alt="Storage settings and deployment volumes" />

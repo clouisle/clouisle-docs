@@ -4,35 +4,51 @@ description: Enable and configure the tool capabilities that ship with Clouisle
 icon: Wrench
 ---
 
-Built-in tools are registered by the platform and do not need to be created or deleted. Some tools require site-level or team-level configuration.
+Built-in tools are registered by the platform and never created or deleted. Select one under **Capabilities** > **Tools** to test it; tools that need credentials show "Configuration needed", and **Configure** stores the team credentials. Tool details list the parameter name, type, required flag, enum, and default value.
+
+## Selectable Built-in Tools
+
+These tools appear in the tool catalog and can be bound to an Agent directly:
 
 | Tool ID | Purpose | Extra configuration |
 | --- | --- | --- |
-| `get_current_time` | Get the current time | None |
-| `format_datetime` | Format a date/time | None |
-| `calculate` | Math calculation | None |
-| `unit_convert` | Unit conversion | None |
-| `web_search` | Web search | `TAVILY_API_KEY` |
-| `fetch_webpage` | Fetch a web page | None |
-| `markitdown` | File/document conversion | None |
-| `generate_image` | Image generation | Image model |
-| `generate_video` | Video generation | Video model |
-| `artifact` / `bash` / `edit` / `read` / `write` | Sandbox artifacts and file operations | Sandbox runtime |
+| `get_current_time` | Current date, time, weekday, and timestamp for a time zone (`timezone_name`, default `UTC`) | None |
+| `format_datetime` | Format a timestamp with `strftime` (`timestamp` defaults to now; `format_string` defaults to `%Y-%m-%d %H:%M:%S`) | None |
+| `calculate` | Math calculation (`expression`) | None |
+| `unit_convert` | Unit conversion (`value`, `from_unit`, `to_unit`) | None |
+| `web_search` | Web search (`query` required; `num_results` default `5`, max `10`) | `TAVILY_API_KEY` / `BOCHA_API_KEY` (optional) |
+| `fetch_webpage` | Fetch a page and extract its text (`url` required; `max_length` default `5000` characters) | None |
+| `rss_feed_reader` | Parse an RSS / Atom feed (`url` required; `limit` default `10`, max `30`) | None |
+| `markitdown` | Convert uploaded PDF / Word / Excel / PPT / text files to text (`files_url` required, an array of URLs) | None |
+| `artifact` / `bash` / `edit` / `read` / `write` | Artifact management and file I/O inside the code sandbox | Sandbox runtime |
 
-### Memory Tools
+<Callout type="info" title="Search backends for web_search">
+  `web_search` defaults to the `auto` engine: it prefers a configured commercial backend — Tavily when `TAVILY_API_KEY` is set, otherwise Bocha when `BOCHA_API_KEY` is set — and falls back to **key-free** DuckDuckGo when neither is configured. You can also force `tavily` / `bocha` / `duckduckgo`; in `auto` mode a failing commercial backend automatically falls back to DuckDuckGo. Credentials live in server-side team configuration — never write them into an Agent prompt.
+</Callout>
 
+### Tools injected by capability switches
 
-When Agent memory is enabled, the model can read the user's memory graph and write memories when permitted. Read tools remain available when automatic extraction is disabled; write tools are gated by the Agent memory configuration.
+The following tools are **not** in the catalog and cannot be attached through `tools_config`; each is injected by its own Agent capability switch:
+
+| Tool ID | Switch | Description |
+| --- | --- | --- |
+| `ask_user` | **User input** (`enable_user_input_request`) | Asks the user an interactive question form and waits for the answer |
+| `generate_image` | **Image generation** (`enable_image_generation`) | Generates images with an authorized image model |
+| `generate_video` | **Video generation** (`enable_video_generation`) | Generates videos with an authorized video model |
+
+### Memory tools
+
+When Agent memory is enabled (`enable_memory`), these 5 memory tools are injected. `auto_extract` only gates writes — the read tools stay available when it is off:
 
 | Tool | Purpose | Limits |
 | --- | --- | --- |
-| `search_memory` | Find relevant memory entities | `top_k` is clamped to `1-10`; supports time-window and entity-type filters |
-| `get_memory_subgraph` | Read related entities and relationships | At most 5 seeds, depth `1-3`, direction `incoming`, `outgoing`, or `both` |
+| `search_memory` | Find relevant memory entities | `query` required; `top_k` defaults to `5` and is clamped to `1-10`; supports `time_window_days` and `entity_type` filters |
+| `get_memory_subgraph` | Read related entities and relations | `entity_ids` at most `5` (entity names or IDs); `max_depth` `1-3`, default `1`; `direction` is `incoming` / `outgoing` / `both` (default `both`) |
+| `create_memory_entity` | Create a memory entity | Write tool; unavailable when `auto_extract` is off |
+| `create_memory_relation` | Create a relation between entities | Write tool; unavailable when `auto_extract` is off |
+| `update_memory_entity` | Update an entity's description or properties | Write tool; unavailable when `auto_extract` is off |
 
-Use `search_memory` to find candidate entities first; call `get_memory_subgraph` only when the answer depends on relationships.
-
-
-Select a built-in tool in **Capabilities** > **Tools** to test it. Tools that need configuration show "Configuration needed"; select **Configure** to fill in team credentials. Tool details show the parameter name, type, required, enum, and default value.
+Use `search_memory` to find candidate entities first; call `get_memory_subgraph` only when the answer depends on relationships. See [Memory and Context](/en/usage/guides/agent/memory).
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/builtin-tools-list.png" alt="Built-in tools list" />
@@ -40,5 +56,9 @@ Select a built-in tool in **Capabilities** > **Tools** to test it. Tools that ne
 </figure>
 
 <Callout type="warn">
-  `web_search` credentials come from server-side configuration and should not be written into the Agent prompt. Execution results and artifacts of sandbox tools should also be accessed according to team permissions.
+  Execution results and artifacts of the sandbox tools (`bash` / `read` / `edit` / `write` / `artifact`) must be accessed per team permissions; never share internal download URLs.
+</Callout>
+
+<Callout type="info">
+  Built-in tools cannot be deleted or shared with other teams; only custom tools support enable/disable and cross-team sharing.
 </Callout>

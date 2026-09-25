@@ -12,11 +12,20 @@ icon: CircleAlert
 
 ### 为什么前端能打开但请求失败？
 
-检查反向代理是否把 `/api/*` 转到 `api:8000`，并确认 `NEXT_PUBLIC_API_URL` 是浏览器可访问的基路径。
+分两条链路排查：
+
+- **浏览器请求**：确认反向代理/Ingress 把 `/api` 转发到 `api:8000`，且 `NEXT_PUBLIC_API_URL`（前端镜像默认 `/api/v1`）是浏览器可访问的路径；浏览器侧请求是相对路径，不会被后端 `API_V1_STR` 用到，但两者路径前缀必须一致。
+- **服务端渲染（SSR）请求**：Next.js 服务端用 `BACKEND_INTERNAL_URL` 拼接 API 地址，代码默认 `http://localhost:8000`（Compose 注入 `http://api:8000`）。
+
+单文件 K8s manifest 和 Helm 默认的 `frontend` Pod **不设置任何环境变量**，因此 SSR 会回退到 `http://localhost:8000`——在 Pod 内这个地址不可达。浏览器流量经 Ingress 转发不受影响；如果依赖 SSR 服务端取数，请给 `frontend` 显式加 `BACKEND_INTERNAL_URL=http://api:8000`。
 
 ### 为什么 Beat 只能有一个副本？
 
 Beat 是调度器。多个副本会重复投递定时任务，造成重复处理或重复通知。
+
+### 改过 Worker 启动命令后，为什么 AgentRun 一直停在运行中？
+
+`worker` 必须消费 `default,agent,knowledge,workflow` 四个队列。持久化 AgentRun 被路由到 `agent` 队列，一旦 `-Q` 里少了 `agent`，任务无人消费，会话会一直显示运行中且不会报错。恢复方法：把 `-Q` 改回四个队列，或另起一个 `-Q agent` 的 Worker。`sandbox` 队列只由 `sandbox-worker` 消费，不在这份列表里。
 
 ## 存储与扩展
 
@@ -32,7 +41,7 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 
 ### 怎么单独扩容某一类任务？
 
-官方部署的 `worker` 同时消费 `default`、`agent`、`knowledge`、`workflow` 4 个队列，整体扩容会同时增加这 4 类任务的吞吐。需要只扩容 AgentRun 执行时，额外启动一个只订阅单队列的 Worker（如 `-Q agent`）；`sandbox` 队列由独立的 `sandbox-worker` 消费。详见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
+官方部署的 `worker` 同时消费 `default`、`agent`、`knowledge`、`workflow` 4 个队列，整体扩容会同时增加这 4 类任务的吞吐。需要只扩容 AgentRun 执行时，额外启动一个只订阅单队列的 Worker（如 `-Q agent`）；`sandbox` 队列由独立的 `sandbox-worker` 消费。详见[部署架构 → Celery 队列划分](./architecture.mdx#celery-队列划分)。
 
 ### 文档上传成功后为什么搜不到？
 
@@ -41,6 +50,16 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 ### 混合检索为什么返回校验错误？
 
 混合检索的 `dense_weight` 和 `lexical_weight` 不能同时为 `0`。全文通道还需要 PostgreSQL 的 `pg_search`。
+
+## 沙箱与代码执行
+
+### 官方部署需要改宿主内核参数吗？
+
+不需要。Compose、Helm 和单文件 manifest 都让 `sandbox-worker` 以 root（`user: "0"` / `runAsUser: 0`）+ `CAP_SYS_ADMIN` 运行，用户命名空间创建走特权路径，也不需要在节点上放开非特权用户命名空间。只有自定义部署坚持让该 Worker 以非 root 运行时，才需要在**节点级别**放开（Ubuntu 23.10+ 的 `kernel.apparmor_restrict_unprivileged_userns=0`、Debian 的 `kernel.unprivileged_userns_clone=1`）。详见[故障排查 → 沙箱任务报 bwrap 用户命名空间错误](./operations/troubleshooting.mdx#bwrap-user-namespace-error)。
+
+### `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` 到底是开还是关？
+
+代码默认是 `false`（让不支持的开发机也能启动），但官方 `sandbox-worker` 镜像的 `ENV`、`deploy/.env.example`、K8s ConfigMap 和 Helm values 都显式设为 `true`。所以走官方部署就是开启的；自己拼镜像或自己写 manifest 时不要漏掉这个变量，否则沙箱会在没有文件系统隔离的情况下执行代码。
 
 ## 安全
 

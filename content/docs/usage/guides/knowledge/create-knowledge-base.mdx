@@ -4,233 +4,235 @@ description: 为团队建立可检索的文档集合并选择索引模型
 icon: Database
 ---
 
-知识库必须归属于一个团队。创建时选择的嵌入模型决定向量维度；文档首次处理后不应更换嵌入模型，若必须更换，需要重建索引。
+知识库必须归属于一个团队。创建时的两个决定最难回头：**嵌入模型决定向量维度**（文档处理后不可更换），**可见性决定谁能在没有共享的情况下读到它**。名称在团队内必须唯一。
+
+<Callout type="info" title="前置条件">
+  1）你是目标团队的成员，并拥有 `kb:create` 权限；2）团队已获授权一个 `embedding` 模型（未授权会在创建时被拒绝，缺少可用模型则该知识库无法检索）；3）如需重排序，再授权一个 `rerank` 模型。授权与供应商配置见[模型管理](../models/manage-models.mdx)。
+</Callout>
+
+## 权限与可见性
+
+| 操作 | 需要的权限 | 团队角色要求 |
+| --- | --- | --- |
+| 查看知识库 / 文档 / 分块 | `kb:read` | 命中可见性规则 |
+| 命中测试（检索） | `kb:test` | 读取权限 |
+| 创建知识库 | `kb:create` | 团队成员 |
+| 编辑设置、上传/处理/删除文档、编辑分块 | `kb:update` | 创建者本人，或团队 owner/admin |
+| 删除知识库 | `kb:delete` | 团队 owner/admin |
+| 共享给其他团队 | `kb:update` | 所属团队 owner/admin |
+| 取消共享 | `kb:delete` | 所属团队 owner/admin |
+
+可见性在创建/编辑对话框中设置：
+
+| 可见性 | 谁可以读 | 说明 |
+| --- | --- | --- |
+| `private` | 仅创建者 | 团队其他成员看不到；**不能共享给其他团队** |
+| `team` | 本团队所有成员 | 写入仍需要创建者或团队管理员 |
+| `public` | 预留值 | 界面不提供，仅作兼容保留 |
+
+跨团队访问只能通过共享获得，且始终是只读的——见下文「跨团队共享（只读）」。
 
 ## 创建知识库
 
 1. 前往**知识库**，选择**创建知识库**。
 2. 填写基本信息：
-   - **名称**：`1-100` 字符，用于知识库列表展示。
-   - **描述**：最多 `500` 字符，说明知识库用途和内容范围。
-   - **团队**：选择知识库归属的团队。
+   - **名称**：`1-100` 字符，**团队内唯一**，重名会报 `kb_name_exists`。
+   - **描述**：最多 `500` 字符，说明用途与内容范围。
+   - **团队**：使用当前团队（管理后台的创建表单可指定其他团队）。
 3. 选择模型：
-   - **嵌入模型**：选择团队已授权的 `embedding` 模型，或使用平台默认配置。`embedding_model_id` 创建后不可更改。
-   - **重排序模型**：可选，选择 `rerank` 模型以提升检索精度。
-4. 配置分块与检索设置：
-   - **分块大小**：每个分块的字符数，默认 `1000`，最小 `100`。
-   - **分块重叠**：相邻分块之间的重叠字符数，默认 `100`，最小 `0`。
-   - **分隔符**：自定义文本分隔符（可选）。
-   - **检索模式**：`vector`、`fulltext` 或 `hybrid`（默认 `hybrid`）。
-   - **重排序**：启用重排序以优化检索结果。
-5. 点击**创建知识库**。
-6. 打开知识库详情，确认状态为**启用**。
+   - **嵌入模型**：团队已授权的 `embedding` 模型。`embedding_model_id` 创建后不可更改。
+   - **重排序模型**：可选，绑定后可在检索时对召回结果二次打分。
+4. 配置分块与重排序：
+   - **分块大小** `chunk_size`：默认 `1000` 字符，最小 `100`（界面建议上限 `2000`）。
+   - **分块重叠** `chunk_overlap`：默认 `100` 字符，最小 `0`（界面建议上限 `500`）。
+   - **自定义分隔符**：可填 `\n\n` 等转义序列，作为硬切分边界。
+   - **启用重排序**：默认开启；**重排序候选数** 默认 `10`（`1-100`）；**重排序分数阈值** 默认留空（`0-1`）。
+5. 选择**可见性**（`private` 或 `team`）。
+6. 点击**创建知识库**，随后进入知识库详情页；确认状态为**启用**。
+
+编辑已有知识库时，对话框额外提供**启用知识库**开关（关闭即 `archived`，归档后的知识库不参与检索）。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-base-create-dialog.png" alt="创建知识库对话框" />
-  <figcaption>创建知识库对话框</figcaption>
+  <figcaption>创建知识库对话框：模型、分块、重排序与可见性</figcaption>
 </figure>
 
-<Callout type="error">
-  嵌入模型不存在、未授权或向量维度与既有索引不匹配时，文档处理和检索会失败。先在[模型指南](../models/manage-models.mdx)确认授权。
+<Callout type="error" title="嵌入模型不可更换">
+  已存储的向量与创建时选择的嵌入模型绑定。更新 `embedding_model_id` 会被直接拒绝（`embedding_model_locked_after_kb_creation`）；而**重排序模型可以随时更换**（更换时会校验团队授权）。要换嵌入模型，只能新建知识库并用新模型重新处理文档。
 </Callout>
 
-## 嵌入与重排序模型
+## 模型与向量维度
 
-嵌入模型是平台上 `model_type = embedding` 的常规模型（如 OpenAI `text-embedding-3-small` 或兼容的本地模型），通过模型授权分配给团队。每个知识库引用一个嵌入模型（`embedding_model_id`）和一个可选的重排序模型（`rerank_model_id`）。
+### 嵌入模型
 
-### 嵌入模型锁定
+平台 `model_type = embedding` 的模型，通过模型授权分配给团队后才能在创建表单中出现。知识库只引用一个嵌入模型；没有可用模型时，文档处理与检索都无法进行。
 
-由于已存储的向量依赖于创建时选择的嵌入模型，因此创建后嵌入模型即被锁定。管理员编辑表单不允许修改 `embedding_model_id`，尝试更新会被拒绝。如需更换嵌入模型，必须创建新的知识库并使用新模型处理文档。
+### 向量维度
+
+`embedding_dimension` 在**首批文档完成向量化时写入**并固化。此后：
+
+- 维度一致的文档正常入库；
+- 维度不一致的向量写入抛出维度不匹配错误，检索请求会返回 `configuration_mismatch` 分类提示核对模型与索引维度；
+- 更换嵌入模型不会自动重建索引，需要新建知识库或执行完整的重新处理流程。
+
+## 分块与检索设置
+
+| 字段 | 默认值 | 范围 | 生效位置 |
+| --- | --- | --- | --- |
+| `chunk_size` | `1000` | `>=100` 字符 | 文档处理（下次处理/重新处理时生效） |
+| `chunk_overlap` | `100` | `>=0` 字符 | 文档处理 |
+| `separator` | 空 | 任意字符串 | 文档处理，硬切分边界 |
+| `rerank_enabled` | `true` | 布尔 | 检索（需绑定 `rerank` 模型） |
+| `rerank_candidate_k` | `10` | `1-100` | 检索 |
+| `rerank_score_threshold` | 空 | `0-1` | 检索 |
+| `search_mode` | 空（`null`） | `vector` / `fulltext` / `hybrid` | Agent/工作流检索的默认模式 |
+| `top_k` | 空（`null`） | `1-100` | Agent/工作流检索 |
+| `score_threshold` | 空（`null`） | `0-1` | Agent/工作流检索 |
+| `dense_weight` / `lexical_weight` | 空（`null`） | `>=0` | 混合检索权重 |
+| `rrf_k` | 空（`null`） | `1-1000` | 混合融合常数 |
+
+<Callout type="warn" title="知识库设置与检索请求是两套默认值">
+  知识库设置里的检索类字段默认是**空的**，只有显式设置后才生效；而**检索请求**不传参时按 `search_mode=hybrid`、`top_k=5`、`score_threshold=0`、`rrf_k=60` 执行。命中测试面板会用知识库设置初始化，并可通过**应用到生产**把配置写回知识库。因此「知识库设置里的模式」主要影响 Agent/工作流检索，见[检索与质量调优](./retrieval.mdx)。
+</Callout>
+
+分块的字符语义、Markdown 与纯文本差异、预览与失败重试见[分块与文档处理](./chunking.mdx)。
+
+## 跨团队共享（只读）
+
+共享让**其他团队**获得对某个知识库的读取与检索能力，但**不能编辑**。这是唯一一种跨团队访问方式。
+
+### 操作步骤
+
+1. 在**知识库**列表中，把鼠标移到知识库卡片上，打开右上角 **⋯** 菜单，选择**共享**。
+   - 该入口只对「自己团队拥有」的知识库显示，且需要团队 owner/admin 角色。
+2. 在**共享**对话框中选择**团队**。
+   - 候选列表来自你加入的团队，并自动排除当前团队与已共享过的团队。
+   - **权限级别**只有**只读**一个选项且不可修改。
+3. 点击**共享**。列表出现该团队、只读徽章与「由某人共享」的说明。
+4. 需要撤销时，在**已共享给**列表中点击该条目的删除图标并确认，对方团队的列表会立即移除该知识库。
+
+### 规则与失败原因
+
+| 规则 | 结果 |
+| --- | --- |
+| `private` 可见性的知识库 | 不能共享，返回 `private_kb_cannot_be_shared`（400） |
+| 共享给本团队 | 拒绝，`kb_cannot_share_to_own_team`（400） |
+| 重复共享同一个团队 | 拒绝，`kb_already_shared`（400） |
+| 接收方团队看到的共享 | 只有可见性为 `team` 或 `public` 的知识库 |
+| 接收方权限 | 仅 `read_only`：可查看、检索、在 Agent/工作流中关联；不能改设置、上传、处理或删除文档 |
+| 撤销一个不存在的共享 | 返回 `kb_share_not_found`（404） |
+
+共享后在双方列表上的标识：
+
+- 接收方：**来自** + 团队名的徽章，进入详情后所有写入入口禁用（`is_owned = false`）。
+- 拥有方：**已共享 N 个团队** 徽章；徽章数量来自 `shared_with_count`。
+
+### 通过 API 共享
+
+```bash
+# 共享给其他团队（permission 只有一个合法值 read_only）
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id": "TARGET_TEAM_UUID", "permission": "read_only"}'
+
+# 查看已共享给哪些团队（仅所属团队成员可读）
+curl "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/shares" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# 取消共享
+curl -X DELETE "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share/$TARGET_TEAM_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+接收方要过滤列表时，`GET /api/v1/knowledge-bases` 支持 `include_shared`（默认 `true`）与 `own_only`（默认 `false`）；设为 `include_shared=false` 或 `own_only=true` 即可只看到自己团队的知识库。
 
 ## 文档管理
 
-文档管理包括上传、处理、重新处理和删除。详细操作见[导入文档](./import-documents.mdx)和[分块与文档处理](./chunking.mdx)。
+文档管理包括上传、处理、重新处理和删除，详细步骤见[导入文档](./import-documents.mdx)与[分块与文档处理](./chunking.mdx)。
 
-### 上传文档
-
-- **单个上传**：选择知识库 → **上传文档** → 选择文件 → **上传**。上传通过 `POST /api/v1/knowledge-bases/{kb_id}/documents/upload`（multipart）完成，上传后文档状态为 `pending`，不会自动开始提取或嵌入。
-- **批量操作**：在文档表格中选择多个文档，可对等待中文档执行**快速处理**、对失败文档执行**重试失败分段**或**删除**。
-- **支持格式**：PDF、DOC/DOCX、TXT、Markdown、HTML、CSV、XLS/XLSX、PPT/PPTX、JSON、URL。
+| 能力 | 说明 |
+| --- | --- |
+| 上传 | `POST /api/v1/knowledge-bases/{kb_id}/documents/upload`（multipart）；上传后为 `pending`，不会自动处理 |
+| URL 导入 | 通过安全校验后创建 `url` 文档，进入预览页后由你确认分块 |
+| 支持格式 | PDF、DOC/DOCX、PPTX、TXT、Markdown、HTML、CSV、XLS/XLSX、JSON、URL（不支持 `.ppt`、压缩包与 OCR） |
+| 批量操作 | 勾选多个文档：等待中文档**快速处理**、失败文档**重试失败分段**、**删除** |
+| 单文件上限 | 站点设置 `kb_document_max_upload_size_mb`，默认 `50MB`，范围 `1-1024MB` |
 
 <Callout type="warn">
-  上传文档与处理文档是两个阶段。文档出现在列表中不代表已经完成嵌入；只有状态为**已完成**才适合绑定到 Agent。
+  上传与处理是两个阶段：文档出现在列表中不代表已经完成嵌入。只有 `completed` 的文档能被检索，也才适合绑定到 Agent。
 </Callout>
 
-### 文档处理流程
+## 统计
 
-```
-上传 → 提取文本 → 清理 → 分块 → 生成嵌入 → 索引
-```
+知识库详情页顶部显示统计卡片（文档数、分块数、Token 数、各状态计数）；下拉菜单中的**命中测试**进入检索实验室。
 
-**处理状态：**
-- **等待中**：已上传，等待管理员启动处理。
-- **处理中**：正在提取、分块、嵌入或索引。
-- **已完成**：成功索引，可参与检索。
-- **错误**：处理出错，查看错误信息后重试或重新处理。
+`GET /api/v1/knowledge-bases/{kb_id}/stats` 返回：
 
-### 重新处理文档
-
-- **单个重新处理**：选择已完成或错误的文档 → **重新处理** → 预览分块 → **处理**。
-- **重试失败分段**：选择错误文档 → **重试失败分段**。
-- 批量重新处理通过选择工具栏对等待中文档执行快速处理或对失败文档执行重试。
-
-### 删除文档
-
-- **单个删除**：选择文档 → **删除** → 确认。
-- **批量删除**：选择多个文档 → **批量删除** → 确认。
-
-## 检索配置
-
-检索在知识库设置中按知识库配置。详细字段说明见[知识库设置参考](/reference/knowledge-settings.mdx)，检索效果比较见[检索与质量调优](./retrieval.mdx)。
-
-### 检索模式
-
-| 模式 | 说明 |
-| --- | --- |
-| `vector` | 纯向量检索，基于语义相似度 |
-| `fulltext` | 全文检索，基于关键词匹配 |
-| `hybrid` | 混合检索，融合向量与全文结果（默认） |
-
-### 混合检索参数
-
-- **稠密权重**：向量检索的 RRF 权重，默认 `1.0`。
-- **词法权重**：全文检索的 RRF 权重，默认 `1.0`。
-- **RRF K**：倒数排名融合参数，默认 `60`，范围 `1-1000`。
-- 稠密权重或词法权重至少一个必须大于 `0`。
-
-### 重排序
-
-- **启用重排序**：开启后对检索结果进行重排序以提升精度。
-- **候选池大小**：`1-100`，默认 `10`。
-- **分数阈值**：可选，`0-1`。
-
-### 测试检索
-
-1. 选择知识库 → **命中测试**。
-2. 输入 `1-1000` 字符查询。
-3. 选择检索方式、Top K（`1-20`，默认 `5`）、分数阈值（`0-1`，默认 `0`）和权重。
-4. 查看匹配分块、相关度分数和来源文档。
-5. 保存预设后可**应用到生产**。
-
-## 统计与监控
-
-### 知识库统计
-
-`GET /api/v1/knowledge-bases/{kb_id}/stats` 返回每个知识库的统计数据：
-
-- 文档总数
-- 分块总数
-- 嵌入总数
-- 各处理状态计数
-- 嵌入配置和向量维度
-
-查看方式：选择知识库 → **统计**标签页。
+- `document_count`（按实际文档数重新计算，而非缓存值）
+- `total_chunks`、`total_tokens`（按文档汇总，并回写知识库缓存字段）
+- `documents_by_status`、`documents_by_type`
+- `embedding_dimension` 与 `embedding_stats`
 
 <Callout type="info">
-  未实现 / Roadmap：搜索查询分析（查询量、响应时间、缓存命中率、热门查询）、存储使用趋势和统计导出功能暂不可用。
+  未实现 / Roadmap：查询量、响应时间、缓存命中率、热门查询等检索分析，存储使用趋势与统计导出均不可用。
 </Callout>
 
 ## 故障排除
 
 ### 文档处理失败
 
-- **症状**：文档状态为"失败"，日志中有错误信息。
-- **解决方案**：
-  1. 检查文件格式是否支持、文件是否损坏、文件大小是否超限。
-  2. 查看处理日志：知识库 → 文档 → 选择文档 → 查看处理日志。
-  3. 常见错误：
-     - **文本提取失败**：文件损坏或格式不支持。
-     - **分块失败**：分块设置无效。
-     - **嵌入失败**：API 密钥无效或配额不足。
-     - **索引失败**：Qdrant 连接问题。
-  4. 重试处理：选择失败文档 → **重试** → 可选调整设置 → 确认。
+1. 确认文件格式受支持、文件未损坏、大小未超限。
+2. 打开文档详情查看错误信息，确认是提取、切分还是嵌入阶段失败。
+3. 常见原因与处理：
 
-### 检索无结果
+| 原因 | 处理方式 |
+| --- | --- |
+| 文本提取失败（损坏、加密、纯图片） | 转换格式或解除密码后重新上传 |
+| 分块为零 | 确认文件含可提取文本，或关闭文本清理后重试 |
+| 嵌入失败（凭据、配额、维度） | 核对模型授权与 `embedding_dimension`，再重试失败分段 |
+| 索引失败（向量库不可用） | 检查 Qdrant 与 Worker 日志 |
 
-- **症状**：检索返回空结果、找不到相关文档、检索报错。
-- **解决方案**：
-  1. 检查文档是否已完成索引，是否有索引错误。
-  2. 使用**命中测试**验证检索结果和分数。
-  3. 检查检索设置：分数阈值是否过高、Top K 值、尝试不同检索模式。
-  4. 检查 Qdrant 服务是否健康可达。
-  5. 必要时重新索引。
+### 检索无结果或结果无关
 
-### 嵌入成本过高
+1. 确认文档状态为 `completed`。
+2. 用**命中测试**验证分数：0 条结果时先降低 `score_threshold`，再切换检索模式。
+3. 检查知识库是否被 Agent 关联参数覆盖（Agent 上的 `retrieval_top_k`、`score_threshold`、`search_mode`）。
+4. 检查向量库与 `pg_search` 是否健康；必要时重新处理文档。
 
-- **症状**：意外高成本、触发成本告警。
-- **解决方案**：
-  1. 查看知识库统计中的嵌入使用量，定位高用量知识库。
-  2. 优化分块：增大分块大小、减少重叠、过滤不必要内容。
-  3. 使用更经济的模型（如 `text-embedding-3-small`）。
-  4. 移除或重新处理不必要的文档。
+### 成本或性能异常
+
+- 成本偏高：减少不必要的重新处理，优化分块（更大的分块、更少的重叠），换用更经济的嵌入模型，删除冗余文档。
+- 检索慢：降低 `top_k`、对简单查询关闭重排序、缩小文档范围，并检查向量库资源。
 
 <Callout type="info">
-  未实现 / Roadmap：每知识库文档限制、每日嵌入配额和成本告警暂不可用。
+  未实现 / Roadmap：每知识库文档上限、每日嵌入配额与成本告警均不可用。
 </Callout>
-
-### 检索性能慢
-
-- **症状**：检索耗时过长、超时。
-- **解决方案**：
-  1. 查看统计中的检索性能，定位慢查询。
-  2. 优化检索：减少 Top K、对简单查询禁用重排序、使用过滤器。
-  3. 检查 Qdrant 资源使用（CPU/内存）和索引。
-  4. 在基础设施层面增加资源或添加副本。
 
 ## 最佳实践
 
-### 文档管理
-
-- ✅ 使用描述性文档名称，按类别和标签组织文档。
-- ✅ 添加元数据以提升检索效果，定期移除过时文档。
-- ✅ 上传后监控处理状态，测试检索结果。
-- ❌ 不要上传重复文档，不要使用不清晰的文件名。
-- ❌ 不要忽略处理错误，不要忘记测试检索。
-
-### 分块策略
-
-- ✅ 根据内容类型选择合适分块大小：叙述性内容使用语义分块，结构化数据使用固定分块。
-- ✅ 测试不同策略，监控分块质量，根据检索性能调整。
-- ❌ 不要对所有内容使用同一策略，分块不宜过大或过小。
-- ❌ 不要忽略分块重叠，不要跳过测试。
-
-### 检索优化
-
-- ✅ 使用混合检索获得最佳结果，启用重排序提升精度。
-- ✅ 设置合适的分数阈值，监控检索性能，收集用户反馈。
-- ❌ 不要仅依赖向量检索，阈值不要设置过高。
-- ❌ 不要忽略性能指标和用户反馈。
-
-## 批量操作
-
-文档表格支持基于选择的操作：
-
-- **快速处理**：处理选中的等待中文档。
-- **重试失败分段**：重试选中的失败文档。
-- **删除**：删除选中的文档。
-
-不支持 ZIP/多文件批量上传或批量元数据更新。文件需单独上传，然后使用预览/编辑器或选择工具栏进行处理。
-
-<Callout type="info">
-  未实现 / Roadmap：知识库导入/导出（JSON/CSV，含或不含嵌入）暂不可用。
-</Callout>
+- ✅ 名称写清楚内容范围，避免「文档」「资料」这类无信息量的名字。
+- ✅ 先用默认分块（`1000`/`100`）跑通一条代表性文档，再用命中测试对比调整。
+- ✅ 定期清理过期文档；重复内容会互相竞争排名。
+- ✅ 私有知识库只用于个人草稿；团队共用的内容用 `team` 可见性。
+- ❌ 不要指望手工「添加元数据」提升检索——`metadata` 由处理管线自动生成，没有编辑入口。
+- ❌ 不要在生产环境直接更换嵌入模型，也不要跳过检索验证直接放大分块。
 
 ## API 访问
 
-通过 API 管理知识库，详见 [Knowledge Bases API](/en/api-reference/endpoints/knowledge-bases)。
-
-**常用操作：**
+通过 API 管理知识库，端点清单见 [知识库 API](/api/knowledge)。知识库端点只接受已登录用户的 JWT 会话（`Authorization: Bearer <ACCESS_TOKEN>`），**不接受 `clou_` 开头的 API Key**。
 
 ```python
-# 列出知识库 — 过滤：team_id、search、status、own_only
-kbs = api.get("/api/v1/knowledge-bases", params={"team_id": "team-123"})
+# 列出知识库 — 支持 team_id、search、status、own_only、include_shared
+kbs = api.get("/api/v1/knowledge-bases", params={"team_id": "team-123", "include_shared": True})
 
 # 为团队创建知识库
 kb = api.post("/api/v1/knowledge-bases", json={
     "name": "Product Docs",
     "team_id": "team-123",
     "embedding_model_id": "model-456",
-    "settings": {"chunk_size": 1000, "chunk_overlap": 100, "search_mode": "hybrid"}
+    "visibility": "team",
+    "settings": {"chunk_size": 1000, "chunk_overlap": 100, "rerank_enabled": True}
 })
 
 # 上传文档
@@ -251,9 +253,17 @@ results = api.post(f"/api/v1/knowledge-bases/{kb_id}/search", json={
 
 | 端点 | 说明 |
 | --- | --- |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process` | 处理等待中的文档 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | 使用指定分块设置处理 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | 重新处理文档 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | 重新分块文档 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | 重试失败分段 |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process` | 处理等待中的文档（可传分块设置） |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | 提交预览确认后的分块 |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | 删除旧分块后重新处理 |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | 用新分块设置重新分块 |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | 仅重试失败分块的嵌入 |
 | `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | 重试单个分块嵌入 |
+
+## 相关页面
+
+- [导入文档](./import-documents.mdx) — 上传、URL 导入与失败重试
+- [分块与文档处理](./chunking.mdx) — 预览、处理与编辑分块
+- [浏览文档与元数据](./browse-documents.mdx) — 共享徽章与系统字段
+- [检索与质量调优](./retrieval.mdx) — 检索实验室与诊断
+- [知识库设置参考](/reference/knowledge-settings) — 全部字段与限制

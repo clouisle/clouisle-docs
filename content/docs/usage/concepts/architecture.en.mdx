@@ -12,7 +12,7 @@ Clouisle uses a layered architecture separating frontend, backend, and infrastru
 | --- | --- | --- |
 | Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS 4 + shadcn/ui, Bun | The container runs the Next.js standalone server (`node server.js`) and does **not** include Nginx; `deploy/nginx/default.conf` is only an optional external reverse-proxy example |
 | Backend | FastAPI (Python 3.13), Tortoise ORM + asyncpg, Celery + Redis | LangChain adapters (chat/embeddings/text splitting); self-built `WorkflowOrchestrator` for workflow execution; LangGraph is declared but not used at runtime; MarkItDown for document conversion |
-| Infrastructure | PostgreSQL 17 (`pg_search` full-text), Redis 7 (cache/Celery broker/rate-limit counters), Qdrant (vectors) | Vectors are stored in a dedicated collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model |
+| Infrastructure | PostgreSQL 17 (`pg_search` full-text), Redis 7 (cache/Celery broker/SSE event buffer/rate-limit and lockout counters), Qdrant (vectors) | Vectors are stored in a dedicated collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model |
 
 ### Request Flows & Execution Lifecycle
 
@@ -27,7 +27,7 @@ Browser → (optional external reverse proxy / Ingress) → Next.js SSR (node se
 Clouisle implements a durable, decoupled `AgentRun` execution architecture for conversational agents:
 
 ```text
-User Message ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis Queue (Celery default)
+User Message ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis Queue (Celery agent)
                        │ (202 Accepted, run_id)                           │
                        ▼                                                  ▼
                   SSE Stream                                  Celery Worker (run_agent_task)
@@ -46,7 +46,7 @@ User Message ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──
                                                         (Status: WAITING)     (Tokens kept in budget)
 ```
 
-1. **Durable AgentRun**: Starting a run dispatches a Celery task and immediately returns `202 Accepted` with a `run_id`. The client establishes an SSE stream (`/chat/runs/{run_id}/stream`) and can disconnect or reconnect (`from_sequence`) without interrupting background tool execution.
+1. **Durable AgentRun**: Starting a run dispatches a Celery task and immediately returns `202 Accepted` with a `run_id`. The task is routed to the `agent` queue and consumed by the main worker; **if you rewrite the worker's `-Q` and drop `agent`, runs stay in `queued` forever without any error**, and users only see "queued" (queue mapping: [Deployment Architecture](../../self-host/architecture.mdx)). The client establishes an SSE stream (`/chat/runs/{run_id}/stream`) and can disconnect or reconnect (`from_sequence`) without interrupting background tool execution. Tasks on the `agent` queue set **no automatic retries** — model calls and tool execution have side effects, so a retry would execute them twice; runs interrupted by a dead worker are reclaimed by the Beat-scheduled `sweep-lost-agent-runs` (every 2 minutes) and marked `interrupted` rather than replayed.
 2. **AgentLoop ReAct Engine**: Manages iterative reasoning and tool-calling cycles (`max_iterations`, timeouts, and credential injection).
 3. **Three-Level Context Compaction**:
    - **Micro Compaction**: Automatically truncates and summarizes oversized tool output payloads and raw base64 data to preserve token budgets.
@@ -83,7 +83,7 @@ Trigger Event / User Input ──► FastAPI (POST /workflows/{id}/runs) ──�
 3. **Pause & Resume Handlers**: Nodes requiring human review (`pause`) persist a `WorkflowPauseRequest` and suspend execution until approved or filled via `/runs/{id}/pause-requests/{req_id}/submit`.
 ### Scalability
 
-The frontend and API are stateless and scale horizontally; Celery Workers scale independently by queue (`default`, `knowledge`, `workflow`). **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. See [Deployment Architecture](../../self-host/architecture.mdx) for the service topology and volumes.
+The frontend and API are stateless and scale horizontally. The main worker (`python main.py worker -c 4 -Q default,agent,knowledge,workflow`) consumes all four of `default`, `agent`, `knowledge`, and `workflow`; to scale one queue independently, start an extra worker subscribed to a single queue (for example `-Q agent`), but a worker must consume `default` and `agent` at all times, otherwise notifications, cleanup tasks, and Agent conversations silently pile up in the queue. The code sandbox is a separate fifth queue, `sandbox`, consumed by the dedicated `sandbox-worker`; scaling it does not affect knowledge base or workflow processing. **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. For the full queue mapping, periodic Beat tasks, and scaling commands, see [Deployment Architecture](../../self-host/architecture.mdx).
 
 ### Security and Multi-tenancy
 
@@ -94,7 +94,21 @@ The frontend and API are stateless and scale horizontally; Celery Workers scale 
 
 ### Performance and Caching
 
-User sessions default to `30` days (controlled by the `session_timeout_days` site setting), with a `8`-day JWT fallback token; site settings are not cached and are read directly from the database on every lookup; rate limiting counts per API Key per minute (`rate_limit`, default `1000`).
+User sessions default to `30` days (controlled by the `session_timeout_days` site setting), with a `8`-day JWT fallback token; site settings are not cached and are read directly from the database on every lookup.
+
+There is no single global rate-limiting middleware: each protection is implemented per scenario, with its own boundary:
+
+| Mechanism | Limit | Where it lives |
+| --- | --- | --- |
+| Login failure lockout | After `max_login_attempts` (default `5`) consecutive failures, the account is locked for `lockout_duration_minutes` (default `15`) minutes | Account fields + site settings |
+| TOTP verification | `5` failures within a 300-second window lock verification for `900` seconds | Redis counter |
+| Admin bulk email | `100` messages per hour per sender | Redis counter (TTL 3600s) |
+| Per-recipient email | `5` messages per day per address | Redis counter (TTL 86400s) |
+| API Key requests per minute | `rate_limit` field defaults to `1000`/min, `0` meaning unlimited — **stored but not enforced today** | Metadata field |
+
+<Callout type="warn">
+Do not treat the API Key `rate_limit` as an active abuse control, and do not assume captcha alone stops brute force: what actually blocks sign-in attempts is the account lockout and the TOTP lockout (see [Teams & Security](./security.mdx)).
+</Callout>
 
 ### Health Checks
 

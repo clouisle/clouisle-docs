@@ -18,11 +18,16 @@ Configuration has three layers: environment variables control startup-level conf
 | `ALGORITHM` | `HS256` | JWT signing algorithm; `HS256`/`HS384`/`HS512` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `11520` (8 days) | JWT fallback token lifetime; active sessions default to the `session_timeout_days` site setting (30 days) |
 | `API_BASE_URL` | Compose `http://api:8000` | Server-side API address |
+| `API_V1_STR` | `/api/v1` | Path prefix under which the backend mounts every router; must match the frontend build-time `NEXT_PUBLIC_API_URL` and the `/api/v1` paths forwarded by the Ingress/proxy |
 | `PUBLIC_API_URL` | Empty | Use when an absolute public URL is required |
 | `FRONTEND_URL` | `http://localhost:3000` | Public frontend/SSO callback base URL |
 | `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed frontend Origins; accepts a JSON array or a comma-separated list |
 | `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | Browser API base path |
 | `BACKEND_INTERNAL_URL` | `http://localhost:8000` | Frontend server-side access to API; `http://api:8000` inside Compose |
+
+`API_V1_STR` (default `/api/v1`) is the prefix under which the backend mounts every router: `/health`, `/openapi.json`, `/embed/*`, `/admin/*` and the rest all live below it. It must match the frontend build-time `NEXT_PUBLIC_API_URL` (frontend image default `/api/v1`) and the path the Ingress/reverse proxy forwards; changing only one of the three breaks browser calls or server-side fetching with a 404. It is not a substitute for either of the other two: `NEXT_PUBLIC_API_URL` is the browser-visible relative base path and `BACKEND_INTERNAL_URL` is used only by the Next.js server.
+
+The single-file K8s manifest and the default Helm `frontend` workload do not inject `BACKEND_INTERNAL_URL`, so SSR falls back to the code default `http://localhost:8000`; set it to `http://api:8000` explicitly when you rely on server-side fetching.
 
 ## Data Dependencies
 
@@ -34,13 +39,13 @@ Configuration has three layers: environment variables control startup-level conf
 | `DATABASE_URL` | Auto-built | Takes precedence over the individual fields when set |
 | `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis connection |
 | `REDIS_PASSWORD` | Empty | Recommended in production |
-
-The Celery broker and result backend are derived from `REDIS_*` (broker `redis://…/0`, backend `redis://…/1`); there are no separate `REDIS_URL`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` variables.
 | `QDRANT_URL` | `http://qdrant:6333` | Vector store address |
 | `QDRANT_API_KEY` | Empty | Recommended in production |
 | `VECTOR_BACKEND` | `qdrant` | Vector backend |
 | `QDRANT_COLLECTION_PREFIX` | `kb_dim` | Collection name prefix |
 | `QDRANT_DISTANCE` | `Cosine` | Distance function |
+
+The Celery broker and result backend are derived from `REDIS_*` (broker `redis://…/0`, backend `redis://…/1`); there are no separate `REDIS_URL`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` variables.
 
 ## Internal Gateway and Sandbox
 
@@ -52,10 +57,10 @@ The Celery broker and result backend are derived from `REDIS_*` (broker `redis:/
 | `UPLOAD_STORAGE_MODE` | `local` | `local`/`remote`; Compose/K8s Worker and Sandbox Worker use `remote` without mounting the uploads volume |
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox artifact upload address |
 | `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | Empty | Can replace the default internal signing |
-| `SANDBOX_RUNTIME_ENABLED` | `true` | Enable the sandbox |
-| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | Fall back to the legacy code execution path when the sandbox runtime is unavailable |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | Compose `true` | Enable filesystem isolation |
-| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | Compose `/usr/bin/bwrap` | Bubblewrap executable path |
+| `SANDBOX_RUNTIME_ENABLED` | `true` | Enable the sandbox runtime |
+| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | Fall back to the in-process legacy runner when the sandbox runtime task fails; set to `false` to fail closed |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | code `false`; image/Compose/K8s `true` | Run executable payloads inside a Bubblewrap mount namespace |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | code `bwrap`; image/Compose/K8s `/usr/bin/bwrap` | Bubblewrap executable name or absolute path |
 | `SANDBOX_WORKER_CONCURRENCY` | `1` | Number of concurrent sandbox worker slots |
 | `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | Host-side root for job and session directories |
 | `SANDBOX_MAX_DISK_MB` | `8192` | Maximum sandbox disk |

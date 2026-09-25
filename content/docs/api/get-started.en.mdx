@@ -4,33 +4,100 @@ description: Create a least-privilege API Key and send your first Agent request
 icon: Rocket
 ---
 
+This page gets you to a real call as fast as possible: create an API Key bound to one Agent, then receive the model's reply over SSE.
+
 ## Prerequisites
 
-You need a deployed Clouisle API URL, a published Agent, and an API Key available to that Agent. API Keys default to `1000` requests per minute; leaving the expiration empty means the key never expires; the full key is shown only once.
+- A deployed Clouisle URL; the API base path is `https://<your-domain>/api/v1`
+- A **team** and an Agent created inside it (every Agent belongs to a team)
+- The Agent's **Agent ID** (UUID), visible in the Agent detail URL `/app/apps/<agent_id>`
+- A credential: an **API Key** (recommended for server-side integrations) or a **JWT** (a user session)
+
+<Callout type="info">
+  Both credentials call the same chat endpoint; only the source of authority differs. An API Key inherits the identity of the **user who created it** and is constrained by its `agent_ids` / `workflow_ids` bindings, while a JWT uses the current user's team visibility. Both travel as `Authorization: Bearer <credential>`.
+</Callout>
 
 ## Create an API Key
 
-1. Navigate to **API Keys** > **Create Key**.
-2. Set the name, `chat` scope, optional expiration, and rate limit.
-3. Optionally bind only the target Agent; an empty binding list means access to all published Agents.
-4. Copy the full key immediately after creation and write it to a local environment variable:
+1. Sign in as the user the key should act on behalf of, then go to **API Keys** > **Create Key**.
+2. Enter a name and, optionally, an expiry (leave it empty for a key that never expires).
+3. Select the target Agent under the Agent binding; an **empty binding means no restriction**, so the key reaches every Agent that the creating user can reach.
+4. Copy the full key immediately and store it in an environment variable. The full key is `clou_` plus 64 hex characters (**69** characters total) and appears **only** in the create response.
 
 ```bash
 export CLOUISLE_API_KEY='clou_replace_me'
 export CLOUISLE_API_BASE='https://your-clouisle.example.com/api/v1'
+export AGENT_ID='0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e'
+```
+
+<Callout type="warn">
+  `scopes` and `rate_limit` on a key are stored but **not enforced** by the current version. What actually applies is: is the key active, has it expired, is its owning user enabled, and does the Agent/Workflow binding match. Implement least privilege with **resource bindings**; see the [API Keys API](./api-keys).
+</Callout>
+
+No JWT yet? Exchange a password for a session token as described in the [Authentication & Login API](./auth):
+
+```bash
+curl -X POST "$CLOUISLE_API_BASE/login/access-token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=you@example.com&password=YourPassword"
 ```
 
 ## Send Your First Request
 
+Streaming chat endpoint (recommended — you can render tokens incrementally):
+
 ```bash
-curl -N "$CLOUISLE_API_BASE/agents/<agent_id>/chat/stream" \
+curl -N "$CLOUISLE_API_BASE/agents/$AGENT_ID/chat/stream" \
   -H "Authorization: Bearer $CLOUISLE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"message":"Hello, please introduce your responsibilities","conversation_id":null,"variables":{}}'
 ```
 
-The response is `text/event-stream`. Read `message_start` to get the `conversation_id`, then pass that ID back in subsequent messages to maintain context.
+For the non-streaming variant use `/agents/$AGENT_ID/chat`, which returns plain JSON (`data.conversation_id` plus `data.message.content`).
+
+Request body fields (`message` is capped at 32000 characters, and either `message` or an attachment must be present):
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `message` | string | Yes unless an attachment is sent | User message; may be an empty string when only attachments are sent |
+| `conversation_id` | string (UUID) \| null | No | Pass an existing conversation ID to keep context |
+| `variables` | object | No | Agent variable values |
+| `file_urls` | array | No | File metadata returned by the upload endpoints; see the [File Upload API](./file-uploads) |
+| `images` | array | No | Images for vision input |
+
+## Read the Streaming Response
+
+The response is `text/event-stream`, pushed event by event:
+
+1. `message_start` — carries `conversation_id` and `message_id`; keep the conversation ID.
+2. `content_delta` — text increments (reasoning models also emit `reasoning_delta`, and tool use emits `tool_call` / `tool_result`).
+3. `message_end` — end of the turn, including token usage and elapsed time.
+
+Pass `conversation_id` back on the next request to maintain context. The full event list is in [Streaming Events](./streaming).
 
 ## Acceptance
 
-You receive `content_delta` and `message_end`, and `message_end` includes Token usage and elapsed time. If `6202` is returned, the Agent is not published yet; if `3000` is returned, check the API Key scope and resource bindings.
+- You receive `message_start`, several `content_delta` events, and a `message_end` carrying usage statistics.
+- A second request reusing the returned `conversation_id` can reference the earlier exchange.
+
+## Common Failures
+
+| HTTP | Code | Cause and fix |
+| --- | --- | --- |
+| `401` | `2001` | Key invalid, deleted, or deactivated; check that you copied all 69 characters |
+| `401` | `2002` | Key expired — create a new one |
+| `401` | `2004` | The key's owning user is deactivated or pending approval |
+| `403` | `3000` | The key has an Agent binding that excludes this Agent; add it to the binding or use an unbound key |
+| `404` | `6200` | Agent ID does not exist or is outside your visibility |
+| `403` | `6201` | Authenticated but not allowed to access this Agent |
+| `400` | `6104` | The team is not authorized for the model this Agent uses; add a team model authorization |
+| `429` | `6103` | Team model quota exceeded; back off or wait for the quota window to reset |
+
+The complete code list and retry guidance are in [API Errors and Retries](./errors).
+
+## Next Steps
+
+- [Agent Chat API](./chat) — multi-turn chats, attachments, variables, regeneration, and message versions.
+- [Workflow Execution API](./workflow) — run workflows, trigger via Webhook, and subscribe to node events.
+- [File Upload API](./file-uploads) — upload first, then pass `file_urls` to the chat endpoint.
+- [Teams API](./teams) and [Team Models API](./team-models) — team and model authorization, which decides the models an Agent can actually use.

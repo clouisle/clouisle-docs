@@ -13,7 +13,7 @@ Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 
 | `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
 | `api` | clouisle-backend | FastAPI API | `8000` |
 | `worker` | clouisle-backend | Celery `default`、`agent`、`knowledge`、`workflow` 队列 | 无 |
-| `sandbox-worker` | sandbox-worker | Celery `sandbox` 队列与产物上传 | 无 |
+| `sandbox-worker` | clouisle-sandbox-worker | Celery `sandbox` 队列与产物上传 | 无 |
 | `beat` | clouisle-backend | Celery Beat 调度器，必须单副本 | 无 |
 | `db` | PostgreSQL 17 + pg_search | 业务、全文检索和审计数据 | `5432` |
 | `redis` | Redis 7 | 队列、缓存、会话 | `6379` |
@@ -45,6 +45,13 @@ Beat 投递的周期性任务：`sweep-lost-agent-runs` 每 2 分钟一次到 `d
 
 外部反向代理或 Ingress 负责路由：`/api/*` 到 `api:8000`，其余 `/` 到 `frontend:3000`。前端镜像不包含 Nginx；`deploy/nginx/default.conf` 只是可选的外部示例。
 
+两条链路要分开理解：
+
+- **浏览器 → API**：浏览器请求 `NEXT_PUBLIC_API_URL`（前端镜像构建期默认 `/api/v1`，即相对路径），由反向代理/Ingress 的 `/api` 前缀转发到 `api:8000`。Compose 中前端服务本身也用 Next.js rewrites 把 `/api/*` 转发到 `BACKEND_INTERNAL_URL`。
+- **Next.js 服务端 → API**：`BACKEND_INTERNAL_URL` 拼接基路径。代码默认 `http://localhost:8000`，Compose 注入 `http://api:8000`，K8s 单文件 manifest 与 Helm 默认的 `frontend` 工作负载不带任何环境变量。
+
+后端所有路由挂载在 `API_V1_STR` 之下，默认 `/api/v1`：`GET {API_V1_STR}/health`、`{API_V1_STR}/openapi.json` 都会随之改变。改动该值时，代理/Ingress 路径与前端构建期 `NEXT_PUBLIC_API_URL` 必须同步改成相同的 `/api/v1` 前缀，否则浏览器与服务端取数都会打到不存在的路径。
+
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/self-host-architecture.svg" alt="Clouisle 部署架构" />
   <figcaption>Clouisle 部署架构</figcaption>
@@ -56,4 +63,15 @@ Compose 默认卷：`postgres_data`、`redis_data`、`qdrant_data` 和 `uploads_
 
 ## 内部地址
 
-容器内使用服务名，不要使用 `localhost`：`POSTGRES_SERVER=db`、`REDIS_HOST=redis`、`QDRANT_URL=http://qdrant:6333`、`API_BASE_URL=http://api:8000`。Sandbox Worker 产物上传地址应保持 `http://api:8000`。
+容器内使用服务名，不要使用 `localhost`：
+
+| 变量 | Compose / K8s 取值 | 用途 |
+| --- | --- | --- |
+| `POSTGRES_SERVER` | `db` / `postgres` | 数据库 |
+| `REDIS_HOST` | `redis` | 缓存与 Celery broker/backend |
+| `QDRANT_URL` | `http://qdrant:6333` | 向量库 |
+| `API_BASE_URL` | `http://api:8000` | 服务端内部 API 地址 |
+| `API_INTERNAL_BASE_URL` | `http://api:8000` | Worker 经此访问上传网关（`UPLOAD_STORAGE_MODE=remote`） |
+| `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | `http://api:8000` | Sandbox Worker 产物上传 |
+
+K8s 中 `FRONTEND_URL` 设为 `http://frontend:3000`（SSO 回调基址），并由 `clouisle-secret` 提供 `INTERNAL_API_TOKEN`，Pod 内通过 `INTERNAL_API_TOKEN_FILE=/var/run/secrets/clouisle/internal-api-token` 读取。Worker 与 Sandbox Worker 不挂 uploads 卷，而是走这条内部网关。

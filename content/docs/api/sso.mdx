@@ -1,0 +1,342 @@
+---
+title: SSO API
+description: 单点登录流程、连接解绑与管理员供应商配置
+icon: ShieldCheck
+---
+
+SSO API 覆盖三件事：登录页的**供应商发现**、基于浏览器重定向的**单点登录流程**（OAuth2 / OIDC、SAML2、CAS），以及用户**解绑自己的 SSO 身份**。供应商的增删改查属于管理端，挂在 `/api/v1/admin/sso`。
+
+<Callout type="info" title="前置条件与认证">
+  `GET /api/v1/sso/providers`、`GET /api/v1/sso/login/{provider_name}`、`GET /api/v1/sso/callback/{provider_name}` 是**公开端点**，不需要认证，也返回重定向或 JSON 而非统一信封。
+
+  `DELETE /api/v1/sso/connections/{connection_id}` 需要登录用户（只能解绑自己的连接）。
+
+  管理端点需要权限码：`GET /api/v1/admin/sso/providers` 需要 `admin:sso:read`；创建、更新、删除、测试供应商以及解绑任意用户的连接需要 `admin:sso:update`。
+
+  供应商配置（`config`、`attribute_mapping`、`allow_signup`、`require_approval`、`default_role_id`）见 [SSO 配置](/usage/guides/administration/sso)。
+</Callout>
+
+<Callout type="warn">
+  `login` 与 `callback` 返回 **HTTP 307 重定向**，不是 `{code, data, msg}` 信封。前端在 `/sso-callback` 路由上接收 `token` 或 `error` 查询参数。若站点设置 `sso_enabled` 为 `false`，`GET /sso/providers` 返回空数组 `[]`，即使已配置供应商也不会暴露。
+</Callout>
+
+## 端点总览
+
+| 方法 | 路径 | 用途 | 认证 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/sso/providers` | 列出已启用的供应商（登录页使用） | 公开 |
+| GET | `/api/v1/sso/login/{provider_name}` | 发起 SSO 登录，重定向到身份提供商 | 公开 |
+| GET | `/api/v1/sso/callback/{provider_name}` | 身份提供商回调，处理登录并跳回前端 | 公开 |
+| DELETE | `/api/v1/sso/connections/{connection_id}` | 解绑当前用户的某个 SSO 连接 | 登录用户 |
+| GET | `/api/v1/admin/sso/providers` | 列出全部供应商（含禁用） | `admin:sso:read` |
+| POST | `/api/v1/admin/sso/providers` | 创建供应商 | `admin:sso:update` |
+| PUT | `/api/v1/admin/sso/providers/{provider_id}` | 更新供应商 | `admin:sso:update` |
+| DELETE | `/api/v1/admin/sso/providers/{provider_id}` | 删除供应商 | `admin:sso:update` |
+| POST | `/api/v1/admin/sso/providers/{provider_id}/test` | 测试供应商配置能否生成授权地址 | `admin:sso:update` |
+| DELETE | `/api/v1/admin/sso/connections/{connection_id}` | 解绑任意用户的 SSO 连接 | `admin:sso:update` |
+
+---
+
+## 1. 列出已启用的供应商
+
+```
+GET /api/v1/sso/providers
+```
+
+登录页用它渲染 SSO 按钮。只返回 `is_enabled=true` 的供应商，且不包含任何敏感配置。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "github",
+      "display_name": "GitHub",
+      "icon_url": "https://cdn.example.com/github.svg",
+      "button_text": "Continue with GitHub",
+      "protocol": "oauth2"
+    }
+  ],
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string (UUID) | 供应商 ID |
+| `name` | string | 供应商唯一标识（登录 URL 中使用） |
+| `display_name` | string | 展示名称 |
+| `icon_url` | string \| null | 图标地址 |
+| `button_text` | string \| null | 按钮文案 |
+| `protocol` | string | `oauth2`、`oidc`、`saml2` 或 `cas` |
+
+---
+
+## 2. 发起 SSO 登录
+
+```
+GET /api/v1/sso/login/{provider_name}
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `redirect` | string | 否 | 登录成功后要落到的**同源相对路径**（如 `/dashboard`）。非相对路径、含协议/主机、以 `//` 开头或含反斜杠的值一律被忽略并回退到 `/dashboard` |
+
+**行为：**
+
+1. 校验供应商存在且已启用，否则直接重定向到前端 `{frontend}/sso-callback?error=sso_provider_not_found`。
+2. 生成随机 `state`（即 `session_id`，`secrets.token_urlsafe(32)`），创建一条 10 分钟后过期的 SSO 会话，保存 PKCE `code_verifier` / `nonce`（OAuth2、OIDC）或 RelayState。
+3. 回调地址由**后端**来源拼接：`{backend}/api/v1/sso/callback/{provider_name}`。
+4. 返回 `307 Temporary Redirect` 到身份提供商的授权地址。
+
+**失败重定向：**
+
+```
+{frontend}/sso-callback?error=<error_code>&redirect=<path>
+```
+
+| `error` | 含义 |
+| --- | --- |
+| `sso_provider_not_found` | 供应商不存在或未启用 |
+| `sso_login_failed` | 供应商初始化失败（协议不支持、配置错误等） |
+
+<Callout type="info" title="关于 state">
+  对 OAuth2 / OIDC，`state` 就是服务端生成的 SSO 会话 ID，回调时用它取回 PKCE `code_verifier` / `nonce`；SAML2 通过 `RelayState`、CAS 通过 `state` 或 `ticket` 传递同一个会话 ID。因此回调链接中的 `state` **不是**客户端自定义值，不要自行拼接或复用。
+</Callout>
+
+---
+
+## 3. 身份提供商回调
+
+```
+GET /api/v1/sso/callback/{provider_name}
+```
+
+身份提供商在用户完成认证后把浏览器重定向到这里。参数随协议不同：
+
+| 协议 | 回调参数 | 会话标识来源 |
+| --- | --- | --- |
+| `oauth2` / `oidc` | `code`、`state` | `state` |
+| `cas` | `ticket`（可带 `state`） | `state` 或 `ticket` |
+| `saml2` | 表单 POST 的 `SAMLResponse`、`RelayState` | `RelayState` |
+
+**成功** → 浏览器重定向到：
+
+```
+{frontend}/sso-callback?token=<access_token>&redirect=<path>
+```
+
+`token` 是标准 JWT 访问令牌（有效期由站点设置 `session_timeout_days` 决定，默认 7 天）。若开启了 `single_session`，服务端会登记该会话使旧令牌失效。SSO 会话在成功后立即删除。
+
+**失败** → 重定向到 `{frontend}/sso-callback?error=<error_code>&redirect=<path>`。常见 `error`：
+
+| `error` | 含义 |
+| --- | --- |
+| `sso_provider_not_found` | 供应商不存在 |
+| `sso_session_expired` | 会话缺失或已超过 10 分钟 |
+| `sso_login_failed` | 换取用户信息失败、`provider_user_id` 缺失 |
+| `pending_approval` | 新用户需要管理员审批才能登录 |
+| `inactive` | 账号已停用 |
+
+<Callout type="warn">
+  账号被停用或待审批时，SSO 流程**不签发令牌**，只把 `error` 带回前端；请据此展示提示，而不是把用户当作已登录。
+</Callout>
+
+---
+
+## 4. 解绑自己的 SSO 连接
+
+```
+DELETE /api/v1/sso/connections/{connection_id}
+```
+
+### 路径参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `connection_id` | string (UUID) | 是 | 用户 SSO 连接 ID |
+
+只能操作**属于当前用户**的连接。若账号没有设置密码，且这是最后一条 SSO 连接，删除会被拒绝（否则账号将无法登录）。
+
+当前用户的连接列表可从 `GET /api/v1/users/me` 的 `sso_connections` 字段读取，见 [用户 API](./users)。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "success"
+}
+```
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `4000` | `sso_connection_not_found`：连接不存在或不属于当前用户 |
+| `400` | `1004` | `cannot_disconnect_only_auth_method`：无密码且这是唯一登录方式 |
+
+---
+
+## 5. 管理端：供应商配置
+
+以下端点挂载在 `/api/v1/admin/sso`。
+
+### 5.1 列出全部供应商
+
+```
+GET /api/v1/admin/sso/providers
+```
+
+需要 `admin:sso:read`。返回**全部**供应商（含 `is_enabled=false`）及其完整配置。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string (UUID) | 供应商 ID |
+| `name` | string | 唯一标识，须匹配 `^[a-z][a-z0-9_-]*$` |
+| `protocol` | string | `oauth2`、`oidc`、`saml2` 或 `cas` |
+| `display_name` | string | 展示名称，最长 100 字符 |
+| `icon_url` | string \| null | 图标地址，必须 `http(s)://` 开头 |
+| `button_text` | string \| null | 按钮文案，最长 50 字符 |
+| `config` | object | 协议相关配置（见下） |
+| `attribute_mapping` | object | 供应商属性到用户字段的映射，如 `{"email": "email"}` |
+| `is_enabled` | boolean | 是否启用 |
+| `allow_signup` | boolean | 是否允许自动创建用户 |
+| `require_approval` | boolean | 新用户是否需要管理员审批 |
+| `default_role_id` | string (UUID) \| null | 新 SSO 用户的默认角色 |
+| `created_at` / `updated_at` | string (ISO 8601) | 创建与更新时间 |
+
+`config` 按协议不同：
+
+| 协议 | 典型字段 |
+| --- | --- |
+| `oauth2` / `oidc` | `client_id`、`client_secret`、`issuer_url`、`authorization_url`、`token_url`、`userinfo_url`、`scopes` |
+| `saml2` | `sp_entity_id`、`idp_entity_id`、`sso_url`、`slo_url`、`x509_cert`、`acs_url` |
+| `cas` | `server_url`、`service_url`、`version` |
+
+### 5.2 创建供应商
+
+```
+POST /api/v1/admin/sso/providers
+```
+
+需要 `admin:sso:update`。请求体字段与上表一致（`name`、`protocol`、`display_name`、`config` 必填，`attribute_mapping` 默认 `{}`，`is_enabled` 默认 `true`，`allow_signup` 默认 `true`，`require_approval` 默认 `false`）。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/sso/providers" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "github",
+    "protocol": "oauth2",
+    "display_name": "GitHub",
+    "config": {"client_id": "...", "client_secret": "...", "authorization_url": "https://github.com/login/oauth/authorize", "token_url": "https://github.com/login/oauth/access_token", "userinfo_url": "https://api.github.com/user", "scopes": ["read:user", "user:email"]},
+    "attribute_mapping": {"email": "email", "username": "login"},
+    "is_enabled": true,
+    "allow_signup": true,
+    "require_approval": false
+  }'
+```
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `6305` | `sso_provider_name_exists`：标识已被占用 |
+| `422` | `1001` | `name` 不符合命名规则，或 `icon_url` 不是 `http(s)` 地址 |
+
+### 5.3 更新供应商
+
+```
+PUT /api/v1/admin/sso/providers/{provider_id}
+```
+
+需要 `admin:sso:update`。所有字段可选，仅更新请求体中出现的字段；`name` 冲突同样返回 `6305`。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `6300` | `sso_provider_not_found` |
+| `400` | `6305` | `sso_provider_name_exists` |
+
+### 5.4 删除供应商
+
+```
+DELETE /api/v1/admin/sso/providers/{provider_id}
+```
+
+需要 `admin:sso:update`。删除供应商会同时删除其配置。
+
+**错误：** `400` + `6300`（`sso_provider_not_found`）。
+
+### 5.5 测试供应商
+
+```
+POST /api/v1/admin/sso/providers/{provider_id}/test
+```
+
+需要 `admin:sso:update`。用测试用的 `state` 与回调地址尝试生成授权 URL，验证配置是否可用。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "status": "success",
+    "message": "SSO provider configuration is valid",
+    "authorization_url": "https://github.com/login/oauth/authorize?client_id=..."
+  },
+  "msg": "success"
+}
+```
+
+配置无效时仍返回 `200 OK`，但 `data.status` 为 `"error"`，`message` 为通用错误文案，且不含 `authorization_url`。
+
+<Callout type="warn">
+  测试结果以 `data.status` 表达，**不通过 HTTP 状态码传递**：`code: 0` + `status: "error"` 表示配置有问题。仅在供应商不存在时返回 `400` + `6300`。
+</Callout>
+
+### 5.6 解绑任意用户的连接
+
+```
+DELETE /api/v1/admin/sso/connections/{connection_id}
+```
+
+需要 `admin:sso:update`。语义与用户自助解绑一致，但可操作任意用户的连接；同样受“无密码且为唯一登录方式”的保护。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `4000` | `sso_connection_not_found` |
+| `400` | `1004` | `cannot_disconnect_only_auth_method` |
+
+---
+
+## 错误处理
+
+| HTTP | 错误码 | 触发场景 |
+| --- | --- | --- |
+| `403` | `3000` | 缺少 `admin:sso:read` / `admin:sso:update` 权限 |
+| `400` | `1004` | 解绑后账号将无可用登录方式 |
+| `400` | `6300` | 供应商不存在（管理端点） |
+| `400` | `6305` | 供应商标识重复 |
+| `400` | `4000` | SSO 连接不存在或不属于调用者 |
+| `422` | `1001` | 请求校验失败（供应商命名、`icon_url` 格式等） |
+
+登录/回调流程不使用统一信封，失败通过前端 `/sso-callback?error=...` 的 `error` 参数返回：`sso_provider_not_found`、`sso_session_expired`、`sso_login_failed`、`pending_approval`、`inactive`。
+
+## 相关文档
+
+- [认证与登录 API](./auth) — 密码登录、JWT 令牌与 TOTP 两步验证
+- [SSO 配置](/usage/guides/administration/sso) — 各协议的配置项与属性映射
+- [用户 API](./users) — 用户资料的 `sso_connections` 字段
+- [错误处理](./errors) — 按 HTTP 状态与业务错误码恢复

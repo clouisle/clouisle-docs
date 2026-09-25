@@ -4,23 +4,72 @@ description: Configure the available nodes in Clouisle workflows by category
 icon: Workflow
 ---
 
-The workflow editor currently registers the following nodes. The exact input and output fields of a node are determined by the editor configuration and the [node reference](/reference/workflow-nodes).
+The workflow editor registers the nodes below, grouped by the four palette categories. The exact input/output fields and configuration options for each node are determined by the editor configuration and the [node reference](/reference/workflow-nodes).
 
 | Category | Nodes |
 | --- | --- |
-| Start and Output | User Input, Trigger, Output, Note |
-| Models and Apps | LLM, Agent, Media Generation, Question Classification, Parameter Extraction |
-| Knowledge and Extensions | Knowledge Base Retrieval, Tools, MCP/Custom Capabilities, Sub-workflow |
-| Logic | Conditional Branch, Iteration, Loop and its start/exit nodes |
-| Transformation | Code Execution, Template Transformation, Variable Assignment, Variable Aggregation, File to URL |
+| Model | LLM, Media Generation |
+| Logic | Condition, Question Classifier, Decision, Iteration, Loop, Pause |
+| Transform | Code, Template, File to URL, Variable Aggregator, Variable Assignment, Parameter Extractor |
+| Extension | Sub-workflow, Agent, Tool, Knowledge Retrieval, Answer |
+| Entry and canvas helpers | Start (User Input / Trigger, chosen at creation), Note (a static annotation sticker that never executes) |
+
+**Types that are not in the palette**: `http_request` and `document_extractor` have executors but no node component, so they only appear in definitions submitted through the API; `iteration_exit` / `loop_exit` are end markers inside an Iteration/Loop container with no standalone executor and must not be connected as independent nodes.
 
 ## Principles for Choosing Nodes
 
-- Use **LLM** when chat model reasoning is needed; use **Agent** when you need to reuse complete Agent behavior.
+- Use **LLM** when chat model reasoning is needed; use **Decision** when you must pick one of several options or ordered levels and know how confident the model is; use **Agent** when you need to reuse complete Agent behavior.
 - Use **Knowledge Base Retrieval** when you need to answer based on a knowledge base, then map the results to an LLM or output.
 - Use **Tools** when you need to call existing HTTP/MCP/code capabilities; do not duplicate stored credentials in workflows.
 - Use **Iteration** to process each array item; use **Loop** to repeat until a condition is met.
 - Use **Sub-workflow** to isolate reusable flows, configuring input/output mappings and failure strategies.
+
+## Decision Node
+
+The Decision node is the only node that returns **probabilities**: it hands a state to a decision model, which answers a single question and returns the probability distribution over options/levels plus a confidence; the node then takes the matching branch. Nothing is generated, so the route never has to be parsed out of model text and cannot drift because the model added a sentence. Full configuration steps and a worked example: [Orchestrate a Workflow → Decision Node](./orchestrate.mdx#decision-node).
+
+### How it differs from LLM and Question Classifier
+
+| Dimension | LLM | Question Classifier | Decision |
+| --- | --- | --- | --- |
+| Underlying model | Chat model | Chat model | Decision model (non-generative) |
+| Output | Generated text | JSON requested in the prompt, with `category` parsed out by regex | Structured result: option/level + probability distribution + confidence |
+| Routing basis | Text content | The parsed category | The highest-probability option/level |
+| Branch handles | none | one per category | one per option/level, plus a fallback branch |
+| Uncertainty handling | none | only the `confidence` field the model happens to report | confidence threshold + fallback branch |
+| Typical use | Generation, summarization, rewriting | Intent routing | Disposition decisions, priority classification, binary gating |
+
+Rule of thumb: when "which path" depends on natural-language meaning and you also need to know how sure the model is, use a Decision node; for pure text generation use LLM; when there is a small fixed set of categories and probabilities do not matter, the Question Classifier is lighter.
+
+### The three question types
+
+| Question type | UI Label | Option/level count | Branch handles | Confidence | Use when |
+| --- | --- | --- | --- | --- | --- |
+| `choice` | Choose an option | 1–255 unique options | one per option, plus the fallback branch | yes | Mutually exclusive dispositions (refund / technical / billing / other) |
+| `score` | Score against ordered levels | 2–10 **ordered** levels | one per level, plus the fallback branch | yes | Levels are inherently ordered (low/medium/high, P0–P3) and you also need a numeric score |
+| `noul` | Yes / No probability | fixed two | `yes`, `no`, plus the fallback branch | no | A single binary call: probability ≥ `0.5` routes `yes`, otherwise `no` |
+
+`noul` returns no confidence, so the confidence threshold has no effect on it; switch to `choice` or `score` when you want "route to a human when unsure".
+
+### Branch handles, fallback, and threshold
+
+- The text of an option (`choice`) or level (`score`) is the name of that output handle on the canvas; the fallback handle is `default` unless you rename it in **Fallback branch**.
+- Editing option text remaps existing connections by position as long as the count is unchanged. Leftover connections after a count change are reported by the checklist as an outdated output handle and must be reconnected.
+- **Confidence threshold** (`0`–`1`, may be left empty) reroutes the flow to the fallback branch only when the returned confidence is **strictly below** it; a confidence equal to the threshold still takes the model's branch. The threshold affects routing only: `answer` is always the option/level the model picked, while `selected_handle` is the branch actually taken.
+- With no threshold set, only "no branch handle resolved" uses the fallback. A fallback branch with no downstream nodes ends the flow at this node.
+- A decision node is retried up to 2 times by default (1 second initial delay, exponential backoff with jitter).
+
+### Outputs and failures
+
+Output variables: `answer` (the selected option/level, or `yes`/`no`), `selected_handle` (the branch actually taken), `usage` (token usage), plus `choice` + `confidence` + `probabilities`, `score` + `confidence` + `probabilities`, or `noul` depending on the type.
+
+When it fails: missing configuration or invalid options fail as `validation_error` before the model is called; an answer whose type, option set, or probability set does not match the configuration fails as `decision_result_missing`; an unauthorized or disabled model, an endpoint blocked by the allowlist, a timeout (default `60` seconds), or exhausted quota surfaces as the corresponding provider error.
+
+### Debugging a decision branch
+
+- The checklist checks each item: model not selected, empty state, empty instructions, too few or too many options/levels, empty or duplicate options, and connections using an outdated handle.
+- In the run trace, use `selected_handle` to see which branch ran, `confidence` to see whether the threshold rerouted it, and `probabilities` to decide between adjusting the threshold and rewriting the instructions.
+- A decision node is one call with one result and no intermediate steps, so there are no breakpoints or single-step debugging — you debug it by running the workflow.
 
 ## Node-level Failures
 

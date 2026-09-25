@@ -1,0 +1,360 @@
+---
+title: Notifications API
+description: Read the in-app notification inbox and let admins publish or delete notifications
+icon: Bell
+---
+
+The Notifications API has two groups: the **in-app inbox** for every signed-in user (`/api/v1/notifications` — list visible notifications, unread count, mark as read) and the `/api/v1/admin/notifications` routes used by administrators to **publish, browse, and delete** notifications. A notification's `scope` (`global` / `team` / `user`) decides who can see it, and read state is **per user**.
+
+## Endpoints
+
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET | `/api/v1/notifications` | List notifications visible to the caller | Signed-in user |
+| GET | `/api/v1/notifications/unread-count` | Count the caller's unread notifications | Signed-in user |
+| POST | `/api/v1/notifications/read` | Mark specific notifications, or all visible ones, as read | Signed-in user |
+| GET | `/api/v1/admin/notifications` | Browse notifications across scopes | Global admin, or team admin (must name a team) |
+| POST | `/api/v1/admin/notifications` | Create and dispatch a notification | `admin:notification:create` |
+| DELETE | `/api/v1/admin/notifications/{notification_id}` | Delete a notification | `admin:notification:delete` |
+
+Every endpoint requires `Authorization: Bearer <token>`.
+
+<Callout type="info" title="Prerequisites">
+  The inbox endpoints only require a session (`get_current_active_user`); there is no permission code.
+
+  Among the admin endpoints, `GET` performs no permission-code check but authorizes by **scope**: the caller must have global admin access (`is_superuser`, or any role granting `admin:dashboard:access` / `*`), otherwise they must pass a `team_id` they administer as OWNER/ADMIN. `POST` requires `admin:notification:create` and `DELETE` requires `admin:notification:delete`.
+
+  External delivery channels (email, DingTalk, WeCom, Feishu, webhook, Slack) must be enabled and configured in the [Settings API](./settings) first, otherwise the create request is rejected.
+</Callout>
+
+## Visibility
+
+The caller can see a notification if and only if at least one of these holds:
+
+- `scope` is `global`;
+- `scope` is `user` and `user_id` is the caller;
+- `scope` is `team` and `team_id` is one of the caller's teams.
+
+Notifications whose `expires_at` is in the past are excluded from the **list and the unread count**; only `include_expired=true` (admin route) brings them back, for troubleshooting.
+
+## Notification object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Notification ID |
+| `scope` | string | `global`, `team`, or `user` |
+| `team_id` | string (UUID) \| null | Target team for `team` scope |
+| `user_id` | string (UUID) \| null | Target user for `user` scope |
+| `type` | string | Notification type key, max 100 characters (automatic notifications use names such as `team.member_added`, `workflow.run_failed`, `security.account_locked`) |
+| `source` | string | `system`, `user`, or `biz` |
+| `title` | string | Title, max 255 characters |
+| `content` | string | Body text |
+| `level` | string | `low`, `medium`, or `high` |
+| `data` | object \| null | Arbitrary payload |
+| `link_url` | string \| null | In-app link to open, max 500 characters |
+| `status` | string | Always `active` |
+| `expires_at` | string (ISO 8601) \| null | Expiry timestamp |
+| `created_at` | string (ISO 8601) | Creation timestamp |
+| `updated_at` | string (ISO 8601) | Last update timestamp |
+| `is_read` | boolean | Whether the caller has read it |
+| `read_at` | string (ISO 8601) \| null | When the caller read it |
+| `deliveries` | array | Per-channel delivery records |
+
+### Delivery record (`deliveries[]`)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `channel` | string | `email`, `dingtalk`, `wechat`, `feishu`, `webhook`, or `slack` |
+| `status` | string | `pending`, `sending`, `success`, or `failed` |
+| `error_message` | string \| null | Failure reason (localized) |
+| `retry_count` | integer | Retry count, default `0` |
+| `sent_at` | string (ISO 8601) \| null | Successful send time |
+| `created_at` / `updated_at` | string (ISO 8601) | Record creation and update timestamps |
+
+<Callout type="info">
+  The user-facing list does not populate delivery records — `deliveries` is always `[]` there; only the admin list and the create response include `deliveries`. `is_read` / `read_at` are the opposite: they appear only on the user side, and the admin list always reports `false` / `null`.
+</Callout>
+
+---
+
+## List notifications
+
+```
+GET /api/v1/notifications
+```
+
+Returns the notifications visible to the caller, ordered by `created_at` descending.
+
+### Query parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `scope` | string | No | - | Filter by scope: `global`, `team`, `user` |
+| `type` | string | No | - | Filter by notification type key |
+| `level` | string | No | - | Filter by level: `low`, `medium`, `high` |
+| `search` | string | No | - | Case-insensitive contains match on `title`, `content`, `type` |
+| `unread_only` | boolean | No | `false` | Return only unread notifications |
+| `created_from` | string | No | - | Lower bound on `created_at` |
+| `created_to` | string | No | - | Upper bound on `created_at` |
+| `page` | integer | No | 1 | Page number, minimum 1 |
+| `page_size` | integer | No | 20 | Items per page, 1–100 |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/notifications?unread_only=true&page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        "scope": "team",
+        "team_id": "550e8400-e29b-41d4-a716-446655440000",
+        "user_id": null,
+        "type": "agent.published",
+        "source": "system",
+        "title": "Agent published",
+        "content": "Support Assistant is now available to the team.",
+        "level": "medium",
+        "data": {"agent_id": "1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d"},
+        "link_url": "/app/apps/1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d",
+        "status": "active",
+        "expires_at": null,
+        "created_at": "2026-09-26T08:15:00Z",
+        "updated_at": "2026-09-26T08:15:00Z",
+        "is_read": false,
+        "read_at": null,
+        "deliveries": []
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+The pagination envelope is `data.items` / `data.total` / `data.page` / `data.page_size`.
+
+---
+
+## Get unread count
+
+```
+GET /api/v1/notifications/unread-count
+```
+
+Counts the caller's visible, unread notifications (same visibility and expiry rules).
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {"total": 3},
+  "msg": "success"
+}
+```
+
+---
+
+## Mark as read
+
+```
+POST /api/v1/notifications/read
+```
+
+Marks notifications by ID, or marks **every visible notification** as read with `mark_all`.
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `notification_ids` | array of string (UUID) | No | Notifications to mark as read |
+| `mark_all` | boolean | No | Mark every visible notification as read, default `false` |
+
+At least one of `notification_ids` or `mark_all` must be present, otherwise the request fails with `400` + `1002` (`validation_error`).
+
+```json
+{
+  "notification_ids": ["9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"],
+  "mark_all": false
+}
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {"updated": 1},
+  "msg": "Notification read status updated"
+}
+```
+
+`data.updated` is the number of **newly** created read records; already-read notifications are not counted and are not an error.
+
+<Callout type="info">
+  Marking as read uses the visibility scope with `include_expired=true`: a notification that is now expired can still be marked read if it was visible. Read records are unique per notification and user, so repeated submissions are safe.
+</Callout>
+
+---
+
+## Browse notifications (admin)
+
+```
+GET /api/v1/admin/notifications
+```
+
+### Query parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `scope` | repeatable string | No | - | Filter by one or more scopes |
+| `team_id` | string (UUID) | No | - | Filter by team |
+| `user_id` | string (UUID) | No | - | Filter by target user |
+| `type` | string | No | - | Filter by notification type key |
+| `level` | repeatable string | No | - | Filter by one or more levels |
+| `search` | string | No | - | Contains match on `title`, `content`, `type` |
+| `include_expired` | boolean | No | `false` | Include expired notifications |
+| `page` | integer | No | 1 | Page number, minimum 1 |
+| `page_size` | integer | No | 20 | Items per page, 1–100 |
+
+Returns the same `{items, total, page, page_size}` envelope as the user route, but:
+
+- `items[].is_read` is always `false` and `read_at` always `null` (read state is per user and is not aggregated here);
+- `items[].deliveries` is populated with per-channel records.
+
+**Authorization rules:**
+
+| Caller | Behaviour |
+| --- | --- |
+| Global admin | May query any scope and omit `team_id` |
+| Team admin (non-global) | **Must** pass a `team_id` they own/administer as OWNER or ADMIN; including `global` in `scope` returns `403`; omitting `team_id` returns `400` |
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `403` | `3001` | `insufficient_privileges`: a non-global admin requested `global` scope |
+| `400` | `1002` | `notification_scope_requires_team`: a non-global admin omitted `team_id` |
+| `403` | `3003` | `team_admin_required`: not an OWNER/ADMIN of that team |
+| `404` | `4004` | `team_not_found` |
+
+---
+
+## Create and dispatch a notification
+
+```
+POST /api/v1/admin/notifications
+```
+
+Requires the `admin:notification:create` permission.
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | string | Yes | `global`, `team`, or `user` |
+| `team_id` | string (UUID) | Conditional | Required when `scope=team` |
+| `user_id` | string (UUID) | Conditional | Target user when `scope=user` |
+| `user_ids` | array of string (UUID) | Conditional | Batch-target multiple users when `scope=user` |
+| `type` | string | Yes | Notification type key, 1–100 characters |
+| `source` | string | No | `system`, `user`, `biz`, default `system` |
+| `title` | string | Yes | Title, 1–255 characters |
+| `content` | string | Yes | Body text |
+| `level` | string | No | `low`, `medium`, `high`, default `medium` |
+| `data` | object | No | Arbitrary payload |
+| `link_url` | string | No | In-app link |
+| `expires_at` | string (ISO 8601) | No | Expiry timestamp |
+| `notify_channels` | array of string | No | External delivery channels; nothing is delivered by default |
+
+**Scope authorization:**
+
+| `scope` | Requirement |
+| --- | --- |
+| `global` | Superuser only, otherwise `403` + `3001` |
+| `team` | `team_id` required (else `400` + `1002`), and the caller must be an OWNER/ADMIN of that team |
+| `user` | `user_id` or `user_ids` required (else `400` + `1002`); any unknown user in `user_ids` returns `404` + `4001` |
+
+Batch mode (`user_ids`) creates one notification per user and returns only the **first** notification object (`msg` is `Notifications created successfully`).
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/notifications" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "team",
+    "team_id": "550e8400-e29b-41d4-a716-446655440000",
+    "type": "maintenance_notice",
+    "source": "system",
+    "title": "Scheduled maintenance",
+    "content": "The platform will be unavailable on Sunday 02:00-04:00 UTC.",
+    "level": "high",
+    "link_url": "/status",
+    "notify_channels": ["email", "webhook"]
+  }'
+```
+
+**200 OK:** `data` is the created notification object; `deliveries` contains the newly created delivery records (`pending`, sent asynchronously by a background task).
+
+<Callout type="warn" title="External channels must be configured first">
+  Every channel in `notify_channels` is validated for enabled state and required configuration before creation; any failure returns `400`:
+  `smtp_not_enabled` / `smtp_not_configured`, `dingtalk_not_enabled` / `dingtalk_not_configured`, `wechat_not_enabled` / `wechat_not_configured`, `feishu_not_enabled` / `feishu_not_configured`, `webhook_not_enabled` / `webhook_not_configured`, `slack_not_enabled` / `slack_not_configured`. See the [Settings API](./settings) for channel configuration.
+</Callout>
+
+---
+
+## Delete notification
+
+```
+DELETE /api/v1/admin/notifications/{notification_id}
+```
+
+Requires the `admin:notification:delete` permission. An audit record is written before deletion.
+
+**Authorization:** `global` and `user` scoped notifications can only be deleted by a global admin; `team` scoped notifications require the caller to be an OWNER/ADMIN of that team (the team comes from the notification itself, not from the request).
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {"id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"},
+  "msg": "Notification deleted successfully"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `404` | `4000` | `notification_not_found` |
+| `403` | `3001` | `insufficient_privileges`: a non-global admin deleting a `global` / `user` notification |
+| `400` | `1002` | `notification_scope_requires_team`: a `team` notification without a `team_id` |
+| `403` | `3003` | `team_admin_required` |
+
+---
+
+## Error handling
+
+| HTTP | Code | Trigger |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | Missing, invalid, or expired token |
+| `400` | `1002` | `validation_error` (`read` with no arguments), `notification_scope_requires_team`, or an unconfigured channel |
+| `403` | `3000` / `3001` | Missing permission code, or scope beyond the caller's privileges |
+| `403` | `3003` | Not an OWNER/ADMIN of the team |
+| `404` | `4001` / `4004` / `4000` | User / team / notification not found |
+| `422` | `1001` | Request validation failed: unknown `scope`/`level`, `page` < 1, `page_size` outside 1–100 |
+
+## Related
+
+- [Notification settings](/usage/guides/administration/notifications) — admin configuration and delivery channels
+- [Settings API](./settings) — enabling and testing channels (SMTP, DingTalk, WeCom, Feishu, webhook, Slack)
+- [Error Handling](./errors) — recover by HTTP status and business error code

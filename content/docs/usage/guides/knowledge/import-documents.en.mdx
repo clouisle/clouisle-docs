@@ -1,32 +1,121 @@
 ---
 title: Import Documents
-description: Upload files or URLs and track parsing, embedding, and indexing status
+description: Upload files or import from URLs and track parsing, embedding, and indexing status
 icon: Upload
 ---
 
-After opening the knowledge base details, select **Upload Documents** to upload local files, or select **Import from URL** to add webpage/YouTube URLs. Current backend document types include `pdf`, `docx`, `doc`, `txt`, `markdown`, `html`, `csv`, `xlsx`, `xls`, `json`, and `url`.
+On the knowledge base detail page, select **Upload Documents** to upload local files or **Import from URL** to add a web page or YouTube URL. Uploading only stores the file and creates a `pending` record; the document is parsed, chunked, embedded, and made searchable only after you **process** it.
 
-## Uploading and Status
+## Supported formats
 
-1. Select files; the frontend shows the upload progress.
-2. After a successful upload, the document status is **Pending**.
-3. Select **Start Processing**; **Preview Chunks** first if necessary.
-4. When processing completes, the status becomes **Completed**, and only then does the document participate in retrieval.
-5. Failed documents show an error message; you can select **Reprocess** or retry only the failed segments.
+| Kind | Extensions | Parsing |
+| --- | --- | --- |
+| PDF | `.pdf` | Document converter → Markdown text |
+| Word | `.docx`, `.doc` | Document converter → Markdown text |
+| Excel | `.xlsx`, `.xls` | Document converter → Markdown text |
+| PowerPoint | `.pptx` | Document converter → Markdown text |
+| Plain text | `.txt` | Decoded as UTF-8 |
+| Markdown | `.md`, `.markdown` | Decoded as UTF-8, chunked with Markdown structure awareness |
+| HTML | `.html`, `.htm` | Document converter → Markdown text |
+| CSV | `.csv` | Structured extraction |
+| JSON | `.json` | Structured extraction |
+| Web page | `url` | Fetched server-side |
+
+<Callout type="warn" title="Not supported">
+  Legacy `.ppt`, XML, archives (ZIP/TAR/GZ), and folder upload are not supported, and there is no OCR for scanned documents or images — a PDF that contains only images extracts to empty text and processing fails.
+</Callout>
+
+## Uploading files
+
+1. On the knowledge base detail page select **Upload Documents**.
+2. Drop files into the dialog or click to select them (multiple selection allowed).
+3. The frontend validates each file's extension and size and immediately drops the files that fail.
+4. Click **Upload**; the dialog shows upload progress.
+5. Each file becomes a document with status `pending`.
+
+Frontend validation only catches problems early — the **server validates the extension and size again**: an oversized file returns `file_too_large` and an unsupported one returns `invalid_document_type`.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-document-processing.png" alt="Document processing status" />
-  <figcaption>Document processing status</figcaption>
+  <figcaption>Processing status and error messages in the document list</figcaption>
 </figure>
 
-## Upload Limits
+## Upload limits
 
-The site's default single-file limit is `50MB`; administrators can adjust it to `1-1024MB` in **Site Settings** > **Storage**. The backend rejects files larger than the current setting. Do not treat the fixed `100MB` from older guides as the current default.
+- The single-file limit defaults to **`50MB`**, controlled by the site setting `kb_document_max_upload_size_mb`, adjustable within `1-1024MB`.
+- The upload dialog reads that site setting and shows the current value (`Maximum file size: 50MB`), so refresh the page after an administrator changes it.
+- The limit is **per file**: you can select several files at once, but each counts and is created separately.
+- There is no ZIP upload and no per-knowledge-base storage quota; watch storage at the team level.
 
-## Importing from URLs
+## Status and processing stages
 
-Enter a full `http://` or `https://` address and an optional document name. Page or YouTube content is fetched server-side and enters the same processing queue. If an external site is unreachable, its content is empty, or parsing fails, check the document error message and the API logs.
+```text
+Upload/import → extract text → clean → chunk → embed → build lexical index → completed
+```
+
+| Status | Meaning | What you can do |
+| --- | --- | --- |
+| `pending` | File stored, waiting to be processed | Preview chunks, start processing, quick process, delete |
+| `processing` | Extracting, chunking, embedding, or indexing | Wait; progress is visible |
+| `completed` | Indexed and retrievable | Hit testing, edit chunks, reprocess |
+| `error` | Processing failed, with an error message | Read the error, retry failed chunks, reprocess |
+
+There are three ways to process, pick the one you need:
+
+- **Quick Process**: processes with the knowledge base (or document) chunk settings as-is, no preview.
+- **Start Processing** (preview page): review — and if needed edit — chunks with **Preview Chunks** first, then submit exactly those chunks for embedding.
+- **Bulk processing**: select several documents in the table and use the selection toolbar to **Quick Process** the pending ones.
 
 <Callout type="warn">
-  Uploading a document and processing it are two separate stages. A document appearing in the list does not mean it has been embedded; only a document with status **Completed** is suitable for binding to an Agent.
+  Uploading and processing are two separate stages. A document appearing in the list does not mean it has been embedded; only a document with status `completed` is suitable for referencing from an Agent, and only those are ever recalled.
 </Callout>
+
+## Importing from a URL
+
+1. On the knowledge base detail page select **Import from URL**.
+2. Enter a full `http://` or `https://` address and a document name (`1-255` characters). The UI marks the name optional, but the API requires `name` and rejects an empty submission with a field error, so fill it in.
+3. Click **Import** — the target is safety-checked first (internal, loopback, and cloud metadata addresses are rejected), then a `url` document is created and the preview page opens.
+4. Generate a chunk preview on that page and submit processing: URL content is fetched server-side at that point, so **importing never starts processing automatically**.
+
+If the import fails (unreachable address, empty content, parsing error) the document keeps an error message; you can open the source URL or delete and retry.
+
+## Failures and retries
+
+| Error | Common cause | What to do |
+| --- | --- | --- |
+| `file_too_large` | Exceeds the site limit | Compress the file or ask an administrator to raise the limit |
+| `invalid_document_type` | Extension/MIME not in the supported list | Convert the format |
+| Extraction failed | Corrupted, encrypted, or image-only file | Re-export or remove the password and upload again |
+| All or some embeddings failed | Model credentials, quota, or dimension mismatch | Check model authorization and dimension, then **Retry Failed Chunks** |
+| Lexical index unavailable | PostgreSQL / `pg_search` problem | Check the database and extension |
+
+**Retry Failed Chunks** is only available for an `error` document that has failed chunks; when the source file is fine (for example the model failed transiently) it is cheaper than reprocessing because successfully embedded chunks are kept.
+
+## Importing through the API
+
+Knowledge base endpoints accept a JWT user session (`Authorization: Bearer <ACCESS_TOKEN>`), never an API key:
+
+```bash
+# Upload a file (multipart, the field name is always "file")
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/upload" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -F "file=@./handbook.pdf"
+
+# Import a URL (optional "name")
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/url" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Release Notes", "source_url": "https://example.com/releases"}'
+
+# Process the document (optionally overriding chunk settings)
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID/process" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"chunk_size": 1000, "chunk_overlap": 100, "clean_text": true}'
+```
+
+## Related pages
+
+- [Chunking and Document Processing](./chunking.mdx) — preview, process, and edit chunks
+- [Browsing Documents & Metadata](./browse-documents.mdx) — status, fields, and metadata
+- [Knowledge Base settings reference](/en/reference/knowledge-settings) — upload limit and chunking fields

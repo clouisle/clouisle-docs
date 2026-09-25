@@ -4,15 +4,16 @@ description: Sign in to Clouisle, choose a team, and complete your first Agent c
 icon: Rocket
 ---
 
-After completing this page, you will have opened a published Agent in your team workspace, sent a message, and found the matching conversation record.
+Clouisle is a multi-agent collaboration platform and workflow engine, with teams as the resource boundary. After completing this page, you will have opened a published Agent in your team workspace, sent a message, and found the matching conversation record.
 
 <Callout type="info" title="Before you begin">
   You need an accessible Clouisle site and a valid account. Creating an Agent also requires a `chat` model authorized to your team; menus that regular members cannot see are determined by roles and permissions.
+  Need your own site? Start it with [Docker Compose](/en/self-host/deploy/docker-compose): 4 GB RAM minimum, browser entry point `http://localhost:3000`.
 </Callout>
 
 ## Step 1: Sign in and choose a team
 
-1. Open the site root address and enter **Sign in**.
+1. Open the site root address and enter **Login**.
 2. Sign in with a username or email and password; the site may also offer SSO only.
 3. If you see prompts for email verification, TOTP, password expiration, or administrator approval, complete them on the page before continuing.
 4. Select the target team in the team switcher at the top of the workspace. Agents, Workflows, Knowledge Bases, and models are all isolated by the current team.
@@ -24,19 +25,19 @@ After completing this page, you will have opened a published Agent in your team 
 
 ## Step 2: Confirm available models
 
-Go to **Models**. Only models authorized by administrators to the current team are shown here; you can filter by provider, model type, and status. You need at least one enabled **chat** model to configure an Agent.
+Go to **Models**. Only models authorized by administrators to the current team are shown here; you can filter by provider, model type, and status. You need at least one enabled **Chat** model to configure an Agent.
 
 <Callout type="warn">
-  If the list is empty, contact the team owner or an administrator to authorize models for the team in the admin panel. Platform users cannot save provider credentials on this page.
+  If the list is empty, contact the team owner or an administrator to authorize models for the team in the admin panel. This page is read-only: no user can add models or save provider credentials here.
 </Callout>
 
 ## Step 3: Open or create an Agent
 
 1. Go to **Apps** and switch to **Agent**.
-2. If you already have a published Agent, open it and select **Conversation**.
-3. If you have the `agent:create` permission, select **Create App** > **Agent**, enter a name, and enter the orchestration page.
-4. In **Agent Settings**, select a model; fill in the prompt and save.
-5. Publishing requires the `agent:publish` permission. After publishing, the public page and API become stable to use.
+2. If you already have a published Agent, choose **Chat** from the **⋯** menu at the top right of its card, or open the orchestration page and click **Chat** in the toolbar.
+3. If you have the `agent:create` permission (the Admin and Member roles have it by default), select **Create App**, choose **AI Agent** under **Select Type**, enter a name, and enter the orchestration page.
+4. On the **Orchestration** page, write the **Prompt**; in **Agent Settings** > **Model Configuration**, select a model, then save.
+5. Publishing requires the `agent:publish` permission. Draft and published differ only in that publish state: iframe embedding works only while the Agent is published, while API calls just need a caller with access to the Agent and valid credentials.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/quick-start-agent-editor.png" alt="Agent orchestration and preview" />
@@ -45,10 +46,10 @@ Go to **Models**. Only models authorized by administrators to the current team a
 
 ## Step 4: Send your first message
 
-1. Type a question in **Debug & Preview** on the right, or open a full conversation through the Agent's **public page**.
-2. Enter a message and send it. Streaming responses may include reasoning, knowledge sources, tool execution, and media results; how they are displayed is controlled by the Agent settings.
-3. To stop, select the stop button in the input area. Manually stopped turns keep their terminated status.
-4. Open **Logs** in the application sidebar to confirm conversations, messages, models, Tokens, duration, and knowledge sources.
+1. Type a question in **Debug & Preview** on the right, or click **Chat** in the toolbar to open the **Public Page** in a new tab for the full conversation.
+2. Enter a message and send it. Streaming responses may include reasoning, knowledge sources, tool execution, and media results; control what is shown with **Hide Reasoning** and **Hide Tool Calls** in **Agent Settings**.
+3. To stop, select the **Stop** button in the input area. A manually stopped turn stays in its stopped state and produces no further output.
+4. Open **Logs** in the application sidebar to confirm conversations and messages, Token and duration statistics, and knowledge sources.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/quick-start-chat-result.png" alt="First Agent conversation result" />
@@ -58,7 +59,7 @@ Go to **Models**. Only models authorized by administrators to the current team a
 ## Acceptance
 
 - The current team is selected.
-- The **Models** page has at least one enabled chat model.
+- The **Models** page has at least one enabled **Chat** model.
 - The Agent status is **Published**, and it can return messages.
 - The conversation you just had can be found in the Agent **Logs**.
 

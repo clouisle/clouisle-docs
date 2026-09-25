@@ -13,6 +13,36 @@ icon: ExternalLink
 - **请求头**：`Authorization: Bearer clou_...`
 - **查询参数**：`?token=clou_...`
 
+解析顺序是**先看 `token` 查询参数，再看 `Authorization` 头**；两处都必须以 `clou_` 开头，否则视同缺少凭据并返回 `401`（业务码 `2000`，`embed_api_key_required`）。
+
+除鉴权外，目标还必须处于可嵌入状态：Agent 与工作流必须是 `published`，且 `embed_config.enabled` 为 `true`，否则分别返回 `404`（`agent_not_found` / `workflow_not_found`）与 `403`（`embed_not_enabled`）。
+
+### 浏览器嵌入页面
+
+除 REST 命名空间外，产品还提供两个可直接用于 `<iframe>` 的页面（不经过 `/api/v1` 前缀）：
+
+| 页面 | 用途 | 查询参数 |
+| --- | --- | --- |
+| `/embed/agent/{agent_id}` | 完整的免登录 Agent 聊天界面（复用公开聊天页） | `token=clou_...`（必填）、`mode=fullscreen` 或 `bubble`（默认 `fullscreen`） |
+| `/embed/workflow/{workflow_id}` | 工作流运行界面（复用运行详情页） | `token=clou_...`（必填） |
+
+```html
+<iframe
+  src="https://your-domain.com/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_xxx&mode=bubble"
+  style="width: 420px; height: 640px; border: 0"
+></iframe>
+```
+
+<Callout type="info">
+  为避免把 API Key 暴露在 URL 中，页面支持通过 `postMessage` 传递凭据：iframe 加载后会向父窗口发送 `{ "type": "clouisle:ready" }`，父窗口回传 `{ "type": "clouisle:token", "token": "clou_..." }` 即可；URL 中的 `token` 仍可用作兜底。若两者都没有，页面停在加载态（Agent 页面）或提示 `invalidToken`（工作流页面）。
+</Callout>
+
+iframe 还会向父窗口发送两类事件，便于宿主页面联动：`{ "type": "clouisle:conversation", "conversationId": "..." }`（会话创建/切换时）与 `{ "type": "clouisle:close" }`（用户点击关闭）。
+
+<Callout type="warn">
+  嵌入模式的能力边界：会话历史保存在浏览器 `localStorage`（键为 `clouisle:embed:history:agent:{agent_id}`），不依赖登录态；**消息编辑、重新生成与版本切换在嵌入模式不可用**（前端直接禁用）。
+</Callout>
+
 ### 域名白名单校验（allowed_domains）
 
 若 Agent 或工作流在 `embed_config` 中配置了 `allowed_domains`：
@@ -94,7 +124,7 @@ Content-Type: application/json
 }
 ```
 
-响应以 `text/event-stream` SSE 形式返回，包含 `message_start`、`content_delta`、`thought`、`tool_start`、`tool_end`、`message_end` 等事件。
+响应以 `text/event-stream` SSE 形式返回，事件与主聊天流式端点完全相同（`message_start`、`content_delta`、`rag_start`/`rag_context`、`reasoning_start`/`reasoning_delta`/`reasoning_end`、`tool_call`/`tool_result`、`media_result`、`compression_start`/`compression_end`、`output_truncated`、`iteration_cap_reached`、`message_end`、`error`），详见 [SSE 流式事件](./streaming)。
 
 ### 3. 创建持久化运行（Durable Run）
 
@@ -128,6 +158,23 @@ Content-Type: application/json
 ```
 
 客户端可随时发起 `GET /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` 订阅事件流，并通过 `after_sequence` 实现去重与断点续连。
+
+### 4. 运行控制与查询参数
+
+| 方法 | 路径 | 查询参数 / 请求体 |
+| --- | --- | --- |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream` | `after_sequence`（默认 `0`，负值按 `0`）——先回放序号更大的缓冲事件再跟随实时流 |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/events` | `after_sequence`（默认 `0`）——非流式读取已缓冲事件 |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}` | 无——返回 `RunOut`（`status`、`error_code`、`pending_tool_*` 等） |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/inputs` | JSON：`delivery`（`steer`/`follow_up`/`auto`，默认 `auto`）、`content`、`attachments`、`request_id`（幂等键） |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/answers` | JSON：`tool_call_id`（必填）、`answers`（ID → 答案）、`skipped` |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stop` | 无请求体——协作式终止，随后事件流收到 `run_end`（`status: "stopped"`） |
+| GET | `/api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages` | 无——返回该会话的可见消息（含 `version_count`）；会话必须属于该 API Key 绑定的用户，否则 `404`（`6210`） |
+| POST | `/api/v1/embed/agents/{agent_id}/upload/file` | `multipart/form-data`，字段名 `file`，查询参数 `category`（默认 `documents`） |
+
+<Callout type="info">
+  运行状态的取值、`run_end` 的唯一性与断点续连策略与主聊天一致，见 [Agent 聊天 API 的持久运行与控制](./chat#持久运行与控制) 与 [SSE 流式事件](./streaming)。
+</Callout>
 
 ---
 
@@ -167,13 +214,38 @@ Content-Type: application/json
 }
 ```
 
+<Callout type="info">
+  返回的 `stream_url` 指向主工作流流式路由（`/api/v1/workflows/runs/{run_id}/stream`），该路由面向登录会话；嵌入客户端应改为订阅 `GET /api/v1/embed/workflows/runs/{run_id}/stream?from_sequence=N`。
+</Callout>
+
+### 2. 订阅工作流运行进度
+
+```
+GET /api/v1/embed/workflows/runs/{run_id}/stream?from_sequence=0
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `from_sequence` | integer | 否 | 0 | 从该序号之后开始回放，再跟随实时事件；用于断线续读 |
+
+注意与 Agent 运行流的命名差异：工作流侧用 `from_sequence`，Agent 侧用 `after_sequence`。该路由**不做域名白名单校验**（其余工作流嵌入端点都会校验），但会检查运行必须由当前 API Key 绑定的用户触发，否则返回 `404`（`workflow_run_not_found`）。
+
+### 3. 工作流嵌入信息
+
+```
+GET /api/v1/embed/workflows/{workflow_id}/info
+```
+
+返回 `id`、`name`、`description`、`icon`、`variables`（输入参数定义）与 `embed_config`。工作流必须已发布且开启嵌入，否则返回 `404`（`workflow_not_found`）或 `403`（`embed_not_enabled`）。
+
 ---
 
 ## 错误代码
 
 | 错误码 | 标识 | 说明 |
 | --- | --- | --- |
-| `2000` | UNAUTHORIZED | 缺少 API Key 或 API Key 无效 |
-| `3000` | PERMISSION_DENIED | 未开启嵌入功能，或请求来源域名不在白名单中 |
-| `4000` | NOT_FOUND | Agent 或工作流不存在，或未处于已发布状态 |
+| `2000` | UNAUTHORIZED | 缺少 API Key、凭据前缀不是 `clou_`，或 Key 无效/过期（`embed_api_key_required`） |
+| `3000` | PERMISSION_DENIED | 未开启嵌入功能（`embed_not_enabled`），或请求来源域名不在白名单中（`embed_domain_not_allowed`） |
+| `4000` | NOT_FOUND | 工作流不存在或未发布（`workflow_not_found`）；工作流运行不存在或不是由该 API Key 用户触发（`workflow_run_not_found`） |
+| `6200` | AGENT_NOT_FOUND | Agent 不存在或未处于已发布状态（`agent_not_found`） |
 | `6210` | CONVERSATION_NOT_FOUND | 会话不存在或不属于当前 API Key 绑定的用户 |

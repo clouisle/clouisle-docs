@@ -59,7 +59,7 @@ Endpoint: `GET /api/v1/admin/observability/timeouts` (supports `source=all|agent
 
 Endpoint: `GET /api/v1/admin/observability/system/health`
 
-The system collects hardware metrics and retains the most recent 120 health snapshots in a Redis list (24-hour expiry; retrieve the trend via `GET .../system/trend`). Thresholds and fields:
+The system collects hardware metrics and retains roughly the most recent 120 health snapshots in a Redis list (`LTRIM 0..120`; the whole list expires after 24 hours — retrieve the trend via `GET .../system/trend`). Thresholds and fields:
 
 | Monitor | Warning / Danger Thresholds | Key Fields |
 | --- | --- | --- |
@@ -97,4 +97,4 @@ Statistics and observability analysis fan out independent aggregates with `async
 Clouisle bounds this with a global semaphore:
 - **Environment variable**: `DB_AGGREGATE_CONCURRENCY` (default `4`, must be greater than 0).
 - **Mechanism**: a single process-wide `asyncio.Semaphore`, applied per query via `run_bounded()` rather than once around an entire `gather()`.
-- **Rationale**: the Tortoise shared pool defaults to `maxsize=5` and PostgreSQL defaults to `max_connections=100`. In a multi-process deployment (roughly 17 worker processes), limiting aggregate concurrency to `4` keeps analytics from exhausting database connections.
+- **Rationale**: the Tortoise shared pool defaults to `maxsize=5` and PostgreSQL defaults to `max_connections=100`. The default deployment already runs roughly 17 processes, each holding a pool, so limiting a single process's aggregate concurrency to `4` keeps analytics from exhausting database connections at any moment.

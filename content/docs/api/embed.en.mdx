@@ -13,6 +13,36 @@ All embed endpoints **exclusively require API Key authentication** (prefixed wit
 - **Header**: `Authorization: Bearer clou_...`
 - **Query Parameter**: `?token=clou_...`
 
+Resolution order is the **`token` query parameter first, then the `Authorization` header**; both must start with `clou_`, otherwise the request is treated as missing credentials and returns `401` (code `2000`, `embed_api_key_required`).
+
+Beyond authentication, the target must be usable for embedding: an Agent or Workflow must be in `published` status and have `embed_config.enabled = true`, otherwise the API returns `404` (`agent_not_found` / `workflow_not_found`) or `403` (`embed_not_enabled`).
+
+### Browser Embed Pages
+
+Alongside the REST namespace, the product ships two pages you can drop straight into an `<iframe>` (these do **not** use the `/api/v1` prefix):
+
+| Page | Purpose | Query Parameters |
+| --- | --- | --- |
+| `/embed/agent/{agent_id}` | Full sign-in-free Agent chat UI (reuses the public chat page) | `token=clou_...` (required), `mode=fullscreen` or `bubble` (default `fullscreen`) |
+| `/embed/workflow/{workflow_id}` | Workflow run UI (reuses the run-detail page) | `token=clou_...` (required) |
+
+```html
+<iframe
+  src="https://your-domain.com/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_xxx&mode=bubble"
+  style="width: 420px; height: 640px; border: 0"
+></iframe>
+```
+
+<Callout type="info">
+  To avoid exposing the API key in the URL, the pages accept credentials over `postMessage`: after loading, the iframe posts `{ "type": "clouisle:ready" }` to the parent, which replies with `{ "type": "clouisle:token", "token": "clou_..." }`. The `token` query parameter still works as a fallback; with neither the Agent page stays in its loading state and the workflow page shows `invalidToken`.
+</Callout>
+
+The iframe also emits two events so the host page can react: `{ "type": "clouisle:conversation", "conversationId": "..." }` when a conversation is created/switched, and `{ "type": "clouisle:close" }` when the user clicks close.
+
+<Callout type="warn">
+  Embed-mode limits: conversation history lives in browser `localStorage` (key `clouisle:embed:history:agent:{agent_id}`) rather than a login session, and **message editing, regeneration, and version switching are unavailable in embed mode** (the frontend disables them).
+</Callout>
+
 ### Domain Whitelist Verification (allowed_domains)
 
 When an Agent or Workflow has `allowed_domains` configured in its `embed_config`:
@@ -94,7 +124,7 @@ Content-Type: application/json
 }
 ```
 
-Returns a `text/event-stream` SSE response with events such as `message_start`, `content_delta`, `thought`, `tool_start`, `tool_end`, and `message_end`.
+Returns a `text/event-stream` SSE response whose events are identical to the main chat stream endpoint (`message_start`, `content_delta`, `rag_start`/`rag_context`, `reasoning_start`/`reasoning_delta`/`reasoning_end`, `tool_call`/`tool_result`, `media_result`, `compression_start`/`compression_end`, `output_truncated`, `iteration_cap_reached`, `message_end`, `error`) — see [SSE Streaming Events](./streaming).
 
 ### 3. Create Durable Run
 
@@ -128,6 +158,23 @@ Content-Type: application/json
 ```
 
 Clients subscribe to `GET /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` to stream events with deduplication and reconnection capability.
+
+### 4. Run Control and Query Parameters
+
+| Method | Path | Query Parameters / Body |
+| --- | --- | --- |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream` | `after_sequence` (default `0`; negative clamped to `0`) — replays buffered events with a higher sequence, then follows the live stream |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/events` | `after_sequence` (default `0`) — non-streaming read of buffered events |
+| GET | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}` | none — returns `RunOut` (`status`, `error_code`, `pending_tool_*`, …) |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/inputs` | JSON: `delivery` (`steer`/`follow_up`/`auto`, default `auto`), `content`, `attachments`, `request_id` (idempotency key) |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/answers` | JSON: `tool_call_id` (required), `answers` (ID → answer), `skipped` |
+| POST | `/api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stop` | no body — cooperatively stops the run; the stream then receives `run_end` with `status: "stopped"` |
+| GET | `/api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages` | none — returns the conversation's visible messages (each with `version_count`); the conversation must belong to the API key's user, otherwise `404` (`6210`) |
+| POST | `/api/v1/embed/agents/{agent_id}/upload/file` | `multipart/form-data` with field name `file` and query parameter `category` (default `documents`) |
+
+<Callout type="info">
+  Run status values, the single `run_end`, and the resumption strategy are the same as the main chat API — see [Durable Runs and Control in the Agent Chat API](./chat#durable-runs-and-control) and [SSE Streaming Events](./streaming).
+</Callout>
 
 ---
 
@@ -167,13 +214,38 @@ Content-Type: application/json
 }
 ```
 
+<Callout type="info">
+  The returned `stream_url` points at the main workflow stream route (`/api/v1/workflows/runs/{run_id}/stream`), which targets signed-in sessions; embed clients should instead subscribe to `GET /api/v1/embed/workflows/runs/{run_id}/stream?from_sequence=N`.
+</Callout>
+
+### 2. Stream Workflow Run Progress
+
+```
+GET /api/v1/embed/workflows/runs/{run_id}/stream?from_sequence=0
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `from_sequence` | integer | No | 0 | Replay events after this sequence, then follow live events; used to resume after a disconnect |
+
+Note the naming difference from Agent runs: workflow streams use `from_sequence`, Agent runs use `after_sequence`. This route does **not** perform the domain whitelist check (every other workflow embed endpoint does), but it does require the run to have been triggered by the API key's user, otherwise it returns `404` (`workflow_run_not_found`).
+
+### 3. Workflow Embed Info
+
+```
+GET /api/v1/embed/workflows/{workflow_id}/info
+```
+
+Returns `id`, `name`, `description`, `icon`, `variables` (input parameter definitions), and `embed_config`. The workflow must be published with embedding enabled, otherwise the call returns `404` (`workflow_not_found`) or `403` (`embed_not_enabled`).
+
 ---
 
 ## Error Codes
 
 | Error Code | Identifier | Description |
 | --- | --- | --- |
-| `2000` | UNAUTHORIZED | Missing or invalid API key |
-| `3000` | PERMISSION_DENIED | Embed not enabled, or request origin not in `allowed_domains` |
-| `4000` | NOT_FOUND | Agent or workflow not found, or not published |
-| `6210` | CONVERSATION_NOT_FOUND | Conversation does not exist or does not belong to the API key user |
+| `2000` | UNAUTHORIZED | Missing API key, credentials without the `clou_` prefix, or an invalid/expired key (`embed_api_key_required`) |
+| `3000` | PERMISSION_DENIED | Embedding not enabled (`embed_not_enabled`), or the request origin is not in `allowed_domains` (`embed_domain_not_allowed`) |
+| `4000` | NOT_FOUND | Workflow does not exist or is not published (`workflow_not_found`); workflow run does not exist or was not triggered by this API key's user (`workflow_run_not_found`) |
+| `6200` | AGENT_NOT_FOUND | Agent does not exist or is not published (`agent_not_found`) |
+| `6210` | CONVERSATION_NOT_FOUND | Conversation does not exist or does not belong to the API key's user |

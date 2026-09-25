@@ -4,11 +4,11 @@ description: Look up provider identifiers, model types, credentials, default end
 icon: Network
 ---
 
-Clouisle unifies multimodal model access through a provider abstraction layer covering chat, embedding, rerank, speech (TTS/STT), and image/video generation.
+Clouisle unifies multimodal model access through a provider abstraction layer covering chat, embedding, rerank, speech (TTS/STT), image/video generation, and **decision** models.
 
 ## Provider Identifier Enumeration
 
-The system defines 22 model provider identifiers (`ModelProvider`). The table lists each provider's backend default endpoint; when no custom `base_url` is set, the runtime resolves request addresses from these defaults.
+The system defines 23 model provider identifiers (`ModelProvider`). The table lists each provider's backend default endpoint; when no custom `base_url` is set, the runtime resolves request addresses from these defaults.
 
 | Provider Identifier (`provider`) | Display Name | Default API Base URL |
 | --- | --- | --- |
@@ -33,19 +33,22 @@ The system defines 22 model provider identifiers (`ModelProvider`). The table li
 | `kling` | Kling | `https://api.klingai.com` |
 | `stability` | Stability AI | `https://api.stability.ai` |
 | `midjourney` | Midjourney | None (proxy required) |
+| `typesafe` | TypeSafe AI | `https://api.typesafe.ai/v1` |
 | `custom` | OpenAI Compatible | None (supplied by the integrator) |
 
 <Callout type="info">
 For `volcengine`, some model types have dedicated default endpoints that take precedence over the general endpoint above:
 - TTS: `https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse`
 - Audio Generation: `https://openspeech.bytedance.com/api/v3/tts/create`
+
+Resolution order is: explicit `base_url` > provider + model-type endpoint > provider general endpoint. `typesafe` + `decision` also registers a dedicated endpoint (identical to the general one).
 </Callout>
 
 ---
 
 ## Model Type Classification (`ModelType`)
 
-`model_type` describes a model's capability class and is independent of the provider; a given provider typically supports only some of these types.
+`model_type` describes a model's capability class and is independent of the provider; a given provider typically supports only some of these types. The system currently defines 9 model types:
 
 | Model Type (`model_type`) | Description |
 | --- | --- |
@@ -57,18 +60,35 @@ For `volcengine`, some model types have dedicated default endpoints that take pr
 | `audio_generation` | Prompt-to-audio generation |
 | `text_to_image` | Text-to-image generation |
 | `text_to_video` | Text-to-video generation |
+| `decision` | Typed decision models (choice / score / yes-no) that generate no prose |
+
+---
+
+## Decision Models and TypeSafe AI
+
+The `decision` type is a **non-generative** model: it evaluates a single state against typed questions and returns typed answers with probability distributions, producing no text at all. It is used exclusively by the workflow [Decision node](/reference/workflow-nodes).
+
+- **Only provider**: the `decision` type currently accepts only the `typesafe` provider. Creating or updating a `decision` model whose `provider` is not `typesafe` returns a validation error (`model_type_not_supported`).
+- **Default endpoint**: `https://api.typesafe.ai/v1`. Runtime requests go to `{base_url}/v1/systemone`; the adapter guarantees the path includes a `/v1` segment, so configuring `base_url` as either `https://api.typesafe.ai` (no `/v1`) or `https://api.typesafe.ai/v1` both resolve to `https://api.typesafe.ai/v1/systemone`.
+- **Authentication**: the API key is sent as `Authorization: Bearer <key>`.
+- **Model ID**: for example `jev-1.13.0`, or `jev-latest` to follow the provider's current release. Model discovery (`POST /api/v1/admin/models/discover`, requires `admin:model:create`) uses the `/v1/models` path for TypeSafe and automatically avoids duplicating a version segment when `base_url` already ends in `/v1`.
+- **Endpoint allowlist**: `https://api.typesafe.ai` is included in the default **Model Endpoint Allowlist**; when routing through a self-hosted gateway, register that gateway's origin under **Site Settings > Security** first.
+
+<Callout type="warn" title="Directionality of the decision ↔ typesafe constraint">
+Validation is one-directional (`type → provider`): the `decision` type must be provided by `typesafe`. The reverse does not hold — the `typesafe` provider is not constrained to `decision` at configuration time, but configuring it as another type (such as `chat`) fails at runtime for lack of an adapter. Use TypeSafe for `decision` only.
+</Callout>
 
 ---
 
 ## Embedding Provider Support
 
-`model_type: embedding` is not valid for every provider identifier. The backend embedding adapter dispatches providers across three paths:
+`model_type: embedding` is not valid for every provider identifier. Model creation/update validates this (`EMBEDDING_SUPPORTED_PROVIDERS`), and the backend embedding adapter then dispatches providers across two paths:
 
 | Adapter Path | Covered Providers | Behavior |
 | --- | --- | --- |
 | `OpenAICompatibleEmbeddingAdapter` | `openai`, `openai_responses`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `custom` | Calls the OpenAI-compatible `/embeddings` endpoint directly and captures upstream `usage` |
-| `FallbackEmbeddingAdapter` | `google`, `azure_openai`, and other providers not listed above | Generates vectors via LangChain Embeddings; `usage` is empty |
-| Unsupported | `anthropic` | No embedding adapter exists; creating a `model_type: embedding` model with `provider: anthropic` raises `Unsupported provider for embedding` at runtime |
+| `FallbackEmbeddingAdapter` | `google`, `azure_openai` | Generates vectors via LangChain Embeddings; `usage` is empty |
+| Unsupported | `anthropic`, `typesafe`, `runway`, `pika`, `luma`, `kling`, `stability`, `midjourney`, etc. | Not in `EMBEDDING_SUPPORTED_PROVIDERS`, so creation is rejected up front; `anthropic` raises `Unsupported provider for embedding` at runtime even if validation is bypassed |
 
 For the detailed embedding mechanics (fallback strategy, token metering, dynamic dimensions, and Qdrant collection partitioning), see [Embedding Adapters & Vector Dimensions](/reference/embedding-adapters).
 
@@ -79,9 +99,9 @@ For the detailed embedding mechanics (fallback strategy, token metering, dynamic
 | Field | Type | Required | Default | Description & Validation |
 | --- | --- | --- | --- | --- |
 | `name` | string | Yes | None | Display name, `1-100` characters |
-| `provider` | enum | Yes | None | Provider identifier (the 22 enum values above) |
+| `provider` | enum | Yes | None | Provider identifier (the 23 enum values above) |
 | `model_id` | string | Yes | None | Upstream model ID, `1-100` characters |
-| `model_type` | enum | Yes | None | Model type (the 8 types above) |
+| `model_type` | enum | Yes | None | Model type (the 9 types above) |
 | `provider_display_name` | string/null | No | `null` | Provider name shown to end users |
 | `base_url` | string/null | No | `null` | Custom API URL (at most 512 characters), constrained by the endpoint allowlist policy |
 | `api_key` | string/null | No | `null` | Access key (may be empty for local providers such as Ollama); encrypted server-side |
@@ -102,14 +122,16 @@ For the detailed embedding mechanics (fallback strategy, token metering, dynamic
 ### Endpoint Allowlist Policy (`model_endpoint_allowlist`)
 
 All outbound requests to model providers are strictly validated against the system endpoint allowlist:
-- The system ships with 19 pre-configured official provider Origins (such as `https://api.openai.com`, `https://api.deepseek.com`).
+- The system ships with 20 pre-configured official provider Origins (including `https://api.typesafe.ai`), such as `https://api.openai.com`, `https://api.deepseek.com`, `https://api.anthropic.com`, and `https://generativelanguage.googleapis.com`.
+- The allowlist holds at most 200 entries (`MODEL_ENDPOINT_ALLOWLIST_MAX_ENTRIES`).
 - If an administrator configures a custom private Base URL (for example self-hosted vLLM or a private Ollama node), its full Origin (`scheme + host + port`) must be explicitly registered under **Site Settings > Model Endpoint Allowlist**.
 - Validation ignores request paths, query parameters, and credentials, but non-standard ports (such as `:11434`) are matched strictly.
 
 ### Connectivity Test Endpoint
 
-When adding or saving a model in the admin console, a test endpoint verifies connectivity:
+When adding or saving a model in the admin console, call `POST /api/v1/admin/models/{model_id}/test` to verify connectivity:
 - The test performs a lightweight upstream call using the credentials the administrator submits at that moment; credentials are not saved automatically during the test.
+- For `decision` models, the test performs a minimal decision evaluation instead of a chat request.
 - The response contains:
   - `success` (bool): whether connectivity succeeded
   - `message` (string): success information or upstream error detail

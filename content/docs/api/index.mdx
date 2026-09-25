@@ -8,18 +8,30 @@ Clouisle API 的基础路径为 `/api/v1`。请求使用 JSON，响应使用统�
 
 <Cards>
   <Card title="开始使用" href="/api/get-started">创建 API Key、设置基础 URL 并发送第一个请求。</Card>
-  <Card title="认证与登录" href="/api/auth">注册、人机验证、密码登录、TOTP 两步验证与密码找回。</Card>
   <Card title="文件上传" href="/api/file-uploads">上传图片、文档和沙箱产物，并解析文件内容。</Card>
+  <Card title="API Keys" href="/api/api-keys">创建和管理用于调用 Agent、工作流与上传接口的用户级 API Key。</Card>
+  <Card title="认证与登录" href="/api/auth">注册、人机验证、密码登录、TOTP 两步验证与密码找回。</Card>
+  <Card title="SSO 单点登录" href="/api/sso">供应商发现、OAuth2/OIDC/SAML2/CAS 登录流程与连接解绑。</Card>
+  <Card title="两步验证（TOTP）" href="/api/totp">绑定、启用、停用 TOTP 两步验证并管理备用码。</Card>
+  <Card title="Agents" href="/api/agents">管理 Agent 生命周期、发布控制与统计查询。</Card>
   <Card title="Agent 聊天" href="/api/chat">发送消息、附件、变量并消费流式响应。</Card>
+  <Card title="会话" href="/api/conversations">查询、更新、删除和管理消息版本。</Card>
+  <Card title="记忆" href="/api/memories">管理当前用户的长期记忆实体与关系图谱。</Card>
+  <Card title="知识库" href="/api/knowledge">管理文档、分块和检索测试。</Card>
+  <Card title="提示词生成" href="/api/prompts">调用大模型流式生成与优化 Agent 系统提示词。</Card>
   <Card title="工作流执行" href="/api/workflow">运行、Webhook、取消和订阅节点事件。</Card>
   <Card title="工作流版本与模板" href="/api/workflow-versions">历史版本、发布、Diff 比对、回滚与模板市场。</Card>
-  <Card title="提示词生成" href="/api/prompts">调用大模型流式生成与优化 Agent 系统提示词。</Card>
-  <Card title="嵌入集成" href="/api/embed">将 Agent 对话与工作流嵌入第三方网站与 iframe。</Card>
-  <Card title="会话" href="/api/conversations">查询、更新、删除和管理消息版本。</Card>
-  <Card title="知识库" href="/api/knowledge">管理文档、分块和检索测试。</Card>
+  <Card title="工具" href="/api/tools">管理与执行 Agent 可调用的工具。</Card>
+  <Card title="技能" href="/api/skills">导入、更新、删除与测试沙箱技能包。</Card>
+  <Card title="团队" href="/api/teams">管理团队信息、成员角色与所有权移交。</Card>
+  <Card title="团队模型授权" href="/api/team-models">配置团队可用模型、配额上限与用量查询。</Card>
+  <Card title="模型" href="/api/models">发现可用模型并查询指定类型的默认模型。</Card>
+  <Card title="通知" href="/api/notifications">读取站内通知收件箱，管理员发布与删除通知。</Card>
   <Card title="流式事件" href="/api/streaming">解析 Agent 与工作流的 SSE 事件。</Card>
+  <Card title="嵌入集成" href="/api/embed">将 Agent 对话与工作流嵌入第三方网站与 iframe。</Card>
+  <Card title="用户" href="/api/users">管理当前用户资料与密码，以及管理员的用户 CRUD。</Card>
+  <Card title="管理 API" href="/api/admin">管理后台端点的分组、权限码与调用边界。</Card>
   <Card title="设置" href="/api/settings">管理站点设置、通知渠道、公开设置和后台记忆提取。</Card>
-
   <Card title="错误处理" href="/api/errors">按 HTTP 状态和业务错误码恢复。</Card>
 </Cards>
 

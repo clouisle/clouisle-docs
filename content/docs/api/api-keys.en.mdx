@@ -1,67 +1,103 @@
 ---
 title: API Keys API
-description: Manage API keys for authentication and access control
+description: Create and manage user-owned API keys for Agents, workflows, and uploads
 icon: KeyRound
 ---
 
-## Overview
+API keys let server-side integrations, scripts, and iframe embeds call Clouisle without a user session. **A key belongs to the user who created it** — it is not a team resource: its reach is the combination of that user's roles, team memberships, and the key's own bindings. The base path is `/api/v1/api-keys`.
 
-The API Keys API allows you to manage API keys used for authenticating requests to Clouisle. API keys provide scoped, revocable access to agents and workflows.
+## Key Shape and What Actually Gates Access
 
-**Base URL**: `/api/v1/api-keys`
+The server generates keys in this shape:
 
-## Authentication
+```
+clou_a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890
+└──┬─┘└───────────────────────────┬───────────────────────────┘
+ clou_ prefix             32 random bytes as 64 hex characters
+```
 
-All API-key management endpoints require an authenticated JWT user with the applicable permission. API keys **cannot** be used to manage other API keys.
-
-**Required permissions:**
-
-| Permission | Description |
+| Property | Value |
 | --- | --- |
-| `apikey:read` | View API keys |
-| `apikey:create` | Create API keys |
-| `apikey:update` | Update API keys |
-| `apikey:delete` | Delete API keys |
+| Full length | **69 characters** (`clou_` + 64 hex) |
+| Displayed prefix | The first **12** characters (`clou_` + 8 hex), used for identification and search |
+| Storage | Only a hash plus the prefix are stored; the full key appears **once**, in the create response |
+| Owner | Bound to the creating user at creation time (`user_id`); it cannot be transferred |
+
+Send it in the `Authorization` header, using the same Bearer form as a JWT:
+
+```http
+Authorization: Bearer clou_a1b2c3d4e5f6...
+```
+
+API key authentication checks exactly four things, and failing any of them rejects the request:
+
+1. **Active state** — a key with `is_active = false` no longer matches, and the request fails with HTTP `401` / `2001` (`INVALID_TOKEN`).
+2. **Expiry** — a non-null `expires_at` in the past fails with HTTP `401` / `2002` (`TOKEN_EXPIRED`); leaving it empty means the key never expires.
+3. **Owner account state** — if the owning user is deactivated or pending approval, requests fail with HTTP `401` / `2004` (`INACTIVE_USER`).
+4. **Resource bindings** — when a key is bound to a list of Agents or Workflows it can only reach those; anything outside the list fails with HTTP `403` / `3000`.
+
+<Callout type="warn">
+  `scopes` and `rate_limit` are stored and echoed back, but **the current version does not enforce either**: there is no scope middleware and no per-key throttling. The four checks above are what actually applies. Never treat `scopes` as a security boundary, and do not rely on `rate_limit` for cost control.
+</Callout>
+
+## Authentication and Permissions
+
+Managing API keys requires a **JWT user session**. An API key cannot create, modify, or delete API keys.
+
+| Permission | Allowed operations |
+| --- | --- |
+| `apikey:read` | List keys, view one key, read statistics |
+| `apikey:create` | Create a key |
+| `apikey:update` | Update, activate, deactivate a key |
+| `apikey:delete` | Delete a key |
+
+Beyond the permission code there is an ownership check: a non-superuser can only operate on keys they created, otherwise the request fails with HTTP `403` / `3000` (`PERMISSION_DENIED`). Superusers can see and operate on everyone's keys and bypass the permission-code check.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/v1/api-keys` | List all API keys |
-| GET | `/api/v1/api-keys/{key_id}` | Get a specific API key |
-| POST | `/api/v1/api-keys` | Create a new API key |
-| PUT | `/api/v1/api-keys/{key_id}` | Update API key settings |
-| DELETE | `/api/v1/api-keys/{key_id}` | Delete (revoke) an API key |
-| GET | `/api/v1/api-keys/stats` | Get aggregate statistics |
-| POST | `/api/v1/api-keys/{key_id}/activate` | Activate an API key |
-| POST | `/api/v1/api-keys/{key_id}/deactivate` | Deactivate an API key |
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET | `/api/v1/api-keys` | List API keys with pagination | `apikey:read` |
+| GET | `/api/v1/api-keys/stats` | Aggregate statistics | `apikey:read` |
+| POST | `/api/v1/api-keys` | Create an API key | `apikey:create` |
+| GET | `/api/v1/api-keys/{api_key_id}` | Get one key | `apikey:read` |
+| PUT | `/api/v1/api-keys/{api_key_id}` | Update a key | `apikey:update` |
+| DELETE | `/api/v1/api-keys/{api_key_id}` | Delete (revoke) a key | `apikey:delete` |
+| POST | `/api/v1/api-keys/{api_key_id}/activate` | Activate a key | `apikey:update` |
+| POST | `/api/v1/api-keys/{api_key_id}/deactivate` | Deactivate a key | `apikey:update` |
+
+Route order matters: `/stats` is a fixed path and `/{api_key_id}` expects a UUID, so `/api/v1/api-keys/stats` is never parsed as an ID.
 
 ## List API Keys
 
-Get a paginated list of all your API keys.
-
-**Endpoint**: `GET /api/v1/api-keys`
-
-### Query Parameters
-
-| Parameter | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `page` | integer | No | 1 | Page number |
-| `page_size` | integer | No | 20 | Items per page |
-| `status` | array | No | - | Filter by status: `active`, `inactive`, `expired` (repeatable) |
-| `user_id` | array | No | - | Filter by owner user ID (admin only) |
-| `search` | string | No | - | Search by name or key prefix |
-
-### Request Example
+```
+GET /api/v1/api-keys
+```
 
 ```bash
-curl -X GET "https://your-domain.com/api/v1/api-keys" \
+curl -X GET "https://your-domain.com/api/v1/api-keys?page=1&page_size=20" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-### Response
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number, 1-based |
+| `page_size` | integer | `20` | Items per page |
+| `status` | string[] | — | Filter by `active`, `inactive`, or `expired` (repeatable; multiple values are OR-ed) |
+| `user_id` | UUID[] | — | Filter by owner; **superuser only** — ignored for regular users |
+| `search` | string | — | Case-insensitive match on name or key prefix |
 
-**200 OK**:
+The status definitions overlap:
+
+- `active`: `is_active = true` **and** (`expires_at` is null or in the future).
+- `inactive`: `is_active = false` (expired or not).
+- `expired`: `expires_at` is in the past, even when `is_active` is still `true`.
+
+A deactivated key that has also expired therefore appears under both `inactive` and `expired`, so the counts can add up to more than the total.
+
+Non-superusers always see only their own keys. Results are ordered by creation time, newest first.
+
+**Response (200 OK):**
 
 ```json
 {
@@ -69,26 +105,17 @@ curl -X GET "https://your-domain.com/api/v1/api-keys" \
   "data": {
     "items": [
       {
-        "id": "key-123",
+        "id": "8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f",
         "name": "Production API Key",
         "key_prefix": "clou_a1b2c3d",
-        "user_id": "user-001",
-        "user": {
-          "id": "user-001",
-          "username": "alice"
-        },
-        "scopes": ["chat", "agent:read"],
+        "user_id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
+        "user": { "id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c", "username": "alice" },
+        "scopes": ["chat"],
         "rate_limit": 1000,
         "is_active": true,
-        "last_used_at": "2026-02-11T14:30:00Z",
+        "last_used_at": "2026-09-24T14:30:00Z",
         "expires_at": "2027-02-11T00:00:00Z",
-        "agents": [
-          {
-            "id": "agent-001",
-            "name": "Customer Support Agent",
-            "icon": "🤖"
-          }
-        ],
+        "agents": [{ "id": "0b1c2d3e-...", "name": "Customer Support", "icon": "🤖" }],
         "workflows": [],
         "created_at": "2026-02-11T10:00:00Z",
         "updated_at": "2026-02-11T10:00:00Z"
@@ -102,77 +129,34 @@ curl -X GET "https://your-domain.com/api/v1/api-keys" \
 }
 ```
 
-<Callout type="info">
-  The actual API key value is only shown once during creation. After creation, only the `key_prefix` is returned for identification.
-</Callout>
+`user` is present only when the owner could be loaded. `last_used_at` is refreshed on every successful authenticated request.
 
-## Get API Key
+## Get an API Key
 
-Get details of a specific API key.
-
-**Endpoint**: `GET /api/v1/api-keys/{key_id}`
-
-### Path Parameters
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `key_id` | string | Yes | API Key UUID |
-
-### Response
-
-**200 OK**:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "key-123",
-    "name": "Production API Key",
-    "key_prefix": "clou_a1b2c3d",
-    "user_id": "user-001",
-    "scopes": ["chat", "agent:read"],
-    "rate_limit": 1000,
-    "is_active": true,
-    "last_used_at": "2026-02-11T14:30:00Z",
-    "expires_at": "2027-02-11T00:00:00Z",
-    "agents": [],
-    "workflows": [],
-    "created_at": "2026-02-11T10:00:00Z",
-    "updated_at": "2026-02-11T10:00:00Z"
-  },
-  "msg": "success"
-}
+```
+GET /api/v1/api-keys/{api_key_id}
 ```
 
-## Create API Key
+| Path parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `api_key_id` | string (UUID) | Yes | The API key UUID |
 
-Create a new API key. The full key value is returned **only once** in this response.
+The body matches a list item (never including `key`). A missing key returns HTTP `404` / `4000`; a key owned by someone else returns HTTP `403` / `3000`.
 
-**Endpoint**: `POST /api/v1/api-keys`
+## Create an API Key
 
-### Request Body
-
-```json
-{
-  "name": "Production API Key",
-  "scopes": ["chat", "agent:read"],
-  "rate_limit": 1000,
-  "expires_at": "2027-02-11T00:00:00Z",
-  "agent_ids": ["agent-001"],
-  "workflow_ids": []
-}
+```
+POST /api/v1/api-keys
 ```
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Yes | API key name (max 100 chars) |
-| `scopes` | array | No | List of permission scopes (default: `["chat"]`) |
-| `rate_limit` | integer | No | Rate limit per minute, `0` means unlimited (default: 1000) |
-| `expires_at` | string | No | Expiration date (ISO 8601) |
-| `agent_ids` | array | No | Agent IDs this key can access (empty = no restriction) |
-| `workflow_ids` | array | No | Workflow IDs this key can access (empty = no restriction) |
-
-### Request Example
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `name` | string | Yes | — | Name, 1–100 characters |
+| `scopes` | string[] | No | `["chat"]` | Permission scopes (**stored only, never enforced**) |
+| `rate_limit` | integer | No | `1000` | Requests per minute, `0` means unlimited (**stored only, never enforced**); must be ≥ 0 |
+| `expires_at` | string (ISO 8601) | No | `null` | Expiry time; omit or pass `null` for a key that never expires |
+| `agent_ids` | UUID[] | No | `[]` | Agents this key may access; an empty array means no restriction |
+| `workflow_ids` | UUID[] | No | `[]` | Workflows this key may access; an empty array means no restriction |
 
 ```bash
 curl -X POST "https://your-domain.com/api/v1/api-keys" \
@@ -180,331 +164,249 @@ curl -X POST "https://your-domain.com/api/v1/api-keys" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Production API Key",
-    "scopes": ["chat", "agent:read"],
-    "rate_limit": 1000,
     "expires_at": "2027-02-11T00:00:00Z"
   }'
 ```
 
-### Response
+Bindings are validated at creation time: every entry in `agent_ids` / `workflow_ids` goes through the Agent/Workflow access check, so naming a resource that does not exist or that you cannot access fails immediately (HTTP `404` / `4000` or `403` / `3000`). Authorization and binding are therefore the same step.
 
-**200 OK**:
+**Response (200 OK):**
 
 ```json
 {
   "code": 0,
   "data": {
-    "id": "key-789",
+    "id": "8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f",
     "name": "Production API Key",
     "key": "clou_a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890",
     "key_prefix": "clou_a1b2c3d",
-    "user_id": "user-001",
-    "scopes": ["chat", "agent:read"],
+    "user_id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
+    "scopes": ["chat"],
     "rate_limit": 1000,
     "is_active": true,
     "expires_at": "2027-02-11T00:00:00Z",
+    "last_used_at": null,
+    "agents": [],
+    "workflows": [],
     "created_at": "2026-02-11T16:00:00Z",
     "updated_at": "2026-02-11T16:00:00Z"
   },
-  "msg": "API key created successfully. Save this key securely - it won't be shown again."
+  "msg": "API key created successfully"
 }
 ```
 
-<Callout type="warn">
-  **The `key` field is only returned once.** Store it securely immediately. You cannot retrieve the full key later — only the `key_prefix` will be visible.
+<Callout type="error">
+  `data.key` appears in this response only. The server keeps just a hash, so every later read returns only `key_prefix`. Write it to a secret manager or environment variable immediately; if you lose it, delete the key and create a new one.
 </Callout>
 
-## Update API Key
+## Update an API Key
 
-Update API key settings. All fields are optional — only include fields you want to update.
-
-**Endpoint**: `PUT /api/v1/api-keys/{key_id}`
-
-### Path Parameters
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `key_id` | string | Yes | API Key UUID |
-
-### Request Body
-
-```json
-{
-  "name": "Production API Key (Updated)",
-  "scopes": ["chat", "agent:read"],
-  "rate_limit": 500,
-  "is_active": true,
-  "agent_ids": ["agent-001"],
-  "workflow_ids": []
-}
+```
+PUT /api/v1/api-keys/{api_key_id}
 ```
 
-### Request Example
+Every field is optional; only the fields you send change, and omitted fields keep their current value.
 
-```bash
-curl -X PUT "https://your-domain.com/api/v1/api-keys/key-123" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Production API Key (Updated)",
-    "rate_limit": 500,
-    "is_active": true
-  }'
-```
-
-### Response
-
-**200 OK**:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "key-123",
-    "name": "Production API Key (Updated)",
-    "is_active": true,
-    "updated_at": "2026-02-11T16:05:00Z"
-  },
-  "msg": "API key updated successfully"
-}
-```
-
-<Callout type="info">
-  Updating scopes takes effect immediately for all requests.
-</Callout>
-
-## Delete API Key
-
-Permanently delete (revoke) an API key.
-
-**Endpoint**: `DELETE /api/v1/api-keys/{key_id}`
-
-### Path Parameters
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `key_id` | string | Yes | API Key UUID |
-
-### Request Example
-
-```bash
-curl -X DELETE "https://your-domain.com/api/v1/api-keys/key-123" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-### Response
-
-**200 OK**:
-
-```json
-{
-  "code": 0,
-  "data": null,
-  "msg": "API key deleted successfully"
-}
-```
-
-<Callout type="warn">
-  Deleted API keys **cannot be recovered**. All requests using this key will fail immediately.
-</Callout>
-
-## Get API Key Stats
-
-Get aggregate statistics across all API keys the current user can see.
-
-**Endpoint**: `GET /api/v1/api-keys/stats`
-
-### Request Example
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/api-keys/stats" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-### Response
-
-**200 OK**:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "total": 3,
-    "active": 2,
-    "inactive": 0,
-    "expired": 1
-  },
-  "msg": "success"
-}
-```
-
-## Activate / Deactivate API Key
-
-Toggle a key between active and inactive without deleting it.
-
-**Endpoints**:
-
-| Method | Path | Purpose |
+| Field | Type | Description |
 | --- | --- | --- |
-| POST | `/api/v1/api-keys/{key_id}/activate` | Activate a key |
-| POST | `/api/v1/api-keys/{key_id}/deactivate` | Deactivate a key |
+| `name` | string | Name, 1–100 characters |
+| `scopes` | string[] | Replaces the scope list |
+| `rate_limit` | integer | Replaces the rate-limit value; must be ≥ 0 |
+| `expires_at` | string (ISO 8601) | Replaces the expiry time |
+| `is_active` | boolean | Flips the active state directly |
+| `agent_ids` | UUID[] | **Replaces** the Agent bindings entirely; `[]` clears them (cleared means no restriction) |
+| `workflow_ids` | UUID[] | **Replaces** the Workflow bindings entirely; `[]` clears them |
 
-### Request Example
+<Callout type="warn">
+  `agent_ids` / `workflow_ids` are replacement semantics, not incremental appends. To add one binding, first read the current bindings (`GET` the key) and submit the full list, otherwise the remaining bindings are silently dropped. Only `null` or an omitted field means “leave unchanged”.
+</Callout>
 
-```bash
-curl -X POST "https://your-domain.com/api/v1/api-keys/key-123/deactivate" \
-  -H "Authorization: Bearer YOUR_TOKEN"
+The response returns the full updated object with `msg` set to `API key updated successfully`.
+
+## Delete an API Key
+
+```
+DELETE /api/v1/api-keys/{api_key_id}
 ```
 
-### Response
+Deletion takes effect immediately: the key no longer authenticates (later requests return HTTP `401` / `2001`). `data` in the response is the **deleted key object** (returned for audit echo), not `null`.
 
-**200 OK**:
+<Callout type="error">
+  Deletion is irreversible — there is no soft delete or grace period. When rotating, create the replacement, confirm it works, then delete the old key.
+</Callout>
+
+## Activate and Deactivate
+
+```
+POST /api/v1/api-keys/{api_key_id}/activate
+POST /api/v1/api-keys/{api_key_id}/deactivate
+```
+
+Both return the updated key object. Calling either while already in the target state is an error, which also helps detect concurrent edits:
+
+- `activate` on an active key: HTTP `400` / `1002` (`api_key_already_active`).
+- `deactivate` on an inactive key: HTTP `400` / `1002` (`api_key_already_inactive`).
+
+Deactivation is a reversible pause: the key record and its bindings stay intact, and reactivating restores exactly the previous access.
+
+## Statistics
+
+```
+GET /api/v1/api-keys/stats
+```
+
+Regular users get statistics for their own keys; superusers get deployment-wide numbers.
 
 ```json
 {
   "code": 0,
-  "data": {
-    "id": "key-123",
-    "name": "Production API Key",
-    "key_prefix": "clou_a1b2c3d",
-    "user_id": "user-001",
-    "scopes": ["chat", "agent:read"],
-    "rate_limit": 1000,
-    "is_active": false,
-    "expires_at": "2027-02-11T00:00:00Z",
-    "created_at": "2026-02-11T10:00:00Z",
-    "updated_at": "2026-02-11T16:00:00Z"
-  },
+  "data": { "total": 3, "active": 2, "inactive": 0, "expired": 1 },
   "msg": "success"
 }
 ```
+
+The definitions match the list `status` filter: `active` requires both an active flag and a non-expired key, `inactive` looks only at the flag, and `expired` looks only at the expiry time. Because the definitions overlap, the four numbers do not have to add up to `total`.
 
 ## Error Codes
 
-| Code | Message | Description |
+| HTTP | Code | Scenario |
 | --- | --- | --- |
-| `4000` | Not found | API key does not exist |
-| `2001` | Invalid token | API key is invalid or expired |
-| `3000` | Permission denied | Insufficient permissions |
-| `1001` | Validation failed | Invalid request data |
+| `400` | `1001` | Body validation failed (empty name, negative `rate_limit`) |
+| `400` | `1002` | The key is already in the requested state (duplicate activate/deactivate) |
+| `401` | `2000` | No credentials provided |
+| `401` | `2001` | API key invalid, deleted, or deactivated; JWT invalid or revoked |
+| `401` | `2002` | API key expired |
+| `401` | `2004` | The key's owner is deactivated or pending approval |
+| `403` | `2003` | JWT cannot be decoded or has expired |
+| `403` | `3000` | Missing an `apikey:*` permission, operating on someone else's key, or a binding mismatch |
+| `404` | `4000` | `api_key_id` does not exist |
+
+## Scope Values
+
+`scopes` is a free-form string array: the server validates no enumeration and enforces nothing. To stay compatible with a future version, these are the values seen in the UI and community examples:
+
+| Value | Meaning |
+| --- | --- |
+| `chat` | Call Agent chat endpoints (the creation default) |
+| `agent:read` | Read Agent information |
+| `agent:chat` | Chat with an Agent |
+| `workflow:execute` | Execute a workflow |
+| `workflow:run` | Trigger a workflow run |
+| `knowledge:read` | Read knowledge base content |
 
 <Callout type="info">
-  No per-endpoint rate limits are implemented. The `rate_limit` field is stored for informational purposes and is not enforced by middleware.
+  If you need least privilege today, the only reliable mechanism is **resource binding**: restrict `agent_ids` / `workflow_ids` to the resources you actually call, and deactivate keys you no longer need. Scope strings are documentation and audit trail only.
 </Callout>
-
-## Key Scopes
-
-API keys support the following permission scopes:
-
-| Scope | Description |
-| --- | --- |
-| `chat` | Send messages to agents |
-| `agent:read` | Read agent information |
-| `workflow:execute` | Execute workflows |
-| `knowledge:read` | Access knowledge base |
 
 ## Best Practices
 
 ### Security
 
-- Store API keys securely (environment variables, secret managers)
-- Use different keys for different environments
-- Rotate keys regularly (every 90 days)
-- Use minimal required scopes
-- Set expiration dates
-- Monitor key usage
-- Revoke unused keys
-- **Never** commit keys to version control
+- Keep full keys in environment variables or a secret manager — **never** in version control, logs, or client-side code.
+- One key per integration so a single deactivation does not break every caller.
+- Set `expires_at` on production keys and allow an overlap window when rotating.
+- Use `agent_ids` / `workflow_ids` to limit a key to the resources it needs.
+- Review `last_used_at` regularly and delete keys that are no longer used.
+- Respond to a leak with `DELETE` (full revoke) or `deactivate` (temporary pause).
 
-### Key Management
+### Lifecycle management
 
-- Name keys descriptively (e.g., "Production Chatbot Key")
-- Document key purposes and ownership
-- Track key usage patterns
-- Set up usage alerts
-- Review keys regularly and remove unused ones
-- Use grace period during rotation — test new keys before revoking old ones
+- Name keys with their purpose and environment, for example `prod-chatbot-gateway`.
+- Rotation flow: create the new key → update the caller → watch `last_used_at` stop advancing → delete the old key.
+- Prefer `deactivate` for temporary investigations; reactivating is cheaper than redistributing a new secret.
+- Re-check keys after team membership changes: a key assumes its owner's identity, so an owner leaving a team changes what the key can reach.
 
 ## Code Examples
 
 ### Python
 
 ```python
-import requests
 import os
+import requests
 
-def create_api_key(token, name, scopes, rate_limit=1000):
-    """Create a new API key."""
-    url = "https://your-domain.com/api/v1/api-keys"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "name": name,
-        "scopes": scopes,
-        "rate_limit": rate_limit,
-        "expires_at": "2027-02-11T00:00:00Z"
-    }
+BASE = "https://your-domain.com/api/v1"
 
-    response = requests.post(url, headers=headers, json=data)
+
+def create_api_key(token: str, name: str, agent_ids: list[str] | None = None) -> dict:
+    """Create an API key bound to specific Agents."""
+    response = requests.post(
+        f"{BASE}/api-keys",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={
+            "name": name,
+            "expires_at": "2027-02-11T00:00:00Z",
+            "agent_ids": agent_ids or [],
+        },
+    )
     result = response.json()
+    if result["code"] != 0:
+        raise RuntimeError(f"create failed: {result['code']} {result['msg']}")
+    # data["key"] is available only in this one response
+    print(f"created {result['data']['key_prefix']}…")
+    return result["data"]
 
-    if result['code'] == 0:
-        api_key = result['data']['key']
-        print(f"API Key created: {api_key}")
-        print("Save this key securely - it won't be shown again!")
-        return result['data']
-    else:
-        raise Exception(f"Error: {result['msg']}")
+
+def list_api_keys(token: str, status: str = "active") -> dict:
+    """Page through your own API keys, filtered by status."""
+    response = requests.get(
+        f"{BASE}/api-keys",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"page": 1, "page_size": 20, "status": status},
+    )
+    return response.json()["data"]
+
 
 # Usage
-token = os.getenv("USER_TOKEN")
-new_key = create_api_key(
-    token,
-    "Production API Key",
-    ["chat", "agent:read"]
-)
+token = os.environ["USER_TOKEN"]
+new_key = create_api_key(token, "prod-chatbot")
+print("store the full key in your secret manager:", new_key["key"])
 ```
 
 ### JavaScript
 
 ```javascript
-async function createApiKey(token, name, scopes, rateLimit = 1000) {
-  const response = await fetch(
-    'https://your-domain.com/api/v1/api-keys',
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: name,
-        scopes: scopes,
-        rate_limit: rateLimit,
-        expires_at: '2027-02-11T00:00:00Z',
-      }),
-    }
-  );
+const BASE = 'https://your-domain.com/api/v1';
 
+async function createApiKey(token, name, agentIds = []) {
+  const response = await fetch(`${BASE}/api-keys`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      name,
+      expires_at: '2027-02-11T00:00:00Z',
+      agent_ids: agentIds,
+    }),
+  });
   const result = await response.json();
-
-  if (result.code === 0) {
-    const apiKey = result.data.key;
-    console.log(`API Key created: ${apiKey}`);
-    console.log('Save this key securely - it won\'t be shown again!');
-    return result.data;
-  } else {
-    throw new Error(result.msg);
+  if (result.code !== 0) {
+    throw new Error(`create failed: ${result.code} ${result.msg}`);
   }
+  return result.data; // data.key is available only in this one response
+}
+
+async function deactivateApiKey(token, keyId) {
+  const response = await fetch(`${BASE}/api-keys/${keyId}/deactivate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const result = await response.json();
+  if (result.code !== 0) {
+    throw new Error(`deactivate failed: ${result.code} ${result.msg}`);
+  }
+  return result.data;
 }
 
 // Usage
 const token = process.env.USER_TOKEN;
-const newKey = await createApiKey(
-  token,
-  'Production API Key',
-  ['chat', 'agent:read']
-);
+const created = await createApiKey(token, 'prod-chatbot');
+console.log('the full key is only available in this response:', created.key);
 ```
+
+## Related Documentation
+
+- [API Quick Start](./get-started) — send your first request with a key
+- [Authentication & Login API](./auth) — obtain the JWT session needed to manage keys
+- [API Errors and Retries](./errors) — unified handling for `2001`, `2002`, and `3000`

@@ -23,7 +23,7 @@ The Clouisle documentation website, built with <a href="https://fumadocs.dev">Fu
 
 ## About
 
-This repository is the official documentation site for [Clouisle](https://github.com/clouisle/Clouisle) — an enterprise-grade knowledge base and intelligent AI Agent platform.
+This repository is the official documentation site for [Clouisle](https://github.com/clouisle/Clouisle) — a multi-agent collaboration platform and workflow engine for building and orchestrating production-ready AI agent teams with sandboxed execution, hybrid RAG, and enterprise-grade security.
 
 Docs are written in MDX under `content/docs/`; Fumadocs generates routes, the sidebar, and the table of contents at build time. Page content is also exported for LLM consumption via `/llms.txt`, `/llms-full.txt`, and `/llms.mdx/*`.
 

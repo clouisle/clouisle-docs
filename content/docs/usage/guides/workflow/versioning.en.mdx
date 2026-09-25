@@ -1,17 +1,23 @@
 ---
 title: Workflow Versioning
-description: Publish snapshots, restore historical versions, and handle legacy definitions
+description: Publish snapshots, diff and restore historical versions, and handle legacy definitions
 icon: GitBranch
 ---
 
-Publishing a workflow automatically saves a version snapshot. A version contains the definition, variables, trigger configuration, and creation information.
+A version record is a snapshot of a workflow definition: `definition`, variables, trigger type, and trigger config. It is produced at two moments — the version number increments when the definition changes, and publishing archives the current version number.
+
+## Version Numbers and Snapshots
+
+- **Only definition changes bump the version**: `PUT /api/v1/workflows/{id}` runs `workflow.version += 1` whenever it is given a new `definition`. Changing only the name, description, icon, visibility, or trigger configuration does not increment it.
+- **Publishing archives it**: `POST /api/v1/workflows/{id}/publish` creates a `WorkflowVersion` snapshot for the current version number (skipped when that number already has one) and then sets the status to `published`. One workflow stores at most one snapshot per version number.
+- **Published runs read the snapshot, not the draft**: a production run loads the latest published version's snapshot, so edits on the draft never leak into a published workflow. Only debug runs use the draft.
 
 ## Publishing a Version
 
 1. Save the draft and open the **Checklist**.
 2. Fix all errors; evaluate warnings before publishing.
-3. Select **Publish** and set the run page presentation to **Form and Results** or **Results and Details**.
-4. After publishing, the version number increments and the run entry uses the currently published version.
+3. Select **Publish** and choose the run-page presentation in the dialog: **Form and result** (`presentation_mode: simple`, showing inputs, run status, and the final result) or **Result with details** (`presentation_mode: result_first`, prioritizing the result and letting people expand the execution trace and run details).
+4. After publishing, the run entry uses the current published version; the version number only moves again when the definition changes.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-publish-dialog.png" alt="Workflow publish dialog" />
@@ -20,12 +26,51 @@ Publishing a workflow automatically saves a version snapshot. A version contains
 
 ## Viewing and Restoring
 
-View snapshots in **Workflow Settings** > **Version History**. Select a version and click **Restore**; the system first saves the current state, then creates a new current version from the restored one. Restoring does not delete other history records.
+View snapshots in **Workflow Settings** > **Version History**, ordered by version number descending with the current one labelled. Select a version and click **Restore** (the UI offers "Restore to `v{version}`" and notes that the current version will be saved automatically). It then:
+
+1. Saves the current workflow state as a new snapshot;
+2. Overwrites the workflow with the target version's `definition`, variables, trigger type, and config, and increments `workflow.version`;
+3. Creates another snapshot describing the restored state.
+
+Restoring does not delete any other history, and the pre-restore state is itself saved as a snapshot, so it can be restored again.
+
+## Version APIs
+
+The persisted snapshots the UI reads and writes live under `/api/v1/workflows`:
+
+| Operation | Endpoint | Notes |
+| --- | --- | --- |
+| List snapshots | `GET /api/v1/workflows/{id}/versions` | `page` (default `1`), `page_size` (default `20`), ordered by version descending, returns `total` |
+| Read one version | `GET /api/v1/workflows/{id}/versions/{version}` | `version` is the integer version number, not a UUID |
+| Snapshot manually | `POST /api/v1/workflows/{id}/versions` | Creates a snapshot of the current state, body `{description}`; requires `workflow:update` |
+| Restore | `POST /api/v1/workflows/{id}/versions/{version}/restore` | Body `{description?}`; saves the current state first, then overwrites and increments the version number |
+
+A second set of programmatic version endpoints lives under `/api/v1/workflow-versions` (a separate store from the table above). Full headers, response shapes, and error codes: [Workflow Versions API](/api/workflow-versions).
+
+| Operation | Endpoint | Notes |
+| --- | --- | --- |
+| Create version | `POST /api/v1/workflow-versions` | Body carries `workflow_id`, `nodes`, `edges`, `config`, `description`; created as a draft and does not modify the workflow |
+| Version history | `GET /api/v1/workflow-versions/{workflow_id}/history` | `limit` 1–100 (default `20`), `offset` (default `0`), optional `status` filter |
+| Read a version | `GET /api/v1/workflow-versions/{workflow_id}/version/{version_id}` | Reads by version UUID |
+| Publish a version | `POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | Marks it published and writes that definition back to the workflow |
+| Archive a version | `POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | Marks it archived without touching other versions |
+| Diff versions | `GET /api/v1/workflow-versions/{workflow_id}/diff?from_version=&to_version=` | Returns added/removed/modified nodes, added/removed edges, and config changes |
+| Rollback | `POST /api/v1/workflow-versions/{workflow_id}/rollback` | Body `{version_id, create_backup}` (default `true`); archives the current version as a rollback backup and creates plus publishes a new version from the target definition |
+| Fork | `POST /api/v1/workflow-versions/{workflow_id}/fork` | Body `{version_id, new_workflow_id, new_name?}`; creates a draft version inside the target workflow |
+| Version stats | `GET /api/v1/workflow-versions/{workflow_id}/stats` | Total/published/draft/archived counts and the first/latest version timestamps |
+
+<Callout type="warn">
+  Versions served by `/api/v1/workflow-versions` are held by an in-process manager (its own source comment says production should use a database): they are lost when the process restarts, never appear in the **Version History** panel, and are not the same records as `/api/v1/workflows/{id}/versions`. Use the endpoints in the previous table when you need durable, UI-visible history.
+</Callout>
+
+<Callout type="info">
+  There is no marketplace API for workflow templates: no endpoint such as `/api/v1/workflow-templates` exists. Built-in templates are only instantiated into new workflows in the editor, and you still review model, knowledge-base, and other references after instantiation.
+</Callout>
 
 ## Legacy Workflows
 
 Legacy definitions with `schema_version` less than `2` can be loaded onto the canvas, but the run button is disabled. Re-saving writes the new type system version; this is a hard switch, and legacy definitions are not migrated automatically at runtime.
 
 <Callout type="warn">
-  Record version notes before publishing, and after restoring re-run the input boundary, conditional branches, sub-workflows, and external side-effect nodes.
+  Record version notes before publishing, and after restoring re-run the input boundary, conditional branches, decision branches, sub-workflows, and external side-effect nodes.
 </Callout>

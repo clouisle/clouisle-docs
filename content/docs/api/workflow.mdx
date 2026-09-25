@@ -41,20 +41,32 @@ icon: Workflow
 | GET | `/api/v1/workflows/{workflow_id}` | 获取工作流详情 |
 | PUT | `/api/v1/workflows/{workflow_id}` | 更新工作流 |
 | DELETE | `/api/v1/workflows/{workflow_id}` | 删除工作流 |
-| POST | `/api/v1/workflows/{workflow_id}/run` | 执行工作流 |
+| POST | `/api/v1/workflows/{workflow_id}/publish` | 发布工作流 |
+| POST | `/api/v1/workflows/{workflow_id}/unpublish` | 取消发布 |
+| POST | `/api/v1/workflows/{workflow_id}/duplicate` | 复制工作流 |
+| POST | `/api/v1/workflows/{workflow_id}/regenerate-webhook-token` | 重新生成 Webhook Token |
+| POST | `/api/v1/workflows/{workflow_id}/run` | 执行已发布工作流 |
+| POST | `/api/v1/workflows/{workflow_id}/debug` | 以当前草稿调试运行 |
+| GET | `/api/v1/workflows/runs` | 跨工作流列出运行记录 |
+| GET | `/api/v1/workflows/runs/stats` | 跨工作流运行统计 |
 | GET | `/api/v1/workflows/runs/{run_id}` | 获取执行状态 |
-| GET | `/api/v1/workflows/{workflow_id}/runs` | 列出执行历史 |
-| POST | `/api/v1/workflows/runs/{run_id}/cancel` | 取消执行 |
+| DELETE | `/api/v1/workflows/runs/{run_id}` | 删除运行记录 |
 | GET | `/api/v1/workflows/runs/{run_id}/stream` | SSE 执行事件流 |
 | GET | `/api/v1/workflows/runs/{run_id}/nodes` | 节点执行详情 |
-| GET | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-request` | 获取等待中暂停/审批请求 |
-| POST | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-requests/{req_id}/submit` | 提交审批或变量以恢复运行 |
-| POST | `/api/v1/workflows/webhook/{webhook_token}` | Webhook 触发 |
+| POST | `/api/v1/workflows/runs/{run_id}/cancel` | 取消执行 |
+| GET | `/api/v1/workflows/{workflow_id}/runs` | 列出该工作流的执行历史 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | 当前用户在该工作流下的运行 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | 当前用户的运行详情 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}/nodes` | 当前用户运行的节点详情 |
+| GET | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-request` | 获取等待中的暂停/审批请求 |
+| POST | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-requests/{pause_request_id}/submit` | 提交审批或变量以恢复运行 |
 | GET | `/api/v1/workflows/{workflow_id}/stats` | 工作流统计 |
 | GET | `/api/v1/workflows/{workflow_id}/stats/trends` | 趋势数据 |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | 当前用户的运行 |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | 当前用户的运行详情 |
-| POST | `/api/v1/workflows/{workflow_id}/regenerate-webhook-token` | 重新生成 Webhook Token |
+| GET | `/api/v1/workflows/{workflow_id}/versions` | 版本快照列表 |
+| GET | `/api/v1/workflows/{workflow_id}/versions/{version}` | 版本快照详情 |
+| POST | `/api/v1/workflows/{workflow_id}/versions` | 创建版本快照 |
+| POST | `/api/v1/workflows/{workflow_id}/versions/{version}/restore` | 恢复版本快照 |
+| POST | `/api/v1/workflows/webhook/{webhook_token}` | Webhook 触发 |
 ---
 
 ## 列出工作流
@@ -473,6 +485,52 @@ curl -X POST "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-4
 
 ---
 
+## 发布、取消发布与复制
+
+| 端点 | 说明 |
+| --- | --- |
+| `POST /api/v1/workflows/{workflow_id}/publish` | 发布工作流：`status` 转为 `published`，并分配/保留 `webhook_token` |
+| `POST /api/v1/workflows/{workflow_id}/unpublish` | 取消发布：`status` 回到 `draft` |
+| `POST /api/v1/workflows/{workflow_id}/duplicate` | 在所属团队内复制一份工作流，包含节点、连线、配置与变量 |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000/publish" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+- 发布/取消发布返回更新后的 `WorkflowOut`。
+- 复制返回新建的 `WorkflowOut`，状态为 `draft`，`run_count`/`success_count`/`fail_count` 归零。
+- 只有 `status: published` 的工作流才能通过 `POST /{workflow_id}/run` 执行；未发布时返回 `403` 并附 `workflow_not_published`。
+
+## 调试运行
+
+```
+POST /api/v1/workflows/{workflow_id}/debug
+```
+
+使用**当前草稿**定义运行工作流（不要求已发布），请求体与 `run` 相同（`{"inputs": {...}}`），需要 `workflow:run` 权限与工作流写访问。创建的运行记录 `is_debug: true`，可在运行列表中用 `is_debug=true` 过滤。
+
+**响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-790",
+    "stream_url": "/api/v1/workflows/runs/run-790/stream"
+  },
+  "msg": "Workflow execution started"
+}
+```
+
+## 删除运行记录
+
+```
+DELETE /api/v1/workflows/runs/{run_id}
+```
+
+删除一条运行记录（连同其节点执行记录），成功时 `data` 为 `{"id": "<run_id>"}`。
+
 ## 获取执行状态
 
 检查工作流运行的状态。
@@ -541,7 +599,7 @@ curl -X GET "https://your-domain.com/api/v1/workflows/runs/run-789" \
 **运行状态值：** `pending`、`running`、`success`、`waiting`、`failed`、`cancelled`、`timeout`。
 
 <Callout type="info">
-  用户自己发布的运行也可通过 `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}` 获取（需要 `workflow:run`）。节点级执行详情可通过 `GET /api/v1/workflows/runs/{run_id}/nodes` 获取。
+  用户自己发布的运行也可通过 `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}` 获取（需要 `workflow:run`），其节点级详情在 `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}/nodes`。管理视角的节点级执行详情可通过 `GET /api/v1/workflows/runs/{run_id}/nodes` 获取。
 </Callout>
 
 ---
@@ -570,7 +628,9 @@ GET /api/v1/workflows/{workflow_id}/runs
 | `page_size` | integer | 否 | 20 | 每页条数（最大 100） |
 | `status` | string | 否 | - | 按状态过滤：`pending`、`running`、`success`、`waiting`、`failed`、`cancelled`、`timeout` |
 | `is_debug` | boolean | 否 | - | 按调试运行过滤 |
-| `search` | string | 否 | - | 搜索运行 |
+| `search` | string | 否 | - | 按运行 ID 搜索（非 UUID 时返回空结果） |
+| `created_after` | string | 否 | - | 只返回该时间之后创建的运行（ISO 8601） |
+| `created_before` | string | 否 | - | 只返回该时间之前创建的运行（ISO 8601） |
 
 ### 请求示例
 
@@ -665,6 +725,55 @@ curl -X POST "https://your-domain.com/api/v1/workflows/runs/run-789/cancel" \
 ```
 
 ---
+
+## 跨工作流运行列表与统计
+
+除按工作流查询外，还可以在**全部可访问工作流**范围内查询运行记录与统计。两者都按每个工作流的可见性做收敛（YUN-153）：其他成员的 PRIVATE 工作流即使与自己同团队也不会出现在结果中，与 `GET /workflows/{workflow_id}` 的访问规则一致。
+
+### 跨工作流运行列表
+
+```
+GET /api/v1/workflows/runs
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `team_id` | array | 否 | - | 按团队过滤（可重复，需团队成员身份） |
+| `workflow_id` | array | 否 | - | 按工作流过滤（可重复） |
+| `status` | array | 否 | - | 按状态过滤（可重复） |
+| `trigger_type` | array | 否 | - | 按触发类型过滤（可重复） |
+| `user_id` | array | 否 | - | 按触发用户过滤（可重复） |
+| `is_debug` | boolean | 否 | - | 是否只看调试运行 |
+| `search` | string | 否 | - | 按工作流名称搜索 |
+| `page` | integer | 否 | 1 | 页码 |
+| `page_size` | integer | 否 | 20 | 每页条数（最大 100） |
+
+需要 `workflow:read`。
+
+### 跨工作流运行统计
+
+```
+GET /api/v1/workflows/runs/stats?period=7d
+```
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `team_id` | string | 否 | - | 按团队过滤 |
+| `period` | string | 否 | - | 时间范围：`7d`、`30d` |
+| `own_only` | boolean | 否 | `false` | 只统计当前用户创建的工作流 |
+
+返回 `total_runs`、`runs_by_status`、`runs_by_workflow`（按运行数排序的前 10 个工作流）、`avg_duration_ms`。需要 `workflow:read`。
+
+## 工作流版本
+
+单个工作流的版本快照（整数编号）由本路由的 `/{workflow_id}/versions` 端点管理；带 Diff、发布、归档、回滚与 Fork 的完整版本管理 API 在[工作流版本 API](/api/workflow-versions) 中，路径为 `/api/v1/workflow-versions/...`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/workflows/{workflow_id}/versions` | 分页列出快照（按版本号倒序） |
+| GET | `/api/v1/workflows/{workflow_id}/versions/{version}` | 获取整数版本快照 |
+| POST | `/api/v1/workflows/{workflow_id}/versions` | 以当前状态创建快照 |
+| POST | `/api/v1/workflows/{workflow_id}/versions/{version}/restore` | 恢复到该快照 |
 
 ## Webhook 触发
 
@@ -777,7 +886,11 @@ curl -X GET "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-44
 }
 ```
 
-趋势端点同样可用：`GET /api/v1/workflows/{workflow_id}/stats/trends?period=7d`（period：`7d`、`30d`）。
+趋势端点同样可用：`GET /api/v1/workflows/{workflow_id}/stats/trends?period=7d`（`period` 默认 `7d`，可选 `7d`、`30d`；返回 `period` 与按天分桶的 `data` 数组，每项含 `date`、`runs`、`success`、`failed`、`avgDuration`）。
+
+<Callout type="warn">
+  `{workflow_id}/stats` 与 `{workflow_id}/stats/trends` 虽然只需要 `workflow:read` 声明，但实现上会对目标工作流执行**写**访问校验（`require_write=True`）。因此只有工作流可写（创建者或具备写权限的团队成员）的调用者才能读取这两个端点的数据；只读共享视图会被拒绝。
+</Callout>
 
 ---
 

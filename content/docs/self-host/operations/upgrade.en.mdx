@@ -8,18 +8,68 @@ Before upgrading, read the target version's CHANGELOG and confirm database migra
 
 ## Compose Upgrade
 
-1. Back up PostgreSQL, Qdrant, upload volumes, and `.env`.
-2. Pull the new images: `docker compose pull`.
-3. Review each service's configuration and image tags.
-4. Run `docker compose up -d` and watch the `api` and Worker logs first.
-5. Check `/api/v1/health`, login, model list, Knowledge Base retrieval, and one published Agent.
-6. Check whether old Workflow definitions need to be re-saved with `schema_version: 2`.
+The Compose file references prebuilt images and has no `build:` blocks, and `up -d --force-recreate` is a stop/recreate operation rather than a rolling update, so schedule a maintenance window. Do not rely on `latest` in production; pin an immutable tag or digest.
 
-The installer upgrade preserves the existing `.env`, but you still need to review new variables and defaults.
+Before upgrading, back up PostgreSQL, Qdrant snapshots, the upload volume, and `.env` (back up Redis queue state only if you need it), and test the exact image tags in staging.
+
+```bash
+cd /opt/clouisle        # replace with your install directory (installer default: /opt/clouisle)
+docker compose pull
+docker compose up -d --force-recreate
+
+docker compose ps
+docker compose logs --tail=50 api worker sandbox-worker beat frontend
+curl --fail http://localhost:8000/api/v1/health
+```
+
+Confirm `worker`, `sandbox-worker`, and `beat` logs are free of startup errors and that `beat` stays at exactly one replica.
+
+When you build your own images, build all three from the **repository root** and push them under the same tag:
+
+```bash
+REGISTRY=registry.example.com/clouisle
+IMAGE_TAG=vX.Y.Z
+docker build -f deploy/dockerfiles/backend.Dockerfile -t "$REGISTRY/clouisle-backend:$IMAGE_TAG" .
+docker build -f deploy/dockerfiles/frontend.Dockerfile -t "$REGISTRY/clouisle-frontend:$IMAGE_TAG" .
+docker build -f deploy/dockerfiles/sandbox-worker.Dockerfile -t "$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG" .
+docker push "$REGISTRY/clouisle-backend:$IMAGE_TAG"
+docker push "$REGISTRY/clouisle-frontend:$IMAGE_TAG"
+docker push "$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
+```
 
 ## Kubernetes Upgrade
 
-Run `helm upgrade` with the same release and namespace, or review and apply newly generated manifests. Update the API and migrations first, then Worker/Beat/Frontend; keep Beat at a single replica during production.
+Run `helm upgrade` with the same release and namespace (update the `images.backend`, `images.sandboxWorker`, and `images.frontend` tags and keep the existing Secret), or review and apply newly generated manifests. With the manifest, update each workload and watch its rollout:
+
+```bash
+kubectl -n clouisle set image deployment/api api="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/worker worker="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/sandbox-worker sandbox-worker="$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/beat beat="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle set image deployment/frontend frontend="$REGISTRY/clouisle-frontend:$IMAGE_TAG"
+
+kubectl -n clouisle rollout status deployment/api
+kubectl -n clouisle rollout status deployment/worker
+kubectl -n clouisle rollout status deployment/sandbox-worker
+kubectl -n clouisle rollout status deployment/beat
+kubectl -n clouisle rollout status deployment/frontend
+```
+
+The API rolling strategy is `maxUnavailable: 0` / `maxSurge: 1`, so a new pod must become ready before an old one retires. Schema changes happen when the API starts (Tortoise ORM, no Alembic), so old replicas keep serving on the new schema — schema changes must stay backward compatible.
+
+<Callout type="error">
+  Do not run an Alembic migration command; that workflow does not exist. The schema is initialized and updated by `init_db` through Tortoise ORM at backend startup.
+</Callout>
+
+The installer upgrade preserves the existing `.env`, but you still need to review new variables and defaults. Check whether old Workflow definitions need to be re-saved with `schema_version: 2`.
+
+## Post-Upgrade Verification
+
+- All infrastructure and application services are running, with `beat` at exactly one replica.
+- `GET /api/v1/health` succeeds through the public proxy.
+- Login, Agent chat/streaming, file upload, Knowledge Base retrieval, and Workflow execution all work.
+- `worker`, `sandbox-worker`, and `beat` logs are free of startup errors.
+- Backup and monitoring jobs keep running.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/upgrade-rollout-status.svg" alt="Upgrade rollout status" />
@@ -28,4 +78,17 @@ Run `helm upgrade` with the same release and namespace, or review and apply newl
 
 ## Rollback
 
-Before rolling back images, confirm whether the database migration is reversible. If the migration is not reversible, do not just switch back to the old image; restore a backup in an isolated environment and verify. Workflow versions can be restored separately in the product UI, but this is not equivalent to a service rollback.
+Before rolling back images, confirm whether the database schema change is reversible. If it is not reversible, do not just switch back to the old image; restore a backup in an isolated environment and verify. Workflow versions can be restored separately in the product UI, but this is not equivalent to a service rollback.
+
+```bash
+# Compose: point the Compose file/environment back at the previous image tag, then recreate
+docker compose pull
+docker compose up -d --force-recreate
+
+# Kubernetes: undo each application workload
+kubectl -n clouisle rollout undo deployment/api
+kubectl -n clouisle rollout undo deployment/worker
+kubectl -n clouisle rollout undo deployment/sandbox-worker
+kubectl -n clouisle rollout undo deployment/beat
+kubectl -n clouisle rollout undo deployment/frontend
+```

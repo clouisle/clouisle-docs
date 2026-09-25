@@ -8,7 +8,7 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ## 节点分类与注册目录
 
-前端节点选择器当前提供 18 个常规画布节点；后端注册表另包含 24 个可执行节点类型（包括 `user_input`、`trigger`、`iteration_start`、`loop_start` 等内部入口节点）。容器内的上下文菜单会移除 `iteration`、`loop` 与 `pause`，并加入结束视觉标记。画布还保留 `start`、`iteration_exit`、`loop_exit` 与 `comment` 等前端别名或视觉标记，它们不都对应独立执行器。下表将常规节点、运行时节点和视觉辅助标记一并列出：
+前端画布选择器当前提供 **19 个可添加节点类型**（`normalCategories`：模型 2 + 逻辑 6 + 数据 6 + 扩展 5）；进入迭代/循环容器后，选择器改为容器内专用目录（用 `iteration_exit`/`loop_exit` 替换 `iteration`/`loop`/`pause`）。后端执行器注册表另有 **25 个可执行节点类型**，包含 `user_input`、`trigger`、`iteration_start`、`loop_start` 等内部入口节点。画布还保留 `start`、`iteration_exit`、`loop_exit`、`comment` 等前端别名或视觉标记，它们不都对应独立执行器。下表将常规节点、运行时节点和视觉辅助标记一并列出：
 
 | 分类 | 节点类型标识 (`type`) | 显示名称 | 核心用途 |
 | --- | --- | --- | --- |
@@ -16,6 +16,7 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 | | `media_generation` | 媒体生成 | 调用团队授权的生图或生视频模型 |
 | **流程与逻辑 (Logic)** | `condition` | 条件分支 | 多分支 IF/ELSE 逻辑流转 |
 | | `question_classifier` | 问题分类 | 基于大语言模型自动识别用户意图分类 |
+| | `decision` | 决策 | 调用决策模型做类型化判断并据此选择分支 |
 | | `iteration` | 迭代容器 | 对数组变量逐项循环处理 |
 | | `loop` | 循环容器 | 重复执行子图直到条件满足或达到上限 |
 | | `pause` | 暂停 | 工作流挂起，等待人工审核或补充输入 |
@@ -28,15 +29,19 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 | **扩展与集成 (Extension)** | `sub_workflow` | 子工作流 | 嵌套调用工作空间内已发布的其他工作流 |
 | | `agent` | 智能体 | 调用已发布的 Agent 执行自主决策推理 |
 | | `tool` | 工具 | 调用系统内置工具、自定义 HTTP 工具或 MCP 服务 |
-| | `http_request` | HTTP 请求 | 发起外部 HTTP/HTTPS API 调用（受 SSRF 白名单管控） |
 | | `knowledge_retrieval` | 知识库检索 | 检索绑定的知识库并回传切片上下文 |
-| | `document_extractor` | 文档提取器 | 从上传的 PDF/DOCX 文件中提取纯文本或 Markdown |
 | | `answer` | 输出 | 汇总最终业务结果，支持向客户端流式响应 |
+| **执行器级（不在画布选择器）** | `http_request` | HTTP 请求 | 发起外部 HTTP/HTTPS API 调用（受 SSRF 白名单管控） |
+| | `document_extractor` | 文档提取器 | 从上传的 PDF/DOCX 文件中提取纯文本或 Markdown |
 | **开始与生命周期** | `user_input` | 开始 | 定义人工发起的输入参数与系统变量（前端画布别名为 `start`） |
 | | `trigger` | 触发器 | Webhook、定时或事件驱动的入口节点 |
 | | `iteration_start` / `loop_start` | 容器开始 | 容器内部的虚拟入口执行节点（透传父容器上下文） |
 | | `iteration_exit` / `loop_exit` | 容器结束 | 迭代/循环容器在前端画布中的结束视觉标记（无独立后端执行器，运行时由容器按 `parentId` 调度子节点） |
 | | `comment` | 注释 | 画布静态说明贴纸，不参与运行时执行 |
+
+<Callout type="info" title="选择器节点 vs 执行器">
+`http_request` 与 `document_extractor` 后端有独立执行器（可被 API 或导入的包引用），但**不出现在画布选择器**中，无法从界面直接拖拽添加。反之，`iteration_exit`/`loop_exit` 只是画布上的容器出口标记，没有独立执行器，运行时由容器按 `parentId` 调度。
+</Callout>
 
 ---
 
@@ -66,7 +71,53 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ---
 
-### 2. 媒体生成节点 (`media_generation`)
+### 2. 决策节点 (`decision`)
+
+决策节点把一个「状态」交给**决策模型**（`model_type: decision`，当前为 TypeSafe AI）判断，并根据返回的**类型化答案**选择分支。与 LLM 节点不同，决策模型不生成文本，只返回类型化答案与概率分布，节点负责把答案映射为输出连线（handle）。
+
+配置容器：`node.data.decisionConfig`（兼容旧定义中的 `node.data.config`）。
+
+| 字段 | 类型 | 默认值 | 说明与取值范围 |
+| --- | --- | --- | --- |
+| `modelId` | UUID string | 必填 | 团队授权的决策模型 ID；下拉只列出 `model_type: decision` 且已启用的模型 |
+| `stateTemplate` | string | 必填（旧字段 `inputVariable` 兼容） | 交给模型评估的状态，支持 `{{变量}}` 插值；解析后必须为字符串 |
+| `questionId` | string | `"decision"` | 问题键名，用于从模型回应中取回对应答案（`answers[questionId]`） |
+| `questionType` | string | `"choice"` | 问题类型：`choice`（选项）、`score`（按等级打分）或 `noul`（是/否概率） |
+| `instructions` | string | 必填 | 交给模型的判断指令（它要决定什么） |
+| `options` | string[] | 前端默认 `["yes","no"]` | `choice`：1–255 个互不重复的非空选项；`score`：2–10 个互不重复的非空等级（有序） |
+| `defaultHandle` | string | `"default"` | 置信度低于阈值或答案无法解析时走的分支 handle |
+| `confidenceThreshold` | number | 未设置 | 可选，`0`–`1`（前端步进 `0.01`）；仅 `choice`/`score` 生效 |
+
+问题类型行为：
+- `choice`：要求模型从 `options` 中选一个。每个选项即一个输出 handle。
+- `score`：要求模型按 `options` 给出的**有序等级**打分；概率最高的等级决定分支，数值 `score` 同时作为输出。
+- `noul`：返回 `0`–`1` 的是/否概率，`>= 0.5` 走 `yes`，否则走 `no`；`noul` 不返回 `confidence`。
+
+分支 handle：
+- `choice`/`score`：每个选项/等级一个 handle，外加回退 handle（默认 `default`）。
+- `noul`：固定 `yes` 与 `no`，外加回退 handle。
+- 重命名选项时编辑器会尽量把已有连线重映射到新 handle（`remapDecisionBranchEdges`）；无法映射的旧 handle 会被校验器标记为错误（`decisionBranchHandleInvalid`），需要手动重连。
+- 早期把 `yes`/`no` 当作选项的决策节点，加载时会自动把分支连线迁移到新选项名（`migrateLegacyDecisionBranchEdges`）。
+
+输出变量：
+- `answer` (string)：选中的选项/等级，或 `yes`/`no`
+- `selected_handle` (string)：实际激活的分支 handle（可能为回退 handle）
+- `usage` (object)：决策模型 Token 计量
+- `choice` + `confidence` + `probabilities`（`choice` 类型）
+- `score` + `confidence` + `probabilities`（`score` 类型）
+- `noul` (number)：是/否概率（`noul` 类型）
+
+<Callout type="warn" title="失败路径">
+缺少 `modelId`、`stateTemplate` 或 `instructions`，`questionType` 非法，或选项数量/唯一性不满足时，节点直接返回 `validation_error`；模型返回的答案类型或概率键与配置不一致时返回 `decision_result_missing`，不会静默走默认分支。
+</Callout>
+
+<Callout type="info" title="失败重试（节点级）">
+决策节点作为工作流节点受**节点级**重试策略约束（`backend/app/services/workflow/retry.py`）：默认策略为 `RetryPolicy(max_retries=2, base_delay=1.0)`，即最多重试 2 次（共 3 次尝试），退避按指数基数 `2.0` 计算并带最多 25% 抖动，单次延迟上限 `60` 秒。编排器在 `enable_retry` 为真（`WorkflowOrchestrator` 默认）时用 `RetryableExecutor` 包裹执行器，因此节点返回 `validation_error`、`decision_result_missing` 等失败结果也会被重试。该重试来自节点策略，而非 TypeSafe 适配器（决策适配器本身没有重试配置）。
+</Callout>
+
+---
+
+### 3. 媒体生成节点 (`media_generation`)
 
 配置容器：`node.data.mediaGenerationConfig` 或 `node.data.config`。
 
@@ -88,7 +139,7 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ---
 
-### 3. 条件分支节点 (`condition`)
+### 4. 条件分支节点 (`condition`)
 
 配置容器：`node.data.conditionConfig` 或 `node.data.config`。
 
@@ -102,7 +153,7 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ---
 
-### 4. HTTP 请求节点 (`http_request`)
+### 5. HTTP 请求节点 (`http_request`)
 
 配置容器：`node.data.config`。
 
@@ -128,7 +179,7 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ---
 
-### 5. 知识库检索节点 (`knowledge_retrieval`)
+### 6. 知识库检索节点 (`knowledge_retrieval`)
 
 配置容器：`node.data.knowledgeRetrievalConfig`。
 
@@ -150,20 +201,21 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ---
 
-### 6. 代码执行节点 (`code`)
+### 7. 代码执行节点 (`code`)
 
 配置容器：`node.data.codeConfig` 或 `node.data.config`。
 
 在沙箱安全容器中执行，默认超时 `30` 秒（`CODE_TIMEOUT = 30`）。
 
-- **Python 入口**：必须声明 `def main(inputs):` 函数，形参 `inputs` 为字典，必须返回 `dict`。
-- **JavaScript 入口**：必须声明 `function main(params)` 或 `const main = (params) =>`，必须返回 `object`。
+- **Python 入口**：`language: "python"` 时，必须声明 `def main(inputs):` 函数，形参 `inputs` 为字典，必须返回 `dict`。
+- **JavaScript 入口**：`language: "javascript"` 时，必须声明 `function main(params)` 或 `const main = (params) =>`，必须返回 `object`。
+- 其他 `language` 取值会被拒绝（`unsupported_code_execution_language`）。
 
 输出变量：函数返回字典中的所有键值对将自动映射为下游可用的独立变量。
 
 ---
 
-### 7. 数据处理辅助节点
+### 8. 数据处理辅助节点
 
 #### 模板转换 (`template`)
 - 配置容器：`node.data.templateConfig`。
@@ -198,7 +250,7 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 ---
 
-### 8. 流程控制与容器节点
+### 9. 流程控制与容器节点
 
 #### 问题分类 (`question_classifier`)
 - 配置容器：`node.data.questionClassifierConfig`。
@@ -239,7 +291,8 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
    - 校验器会标记缺少上游边的节点；`user_input`、`trigger`、`iteration_start`、`loop_start` 和 `comment` 除外。
 2. **节点配置检查**：
    - 依据节点类型报告诸如缺少模型、工具、知识库、提取参数、变量赋值或容器处理节点等问题。
-   - `condition`、`question_classifier`、`code`、`sub_workflow`、`agent`、`media_generation`、`pause` 与变量处理节点都有对应配置检查。
+   - `condition`、`question_classifier`、`decision`、`code`、`sub_workflow`、`agent`、`media_generation`、`pause` 与变量处理节点都有对应配置检查。
+   - `decision` 节点会校验 `stateTemplate`、`instructions`、选项数量与唯一性，以及连线是否引用了旧的分支 handle（`decisionBranchHandleInvalid`）。
 3. **变量与容器检查**：
    - 编辑器报告当前可见上游变量中不存在的变量引用、非法或重复参数名，以及容器结构相关问题。
    - 编辑器也会报告迭代/循环容器中 `pause` 节点的放置问题。

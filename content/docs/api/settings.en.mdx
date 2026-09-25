@@ -25,7 +25,8 @@ The Settings API manages administrator site configuration and the unauthenticate
 Admin endpoints require a JWT or an API key with the corresponding permission:
 
 - `admin:settings:read`: read settings
-- `admin:settings:update`: update and reset settings
+- `admin:settings:update`: update, reset, and trigger notification-channel tests
+- `audit:export`: audit-log archiving (both `archive-audit-logs` endpoints)
 
 The public settings endpoint requires no authentication. The admin API is primarily used by the administration UI and should not be treated as an anonymous public API.
 
@@ -36,7 +37,7 @@ curl -X GET "https://your-domain.com/api/v1/admin/site-settings?category=general
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
 ```
 
-The optional `category` filter accepts values such as `general`, `security`, `email`, `storage`, `notification`, and `memory`. A single-setting response contains `key`, `value`, `value_type`, `category`, `description`, and `is_public`.
+The optional `category` filter accepts `general`, `security`, `email`, `storage`, `notification`, `memory`, `audit`, `sso`, `retrieval`, `dingtalk`, `wechat`, `feishu`, `slack`, and `webhook`. A single-setting response contains `key`, `value`, `value_type`, `category`, `description`, and `is_public`.
 
 ## Update Settings
 
@@ -108,7 +109,7 @@ GET /api/v1/admin/site-settings/auto-notifications
 PUT /api/v1/admin/site-settings/auto-notifications
 ```
 
-Notification test endpoints include `test-email`, `test-dingtalk`, `test-wechat`, `test-feishu`, `test-webhook`, and `test-slack`. `test-email` accepts `{ "to_email": "admin@example.com" }`; the other test endpoints take no body.
+Notification test endpoints include `test-email`, `test-dingtalk`, `test-wechat`, `test-feishu`, `test-webhook`, and `test-slack`; all require `admin:settings:update`. `test-email` accepts `{ "email": "admin@example.com" }` and requires `smtp_enabled` to be `true`, otherwise it returns `smtp_not_configured`; the other test endpoints take no body, but the channel must be enabled and configured or they return `*_not_configured`.
 
 ## Audit-Log Archiving
 
@@ -117,7 +118,7 @@ POST /api/v1/admin/site-settings/archive-audit-logs
 GET  /api/v1/admin/site-settings/archive-audit-logs/{task_id}
 ```
 
-The start endpoint returns a background task ID. Use the status endpoint to inspect the archive task.
+The start endpoint returns a background task ID. Use the status endpoint to inspect the archive task. Both endpoints require the `audit:export` permission; once queued, the start endpoint returns `{ "task_id": "...", "status": "pending" }`.
 
 ## Common Errors
 

@@ -1,0 +1,456 @@
+---
+title: 团队模型授权 API
+description: 配置团队可用模型、配额上限与用量查询
+icon: Boxes
+---
+
+团队模型授权 API 决定**某个团队可以使用哪些模型**，以及每个模型的配额上限与当前用量。路由挂载在团队前缀下，因此所有路径都是 `/api/v1/teams/{team_id}/models...`。
+
+<Callout type="error" title="写操作仅限超级管理员">
+  `POST`、`PUT`、`DELETE`（含批量）全部依赖 `get_current_active_superuser`：**只有超级管理员能修改团队模型授权**，非超级管理员调用返回 `403` + `3001`（`insufficient_privileges`）。
+
+  产品界面中团队页的「模型授权」标签页是**只读**的——它只调用 `GET /teams/{team_id}/models`，并提示“由系统管理员分配”。不要为团队成员提供写入口。
+</Callout>
+
+<Callout type="info" title="前置条件与认证">
+  所有端点都需要已认证的 JWT 用户会话（`Authorization: Bearer <token>`）。
+
+  读取端点（列表、`available-models`、`quota`）不校验权限码，只做成员校验：超级管理员可直接读取；其它用户必须是该团队成员，否则返回 `403` + `3002`（`not_team_member`）。
+
+  写入端点必须是超级管理员，且不需要团队角色。
+</Callout>
+
+## 端点总览
+
+| 方法 | 路径 | 用途 | 访问要求 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/{team_id}/models` | 列出该团队已授权的模型 | 团队成员 |
+| POST | `/api/v1/teams/{team_id}/models` | 为团队授权一个模型 | 超级管理员 |
+| PUT | `/api/v1/teams/{team_id}/models/{model_id}` | 更新某个授权的限额/状态 | 超级管理员 |
+| DELETE | `/api/v1/teams/{team_id}/models/{model_id}` | 撤销某个模型授权 | 超级管理员 |
+| POST | `/api/v1/teams/{team_id}/models/batch` | 批量授权模型 | 超级管理员 |
+| DELETE | `/api/v1/teams/{team_id}/models/batch` | 批量撤销授权 | 超级管理员 |
+| GET | `/api/v1/teams/{team_id}/available-models` | 列出已授权且启用的模型 | 团队成员 |
+| GET | `/api/v1/teams/{team_id}/models/quota` | 查询每个模型的配额用量 | 团队成员 |
+
+## 授权对象
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string (UUID) | 授权记录 ID |
+| `team_id` | string (UUID) | 所属团队 |
+| `model_id` | string (UUID) | 模型 ID |
+| `model` | object | 模型摘要：`id`、`name`、`provider`、`provider_display_name`、`model_id`、`model_type`、`capabilities` |
+| `daily_token_limit` | integer \| null | 每日 Token 限额，`null` 表示无限制 |
+| `monthly_token_limit` | integer \| null | 每月 Token 限额，`null` 表示无限制 |
+| `daily_request_limit` | integer \| null | 每日请求次数限额，`null` 表示无限制 |
+| `monthly_request_limit` | integer \| null | 每月请求次数限额，`null` 表示无限制 |
+| `daily_tokens_used` | integer | 当日已用 Token，默认 `0` |
+| `monthly_tokens_used` | integer | 当月已用 Token，默认 `0` |
+| `daily_requests_used` | integer | 当日请求次数，默认 `0` |
+| `monthly_requests_used` | integer | 当月请求次数，默认 `0` |
+| `is_enabled` | boolean | 该授权是否生效，默认 `true` |
+| `priority` | integer | 团队内模型选择优先级，默认 `0`；越大越优先 |
+| `created_at` / `updated_at` | string (ISO 8601) | 创建与更新时间 |
+
+`model_type` 取值：`chat`、`embedding`、`rerank`、`tts`、`stt`、`audio_generation`、`text_to_image`、`text_to_video`、`decision`。
+
+---
+
+## 1. 列出团队模型授权
+
+```
+GET /api/v1/teams/{team_id}/models
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_type` | string | 否 | 按模型类型过滤，如 `chat`、`embedding` |
+
+按 `priority` 倒序、`created_at` 升序返回。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/teams/550e8400-e29b-41d4-a716-446655440000/models?model_type=chat" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "team_id": "550e8400-e29b-41d4-a716-446655440000",
+      "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+      "model": {
+        "id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+        "name": "GPT-4o",
+        "provider": "openai",
+        "provider_display_name": "OpenAI",
+        "model_id": "gpt-4o",
+        "model_type": "chat",
+        "capabilities": {"chat": true, "vision": true}
+      },
+      "daily_token_limit": 1000000,
+      "monthly_token_limit": 20000000,
+      "daily_request_limit": null,
+      "monthly_request_limit": null,
+      "daily_tokens_used": 122880,
+      "monthly_tokens_used": 1980420,
+      "daily_requests_used": 412,
+      "monthly_requests_used": 6031,
+      "is_enabled": true,
+      "priority": 0,
+      "created_at": "2026-09-01T09:00:00Z",
+      "updated_at": "2026-09-20T11:30:00Z"
+    }
+  ],
+  "msg": "success"
+}
+```
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `404` | `4004` | `team_not_found` |
+| `403` | `3002` | `not_team_member`：非团队成员且非超级管理员 |
+
+---
+
+## 2. 授权一个模型
+
+```
+POST /api/v1/teams/{team_id}/models
+```
+
+**仅超级管理员。**
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `model_id` | string (UUID) | 是 | - | 要授权的模型 |
+| `daily_token_limit` | integer \| null | 否 | `null` | 每日 Token 限额，≥ 0 |
+| `monthly_token_limit` | integer \| null | 否 | `null` | 每月 Token 限额，≥ 0 |
+| `daily_request_limit` | integer \| null | 否 | `null` | 每日请求次数限额，≥ 0 |
+| `monthly_request_limit` | integer \| null | 否 | `null` | 每月请求次数限额，≥ 0 |
+| `is_enabled` | boolean | 否 | `true` | 是否生效 |
+| `priority` | integer | 否 | `0` | 优先级 |
+
+所有限额字段为 `null` 或省略时表示**无限制**。
+
+```json
+{
+  "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+  "daily_token_limit": 1000000,
+  "monthly_token_limit": 20000000,
+  "is_enabled": true,
+  "priority": 0
+}
+```
+
+**成功响应（200 OK）：** `data` 为新建的[授权对象](#授权对象)。授权成功后会给团队发送一条 `team.model_granted` 通知。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `403` | `3001` | `insufficient_privileges`：非超级管理员 |
+| `404` | `4004` | `team_not_found` |
+| `404` | `6100` | `model_not_found` |
+| `400` | `6102` | `team_model_already_authorized`：该模型已授权 |
+| `422` | `1001` | 请求校验失败（`model_id` 缺失、限额为负数） |
+
+---
+
+## 3. 更新授权配置
+
+```
+PUT /api/v1/teams/{team_id}/models/{model_id}
+```
+
+**仅超级管理员。** 所有字段可选，只更新请求体中出现的字段。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `daily_token_limit` | integer \| null | 每日 Token 限额，≥ 0 |
+| `monthly_token_limit` | integer \| null | 每月 Token 限额，≥ 0 |
+| `daily_request_limit` | integer \| null | 每日请求次数限额，≥ 0 |
+| `monthly_request_limit` | integer \| null | 每月请求次数限额，≥ 0 |
+| `is_enabled` | boolean \| null | 是否生效 |
+| `priority` | integer \| null | 优先级 |
+
+```json
+{
+  "daily_token_limit": 2000000,
+  "is_enabled": false
+}
+```
+
+**成功响应（200 OK）：** `data` 为更新后的[授权对象](#授权对象)。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `403` | `3001` | 非超级管理员 |
+| `404` | `6101` | `team_model_not_found`：该团队未授权此模型 |
+
+---
+
+## 4. 撤销授权
+
+```
+DELETE /api/v1/teams/{team_id}/models/{model_id}
+```
+
+**仅超级管理员。** 撤销后会向团队发送 `team.model_revoked` 通知。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "team_id": "550e8400-e29b-41d4-a716-446655440000",
+    "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c"
+  },
+  "msg": "Model authorization revoked successfully"
+}
+```
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `403` | `3001` | 非超级管理员 |
+| `404` | `6101` | `team_model_not_found` |
+
+---
+
+## 5. 批量授权
+
+```
+POST /api/v1/teams/{team_id}/models/batch
+```
+
+**仅超级管理员。**
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_ids` | array of string (UUID) | 是 | 模型 ID 列表，至少 1 个 |
+| `daily_token_limit` | integer \| null | 否 | 应用于每个新授权的每日 Token 限额 |
+| `monthly_token_limit` | integer \| null | 否 | 应用于每个新授权的每月 Token 限额 |
+| `daily_request_limit` | integer \| null | 否 | 应用于每个新授权的每日请求限额 |
+| `monthly_request_limit` | integer \| null | 否 | 应用于每个新授权的每月请求限额 |
+
+```json
+{
+  "model_ids": [
+    "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+    "8a7b6c5d-4e3f-4a2b-9c8d-7e6f5a4b3c2d"
+  ],
+  "monthly_token_limit": 5000000
+}
+```
+
+**成功响应（200 OK）：** `data` 为**本次新建**的授权对象数组。
+
+<Callout type="info">
+  已授权的模型与不存在的模型 ID 会被**静默跳过**，不报错也不出现在结果里；因此返回数组长度可能小于 `model_ids`。批量授权不设置 `is_enabled` / `priority`，新记录使用默认值（`true` / `0`）。
+</Callout>
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `403` | `3001` | 非超级管理员 |
+| `404` | `4004` | `team_not_found` |
+| `422` | `1001` | `model_ids` 为空或格式非法 |
+
+---
+
+## 6. 批量撤销
+
+```
+DELETE /api/v1/teams/{team_id}/models/batch
+```
+
+**仅超级管理员。** 请求体只有 `model_ids`（至少 1 个）。
+
+```json
+{
+  "model_ids": ["6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c"]
+}
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {"deleted_count": 1},
+  "msg": "Model authorizations revoked successfully"
+}
+```
+
+`deleted_count` 是实际删除的记录数；不存在的授权不计入。撤销成功后会给团队发送 `team.model_revoked` 通知。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `403` | `3001` | 非超级管理员 |
+| `404` | `4004` | `team_not_found` |
+
+---
+
+## 7. 列出可用模型
+
+```
+GET /api/v1/teams/{team_id}/available-models
+```
+
+只返回**已授权、授权已启用、且模型自身也启用**的模型（`is_enabled=true`），按 `priority` 倒序。中台/前端下拉选择应使用本端点而非全量列表。
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `model_type` | string | 否 | 按模型类型过滤 |
+
+**成功响应（200 OK）：** `data` 为模型摘要数组：
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+      "name": "GPT-4o",
+      "provider": "openai",
+      "provider_display_name": "OpenAI",
+      "model_id": "gpt-4o",
+      "model_type": "chat",
+      "capabilities": {"chat": true, "vision": true}
+    }
+  ],
+  "msg": "success"
+}
+```
+
+**错误：** `404` + `4004`（`team_not_found`）、`403` + `3002`（`not_team_member`）。
+
+---
+
+## 8. 查询配额用量
+
+```
+GET /api/v1/teams/{team_id}/models/quota
+```
+
+返回团队每个已授权模型的配额与用量（包含已禁用授权）。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+      "model_name": "GPT-4o",
+      "model_type": "chat",
+      "daily_token_limit": 1000000,
+      "daily_tokens_used": 122880,
+      "daily_token_percent": 12.29,
+      "monthly_token_limit": 20000000,
+      "monthly_tokens_used": 1980420,
+      "monthly_token_percent": 9.9,
+      "is_enabled": true,
+      "is_quota_exceeded": false
+    }
+  ],
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `model_id` | string (UUID) | 模型 ID |
+| `model_name` | string | 模型名称 |
+| `model_type` | string | 模型类型 |
+| `daily_token_limit` | integer \| null | 每日 Token 限额 |
+| `daily_tokens_used` | integer | 当日已用 Token |
+| `daily_token_percent` | number \| null | 当日已用百分比（保留两位小数）；限额为 `null` 时为 `null` |
+| `monthly_token_limit` | integer \| null | 每月 Token 限额 |
+| `monthly_tokens_used` | integer | 当月已用 Token |
+| `monthly_token_percent` | number \| null | 当月已用百分比；限额为 `null` 时为 `null` |
+| `is_enabled` | boolean | 该授权是否生效 |
+| `is_quota_exceeded` | boolean | 是否已超额 |
+
+<Callout type="warn">
+  `is_quota_exceeded` **只依据 Token 限额**（`daily_tokens_used >= daily_token_limit` 或 `monthly_tokens_used >= monthly_token_limit`，且对应限额非 `null`）；请求次数限额不参与该字段计算，且本响应也不返回请求次数的用量/百分比。
+</Callout>
+
+**错误：** `404` + `4004`（`team_not_found`）、`403` + `3002`（`not_team_member`）。
+
+---
+
+## 9. 默认模型查询
+
+```
+GET /api/v1/models/default/{model_type}
+```
+
+按模型类型查询全局默认模型，用于在未显式指定模型时决定默认值。需要登录用户。
+
+**成功响应（200 OK）：** `data` 为模型摘要（`ModelBrief`），或 `null`（该类型没有启用的默认模型）：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+    "name": "GPT-4o",
+    "provider": "openai",
+    "provider_display_name": "OpenAI",
+    "model_id": "gpt-4o",
+    "model_type": "chat",
+    "capabilities": {"chat": true, "vision": true}
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="info">
+  默认模型是**平台级**配置（`is_default=true` 且 `is_enabled=true`），与团队授权无关：拿到默认模型后仍需确认该团队已授权可用（见 `available-models`）。
+</Callout>
+
+---
+
+## 错误处理
+
+| HTTP | 错误码 | 触发场景 |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | 缺少令牌、令牌无效或已过期 |
+| `403` | `3001` | 非超级管理员执行写操作 |
+| `403` | `3002` | 非团队成员读取 |
+| `404` | `4004` | 团队不存在 |
+| `404` | `6100` / `6101` | 模型不存在 / 该团队未授权此模型 |
+| `400` | `6102` | 重复授权 |
+| `422` | `1001` | 请求校验失败（限额为负、`model_ids` 为空等） |
+
+## 相关文档
+
+- [模型 API](./models) — 平台模型目录与模型类型
+- [团队 API](./teams) — 团队成员与角色管理
+- [模型供应商](/reference/model-providers) — 供应商、基础地址与能力矩阵
+- [错误处理](./errors) — 按 HTTP 状态与业务错误码恢复

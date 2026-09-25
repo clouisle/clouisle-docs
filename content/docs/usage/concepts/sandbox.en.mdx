@@ -4,7 +4,11 @@ description: Run Python and JavaScript code safely in isolated Bubblewrap namesp
 icon: CodeXml
 ---
 
-The code sandbox is Clouisle's secure, isolated execution environment for running user-supplied Python and JavaScript code within workflows, agents, and tools. Sandbox tasks are submitted to a dedicated Celery worker, which uses rootless Bubblewrap for filesystem isolation and constrains runaway jobs with timeouts, output limits, and disk checks.
+The code sandbox is Clouisle's secure, isolated execution environment for running user-supplied Python and JavaScript code within workflows, agents, and tools. Sandbox tasks are submitted to a dedicated Celery worker (consuming only the `sandbox` queue, separate from the main worker's four queues), where each task runs inside its own Bubblewrap user + mount namespace and is constrained by timeouts, output limits, and disk checks.
+
+<Callout type="warn">
+The supplied sandbox-worker deployment runs as **root** (`user: "0"` / `runAsUser: 0`) with **`CAP_SYS_ADMIN`** added on top of the runtime default cap set and `seccomp=unconfined` — it is **not** a rootless container. Isolation comes from the **per-task** Bubblewrap user + mount namespace, not from de-privileging the worker itself; the escape consequences and hardening options are covered under "Hardening" below.
+</Callout>
 
 ### Deep-Dive Bubblewrap Namespace & Mount Layout
 
@@ -40,6 +44,7 @@ bwrap \
 3. **Container Runtimes & CJK Font Support**:
    - **Runtimes**: Pre-installed Python 3.13 (managed via `uv`) and Node.js 22.
    - **CJK Fonts Included**: The `clouisle-sandbox-worker` image packages `fontconfig`, `fonts-wqy-zenhei`, and `fonts-wqy-microhei` with `fc-cache -fv`. Because `/usr/share/fonts` is exposed via read-only bind mount, sandbox scripts generating charts (`matplotlib`, `seaborn`, `Pillow`) render Chinese, Japanese, and Korean text flawlessly without missing-character boxes ("tofu").
+
 ### Supported Runtimes
 
 | Runtime | Base Environment |
@@ -55,7 +60,18 @@ bwrap \
 
 ### Execution Limits
 
-Code tools default to a `30` second timeout with `1-600` seconds allowed for persisted configuration; the direct execution API limits `1-60` seconds. Default disk is `1024MB` with `256KB` each for stdout and stderr. Artifact paths must live under `/workspace`. See [Tools & Skills → Sandbox Boundaries](./tool.mdx) for the full limits.
+Limits come from `SandboxLimits`, and the effective value is whichever bound trips first:
+
+| Limit | Default | Allowed range | Notes |
+| --- | --- | --- | --- |
+| `timeout_seconds` | `30` | `1-600` | Per-task execution timeout in seconds; on expiry the process group is reaped with SIGTERM → SIGKILL |
+| `disk_mb` | `1024` | `0-102400` (also capped by `SANDBOX_MAX_DISK_MB`, default `8192`) | Workspace disk quota |
+| `max_stdout_kb` | `256` | `16-8192` | Stdout cap; excess is truncated with `...<truncated>` appended |
+| `max_stderr_kb` | `256` | `16-8192` | Stderr cap, same truncation |
+
+A second, independent timeout applies on the caller side: the direct execution endpoint `POST /api/v1/tools/execute-code` defaults `timeout` to `30` with a range of `1-60`, and Agent chat calls to a code tool are bounded by `STREAM_TOOL_TIMEOUT_CODE` (default `60` seconds). A saved tool's `limits.timeout_seconds` takes precedence over the caller-supplied value (the caller value only fills in when the config omits it). Whichever bound trips first decides the outcome: a sandbox-internal timeout fails the task as an execution timeout, while the outer bound surfaces as a tool-call timeout.
+
+Artifact paths must live under `/workspace`; artifacts default to `10MB` per file and `10MB` in total (`SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` / `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB`). See [Tools & Skills → Sandbox Boundaries](./tool.mdx) for the full limits.
 
 ### Security Model
 
@@ -109,9 +125,28 @@ The sandbox task runs in a fresh Bubblewrap user + mount namespace, so it cannot
 - **Docker Compose**: enable daemon user namespace remapping (`"userns-remap": "default"` in `/etc/docker/daemon.json`) to place every container in a nested user namespace — `CAP_SYS_ADMIN` then only applies to the container's own user namespace and the host-escape chains no longer work. The sandbox worker still creates its Bubblewrap user namespace (privileged inside the remapped namespace), so sandbox functionality is unaffected. Existing named volumes need an ownership reset, and all containers on the daemon are remapped.
 - **Kubernetes**: daemon-level remapping does not apply; rely on NetworkPolicy for outbound sandbox traffic, keep Bubblewrap updated and monitor its CVEs, or use node-level user namespace support where the cluster provides it.
 
+### Runtime Switches and Fallback Behaviour
+
+Four switches govern the sandbox path, and the **defaults favour "the code always runs" over "isolation is always in effect"** — production deployments should confirm each one:
+
+| Environment variable | Default | Effect |
+| --- | --- | --- |
+| `SANDBOX_RUNTIME_ENABLED` | `true` | When `false`, the sandbox gateway is skipped entirely and code runs in-process inside the API/worker (**no isolation at all**); debugging only |
+| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | On a failed sandbox job or a gateway exception, fall back to the in-process legacy runner |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `false` in code; `true` in images/Compose/Helm/K8s | Wrap executable payloads in a Bubblewrap mount namespace |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `bwrap` in code; `/usr/bin/bwrap` in deployments | Bubblewrap executable name or absolute path |
+
+**Why `SANDBOX_LEGACY_FALLBACK_ENABLED` deserves attention**: when the sandbox gateway returns a failure or raises, the `execute_code` code path **silently** re-runs the payload with the in-process legacy runner and only leaves a `warning` in the server log. So a dead sandbox worker, a missing `bwrap`, or an unconsumed queue does not mean "code refused to run" by default — it means "code ran in-process **without isolation**", while the caller receives a successful-looking result.
+
+To fail closed, set it to `false`: a sandbox failure is returned to the caller instead of degrading. Security-sensitive deployments should turn it off and alert on sandbox job failure rates.
+
+<Callout type="warn">
+Beware the opposite trap as well: when filesystem isolation **is** enabled, a missing `bwrap`, a missing workspace root, or a task `cwd` escaping the workspace raises `SandboxIsolationError` and fails the job — **the launcher itself never degrades to unisolated execution**. But `SANDBOX_LEGACY_FALLBACK_ENABLED=true` upstream still catches that failure and degrades anyway, so enabling isolation without disabling the fallback does not guarantee isolation is in effect.
+</Callout>
+
 ### Related Configuration
 
-Sandbox environment variables are listed in the [Environment Variables Reference](../../self-host/configuration/environment-variables.mdx). Enabling filesystem isolation requires `SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true` with `SANDBOX_FILESYSTEM_ISOLATION_BINARY` pointing at the Bubblewrap executable (`/usr/bin/bwrap` by default in Compose/Helm); a missing binary or missing workspace root fails the task instead of falling back to direct execution. The sandbox-worker in Docker Compose and Helm defaults to the root + `CAP_SYS_ADMIN` + `seccomp=unconfined` security configuration; for bwrap user namespace errors during deployment, see [Troubleshooting](../../self-host/operations/troubleshooting.mdx).
+Sandbox environment variables are listed in the [Environment Variables Reference](../../self-host/configuration/environment-variables.mdx). Enabling filesystem isolation requires `SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true` with `SANDBOX_FILESYSTEM_ISOLATION_BINARY` pointing at the Bubblewrap executable (`/usr/bin/bwrap` by default in Compose/Helm). The sandbox-worker in Docker Compose and Helm defaults to the root + `CAP_SYS_ADMIN` + `seccomp=unconfined` security configuration; for bwrap user namespace errors during deployment, see [Troubleshooting](../../self-host/operations/troubleshooting.mdx).
 
 ---
 

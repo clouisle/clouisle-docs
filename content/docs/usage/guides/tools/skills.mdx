@@ -70,6 +70,10 @@ x-clouisle:
 
 ## 导入 Skill 包
 
+<Callout type="warn" title="Skill 只能通过导入创建">
+  平台**没有“手动新建 Skill”入口**，也没有 Skill 的文件子资源端点（如 `/files`）。创建 Skill 的唯一方式是导入 ZIP 或 Git 仓库（**预览 → 安装**两步）。安装后只能用 `PATCH /api/v1/skills/{skill_id}` 修改**元数据**（显示名、描述、图标、分类、启用状态、默认配置）——要改 `SKILL.md` 正文或脚本内容必须重新导入。
+</Callout>
+
 平台提供**上传 Zip**与 **Git 仓库**两种导入方式：
 
 1. 前往**能力**页（`/app/capabilities`），切换至 **Skills** 标签。

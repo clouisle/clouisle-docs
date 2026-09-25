@@ -47,8 +47,8 @@ Configure theme mode, primary color, branding display, and interface elements:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `theme_mode` | `light`, `dark`, or `system` | `light` | Theme mode |
-| `theme_primary_color` | string | `#3B82F6` | Theme primary color |
+| `theme_mode` | `light`, `dark`, or `system` | `system` | Site default theme mode (users can override it in their own settings) |
+| `theme_primary_color` | string | empty | Theme primary color (empty uses the built-in palette) |
 | `theme_branding_display` | `full`, `name_only`, `icon_only`, or `hidden` | `full` | Branding display |
 
 Additional theme tokens (primary foreground, background, card, sidebar, navbar, accent, chart colors, etc.) can also be customized.
@@ -121,7 +121,7 @@ Password expiration configuration:
 | `password_expiration_warning_days` | number | `7` | Warning days before expiration |
 | `password_history_count` | number | `5` | Password history count |
 | `password_min_age_days` | number | `0` | Minimum password age in days |
-| `force_password_change_on_first_login` | boolean | `false` | Force password change on first login |
+| `force_password_change_first_login` | boolean | `false` | Force password change on first login |
 
 ### Session Settings
 
@@ -145,6 +145,19 @@ Configure session timeout, login attempt limits, and CAPTCHA:
 
 Admin TOTP statistics and per-user status/disable endpoints are available under `/api/v1/admin/totp`.
 
+### Human Verification
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enable_captcha` | boolean | `false` | Enable human verification on the login page |
+
+Once enabled, password logins must carry a one-time verification credential (`captcha_id` + `captcha_token`): the front end first calls `POST /api/v1/login/captcha/click` to exchange a valid click interaction for a private one-time proof, then submits it with the login. A missing credential raises `captcha_required`; a failed check raises `captcha_invalid`.
+
+<Callout type="warn" title="A single switch, nothing more">
+  The Security page has exactly one CAPTCHA switch ("Enable Human Verification") — there are **no** failure thresholds, validity periods, or difficulty settings. Treat it as a supplement that raises the cost of automated attempts, not as a replacement for lockout and TOTP: brute-force protection actually comes from `max_login_attempts` (default `5`) / `lockout_duration_minutes` (default `15`) and `require_totp`. Assuming `enable_captcha` means "bot logins are solved" leaves a brute-force exposure.
+</Callout>
+
+
 ### Model Endpoint Allowlist
 
 Before saving or testing a model with a new API endpoint:
@@ -158,7 +171,32 @@ Before saving or testing a model with a new API endpoint:
 Prefer HTTPS for remote endpoints. Use HTTP only for endpoints on a trusted private network because API keys and model traffic are otherwise sent without transport encryption.
 </Callout>
 
-Matching is exact. URL paths are ignored, but the scheme, hostname, and port must all match. Removing an Origin blocks subsequent model discovery, connection tests, and runtime requests without restarting the service.
+Matching is exact. URL paths are ignored, but the scheme, hostname, and port must all match. Removing an Origin blocks subsequent model discovery, connection tests, and runtime requests without restarting the service. The default allowlist ships with 20 known provider origins (e.g. `https://api.openai.com`, `https://api.anthropic.com`, `http://localhost:11434`) and stores at most **200** entries.
+
+### Outbound Network Allowlist (SSRF Exemption)
+
+Clouisle applies one shared SSRF check to custom HTTP tools, workflow HTTP request nodes, knowledge base URL imports, and database tool connection tests: the host is resolved to IPs first, and any resolved IP falling into the **private (`is_private`) / loopback (`is_loopback`) / link-local (`is_link_local`) / reserved (`is_reserved`) / multicast (`is_multicast`) / unspecified (`is_unspecified`)** categories is rejected. Typical members: `127.0.0.1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.169.254`, `fe80::/10`, `0.0.0.0`, `::`, and the hostnames `localhost`, `local`, `metadata.google.internal`.
+
+To call internal APIs, microservices, or intranet databases, add the approved targets one per line under **Settings** → **Security** → **Outbound Network Allowlist (SSRF Exemption)** (setting key `ssrf_allowed_targets`, a JSON array):
+
+| Form | Example | Matching rule |
+| --- | --- | --- |
+| Single IP | `192.168.1.50` | Exact address match |
+| CIDR subnet | `10.10.0.0/16` | Any resolved IP inside the subnet is allowed |
+| Exact domain | `api.internal.service` | Must contain `.`; case-insensitive |
+| Wildcard domain | `*.corp.internal` | Matches every subdomain **and the base domain itself** |
+
+<Callout type="error" title="Targets that can never be allowlisted">
+  Rejected at save time: `*`, `0.0.0.0`, `::`, `169.254.169.254`, `metadata.google.internal`, and any CIDR overlapping cloud metadata (`169.254.0.0/16`), multicast (`224.0.0.0/4`), or unspecified (`0.0.0.0/32`) ranges (including `0.0.0.0/0` and `::/0`). Invalid entries raise an error instead of being silently dropped.
+</Callout>
+
+Other constraints and behaviour:
+
+- The allowlist holds at most **200** entries; duplicates are de-duplicated. Hostnames without a `.` (such as `localhost`) cannot be an entry — use an IP or CIDR instead.
+- An empty allowlist blocks every internal target — that is the default posture. The wider you open it, the easier tools and workflows become an intranet-probing pivot.
+- Validation re-reads the setting and resolves the host **on every request**, so changes take effect immediately with no restart.
+- The Fake-IP benchmark pool `198.18.0.0/15` (Clash/Surge/Mihomo TUN mode) is automatically allowed so public domains are not falsely flagged as SSRF.
+
 
 ## Notification Settings
 
@@ -168,16 +206,20 @@ Configure email sending:
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `smtp_enabled` | boolean | `true` | Enable SMTP |
-| `smtp_host` | string | `smtp.gmail.com` | SMTP host |
+| `smtp_enabled` | boolean | `false` | Enable SMTP |
+| `smtp_host` | string | empty | SMTP host |
 | `smtp_port` | number | `587` | SMTP port |
 | `smtp_encryption` | `none`, `ssl`, or `tls` | `tls` | Encryption method |
 | `smtp_username` | string | empty | SMTP username |
 | `smtp_password` | string | empty | SMTP password |
-| `email_sender_name` | string | `Clouisle` | Sender name |
-| `email_sender_address` | string | empty | Sender address |
+| `email_from_name` | string | `Clouisle` | Sender name |
+| `email_from_address` | string | empty | Sender address |
 
 Update SMTP settings: Navigate to **Settings** → **Notifications**, enter SMTP details, set sender name and address, click **Test** (`POST /api/v1/admin/site-settings/test-email`), then click **Save Changes**.
+
+<Callout type="info">
+  `smtp_enabled` defaults to `false` and `smtp_host` to empty — out of the box, email is unconfigured. Until you enable it and fill in host, port, encryption, credentials, and sender address, email notifications **silently stay in-app only**: nothing errors and nothing is replayed later. Click **Test** to confirm delivery before saving.
+</Callout>
 
 ### External Notification Channels
 
@@ -186,7 +228,7 @@ The following channels can be enabled and configured (each with its own settings
 | Channel | Key Settings | Test Endpoint |
 | --- | --- | --- |
 | DingTalk | `dingtalk_enabled`, type (`webhook` or `app`), webhook URL/secret or app key/secret/agent ID | `/test-dingtalk` |
-| WeChat Work | `wechat_enabled`, type (`webhook` or `app`), webhook URL or corp ID/agent ID/app secret | `/test-wechat` |
+| WeChat Work | `wechat_enabled`, `wechat_notification_type` (`webhook` or `app`), webhook URL, or corp ID (`wechat_corp_id`) / agent ID (`wechat_agent_id`) / app secret (`wechat_secret`) | `/test-wechat` |
 | Feishu | `feishu_enabled`, type (`webhook` or `app`), webhook URL/secret or app ID/secret | `/test-feishu` |
 | Slack | `slack_enabled`, incoming webhook URL | `/test-slack` |
 | Webhook | `webhook_enabled`, URL, method, custom headers, body template, HMAC secret | `/test-webhook` |
@@ -240,6 +282,7 @@ Administrators choose which automatic event types are enabled (`enabled_types`).
 | `user.pending_approval` | New registration awaiting approval |
 | `kb.doc_indexed` / `kb.doc_failed` | Knowledge base document processing |
 | `workflow.run_failed` | Workflow execution failures |
+| `workflow.pause_pending` | A workflow paused and is waiting for human approval |
 | `apikey.expiring` / `apikey.expired` | API key lifecycle |
 | `security.login_anomaly` | Login from a new location/device |
 | `security.account_locked` | Account locked after failed attempts |
@@ -267,7 +310,7 @@ See [Notifications & External Channels](./notifications.mdx) for details.
 - `POST /api/v1/notifications/read` — mark notifications read (`notification_ids` or `mark_all`)
 - Admin endpoints (`/api/v1/admin/notifications`) — create/delete notifications, manage auto-notification config
 
-> **Note:** There is no `PATCH /api/v1/notifications/{id}` or user-level `DELETE /api/v1/notifications/{id}` — reading is a bulk action and deletion is admin-only.
+<Callout type="note">There is no `PATCH /api/v1/notifications/{id}` and no user-level `DELETE /api/v1/notifications/{id}` — reading is a bulk action and deletion is admin-only.</Callout>
 
 ### Best Practices
 
@@ -330,9 +373,24 @@ Configure object storage: Navigate to **Settings** → **Storage**, enter the en
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `audit_log_retention_days` | number (30-3650) | `365` | Audit log retention days |
-| `audit_log_archive_path` | string | empty | Audit log archive path |
+| `audit_log_archive_path` | string | `/var/log/clouisle/audit_archives` | Local path archive JSON files are written to |
 
 Logs older than the retention period are archived (manually triggered) to monthly JSON files under the archive path and then deleted. See [Audit Log Management](./audit-logs.mdx) for details.
+
+### Audit Alerts (Not Wired Up)
+
+The following five keys are seeded into the database at initialization, but **no code reads them** — there is no detection task and no delivery path, so configuring them produces no alerts:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `audit_alert_enabled` | boolean | `true` | Suspected leftover alert master switch |
+| `audit_alert_webhook` | string | empty | Suspected leftover alert webhook URL |
+| `audit_alert_failed_login_threshold` | number | `5` | Suspected leftover failed-login threshold |
+| `audit_alert_failed_login_window` | number | `5` | Suspected leftover detection window (minutes) |
+| `audit_alert_bulk_deletion_threshold` | number | `10` | Suspected leftover bulk-deletion threshold |
+
+For real security alerting, use the implemented path: the `security.*` events and external channels of [Auto Notifications](./notifications.mdx).
+
 
 ## SSO Settings
 
@@ -354,18 +412,24 @@ SSO providers are managed in **Settings** → **SSO**. Providers are created gen
 
 ## Team Settings
 
-Team admins can manage team members, model authorization, and team information. Teams group users and resources (agents, workflows, and knowledge bases).
+Teams group users and resources (agents, workflows, and knowledge bases). Team admins manage **members** and **basic team information**; **model authorization can only be changed by a superuser**.
 
 > **Note:** Team slugs, visibility, invitation flows, join requests, member limits, per-team resource limits, per-team security/API settings, billing, data retention, custom domains, and branding are **not implemented**.
 
 ### Accessing Team Management
 
-1. Open the platform **Team switcher**.
-2. Choose **Manage Teams**.
-3. The team management page opens at `/teams`.
-4. Select a team to view its **Members** tab or, for authorized managers, its **Model Authorization** tab.
+There are two entry points with completely different permissions and capabilities:
 
-**Required Permission:** Team Admin or Owner (for editing and member/model management).
+| Entry point | Path | Required permission | Capabilities |
+| --- | --- | --- | --- |
+| Admin team management | `/teams` | `admin:team:read` (or superuser) | Cross-team view/create/edit; **model authorization is superuser-only** |
+| Team settings (team-scoped) | `/app/team` | Team membership plus `team:manage` / `team:update` (team admin or owner) | The current team's members, basic info, and a **read-only** model tab |
+
+Open them from the **Team switcher**: **Manage All Teams (Admin)** goes to `/teams` (shown only with `admin:team:read`) and **Manage Current Team** goes to `/app/team` (shown only with `team:manage`).
+
+<Callout type="warn">
+  **Members and Viewers do not have `admin:team:read`**, so they never see the `/teams` entry; inside the team switcher they only get **Manage current team** (and that still requires `team:manage`). When someone asks "why can't I see team management", check this permission before suspecting a frontend bug.
+</Callout>
 
 ### Team Information
 
@@ -381,14 +445,22 @@ Only three fields can be edited:
 
 ### Model Authorization
 
-Team admins and owners can manage which enabled models the team may use:
+**Team model authorization can only be performed by a superuser.** On `/app/team` → **Model Authorization**, a team admin or owner sees a **read-only** view: authorized models, enable state, and a "today's usage / limit" bar (limits are assigned by the system administrator; `no limit` means uncapped). Changing authorizations requires the team detail under `/teams`, which itself requires `admin:team:read`.
 
-1. Open **Manage Teams** (`/teams`) and select a team.
-2. Open **Model Authorization**.
-3. Choose **Authorize Model** and select an enabled model, or revoke an existing authorization.
-4. Save the authorization change.
+| Operation | Endpoint | Permission |
+| --- | --- | --- |
+| List a team's authorized models | `GET /api/v1/teams/{team_id}/models` | Team member or superuser |
+| Authorize a model | `POST /api/v1/teams/{team_id}/models` | **Superuser only** |
+| Change quota/priority/enable state | `PUT /api/v1/teams/{team_id}/models/{model_id}` | **Superuser only** |
+| Revoke an authorization | `DELETE /api/v1/teams/{team_id}/models/{model_id}` | **Superuser only** |
+| Batch authorize/revoke | `POST` / `DELETE /api/v1/teams/{team_id}/models/batch` | **Superuser only** |
+| List authorizable models | `GET /api/v1/teams/{team_id}/available-models` | **Superuser only** |
 
-Authorized models become available for the team's agents and knowledge bases when their configuration requires a model.
+Only authorized models appear in the team's Agent and knowledge base model pickers.
+
+<Callout type="warn">
+  Telling team admins to "go authorize the model themselves" is a common process mistake: the UI offers no such control and a superuser must do it. It also means model quotas are centrally governed — teams cannot raise their own limits.
+</Callout>
 
 ### Member Management
 
@@ -458,6 +530,22 @@ The following team-level features are **not implemented**:
 See also:
 - [Teams & Members](./teams.mdx) — Detailed team management guide
 - [Roles & Permissions](./roles-permissions.mdx) — Roles and permissions
+
+## Rollout Settings (Private)
+
+These keys live in the `retrieval` category with `public=false`: they are absent from the site-settings UI and from the public settings API, and exist for operators to control the staged rollout of hybrid retrieval:
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `retrieval_hybrid_mode` | `rollout`, `enabled`, or `disabled` | `rollout` | Hybrid retrieval master switch |
+| `retrieval_hybrid_team_ids` | JSON array | `[]` | Explicit team-ID allowlist included in the rollout |
+| `retrieval_hybrid_percentage` | number | `100` | Deterministic rollout percentage (0-100, bucketed by hash of the team set) |
+
+Precedence: the environment variable `RETRIEVAL_HYBRID_KILL_SWITCH=true` wins over everything and disables hybrid retrieval; `disabled` turns it off globally; `enabled` turns it on globally; under `rollout`, a team matching the allowlist is enabled, otherwise the hash bucket `< percentage` decides.
+
+<Callout type="warn">
+  Under `rollout`, `retrieval_hybrid_percentage` is a deterministic hash of the team set (the same set of teams always lands in the same bucket), not random sampling — so changing the percentage changes *which* teams are included rather than flipping individual requests. Switching the mode to `disabled` reverts retrieval to a single mode globally and directly affects recall quality.
+</Callout>
 
 ## Feature Flags and Other Settings
 

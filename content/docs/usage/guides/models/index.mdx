@@ -1,10 +1,13 @@
 ---
 title: 模型指南
-description: 配置供应商、测试连接、授权团队并管理模型配额
+description: 配置供应商端点、注册并测试模型、授权团队并管理配额
 icon: Cpu
 ---
 
+模型是 Agent、知识库与工作流共同依赖的底层能力。Clouisle 采用**两级管理**：管理员在管理后台的全局模型注册表中登记供应商、端点、凭据与能力标记，再把模型授权给具体团队并设置 Token 与请求配额。
+
 <Cards>
-  <Card title="供应商与模型" href="/usage/guides/models/providers">理解管理员注册模型、端点、凭据和能力标记。</Card>
-  <Card title="管理团队模型" href="/usage/guides/models/manage-models">授权模型、启停模型、设置优先级和配额。</Card>
+  <Card title="供应商、模型类型与模型发现" href="/usage/guides/models/providers">查阅 23 个供应商标识、默认端点、各模型类型支持的供应商，以及远程模型发现的路径与鉴权规则。</Card>
+  <Card title="注册模型与团队授权" href="/usage/guides/models/manage-models">登记全局模型、测试连接、设置能力标记，并授权团队、配置配额与优先级。</Card>
+  <Card title="模型" href="/usage/concepts/model">理解两级模型结构、凭据与端点解析、配额语义与错误码。</Card>
 </Cards>

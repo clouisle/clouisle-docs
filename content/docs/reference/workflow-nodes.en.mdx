@@ -8,7 +8,7 @@ The Clouisle workflow engine supports native complex objects, streaming inferenc
 
 ## Node Categories & Catalog
 
-The current node builder offers 18 regular canvas nodes. The backend registry additionally contains 24 executable node types, including internal entry nodes such as `user_input`, `trigger`, `iteration_start`, and `loop_start`. Contextual menus within containers remove `iteration`, `loop`, and `pause`, and add a visual exit marker. The canvas also retains frontend aliases or visual markers such as `start`, `iteration_exit`, `loop_exit`, and `comment`; not all map to independent executors. The table lists regular nodes, runtime nodes, and visual helper markers together:
+The current canvas picker offers **19 addable node types** (`normalCategories`: 2 model + 6 logic + 6 transform + 5 extension). Inside an iteration/loop container the picker switches to a container-only catalog (swapping `iteration_exit`/`loop_exit` in for `iteration`/`loop`/`pause`). The backend executor registry additionally holds **25 executable node types**, including internal entry nodes such as `user_input`, `trigger`, `iteration_start`, and `loop_start`. The canvas also retains frontend aliases or visual markers such as `start`, `iteration_exit`, `loop_exit`, and `comment`; not all map to independent executors. The table lists regular nodes, runtime nodes, and visual helper markers together:
 
 | Category | Type Identifier (`type`) | Label | Primary Purpose |
 | --- | --- | --- | --- |
@@ -16,6 +16,7 @@ The current node builder offers 18 regular canvas nodes. The backend registry ad
 | | `media_generation` | Media Generation | Call team-authorized image or video generation models |
 | **Logic** | `condition` | Condition Branch | Multi-branch IF/ELSE routing logic |
 | | `question_classifier` | Question Classifier | Classify user intent dynamically using LLMs |
+| | `decision` | Decision | Ask a decision model a typed question and branch on the answer |
 | | `iteration` | Iteration Container | Iterate over array variables sequentially |
 | | `loop` | Loop Container | Execute child nodes repeatedly until conditions are met or maximum count is reached |
 | | `pause` | Pause | Suspend workflow execution pending human approval or variable inputs |
@@ -28,15 +29,19 @@ The current node builder offers 18 regular canvas nodes. The backend registry ad
 | **Extension** | `sub_workflow` | Sub-workflow | Invoke other published workflows within the workspace |
 | | `agent` | Agent | Call a published Agent for autonomous goal execution |
 | | `tool` | Tool | Invoke built-in tools, custom HTTP tools, or MCP services |
-| | `http_request` | HTTP Request | Perform external HTTP/HTTPS API calls (restricted by SSRF policies) |
 | | `knowledge_retrieval` | Knowledge Retrieval | Search a bound knowledge base and retrieve chunk contexts |
-| | `document_extractor` | Document Extractor | Extract plain text or Markdown from uploaded PDF/DOCX files |
 | | `answer` | Output | Assemble final results and support streaming output to clients |
+| **Executor-level (not in the canvas picker)** | `http_request` | HTTP Request | Perform external HTTP/HTTPS API calls (restricted by SSRF policies) |
+| | `document_extractor` | Document Extractor | Extract plain text or Markdown from uploaded PDF/DOCX files |
 | **Entry & Lifecycle** | `user_input` | Start | Define human-initiated input parameters and system variables (frontend canvas alias `start`) |
 | | `trigger` | Trigger | Webhook, scheduled cron, or event-driven entry points |
 | | `iteration_start` / `loop_start` | Container Start | Internal virtual entry executor node passing parent container context |
 | | `iteration_exit` / `loop_exit` | Container Exit | Internal visual exit marker on the canvas (no backend executor; child nodes are orchestrated by `parentId`) |
 | | `comment` | Comment | Static canvas sticker, ignored during runtime execution |
+
+<Callout type="info" title="Picker nodes vs executors">
+`http_request` and `document_extractor` have independent backend executors (callable by the API or by imported packages) but do **not** appear in the canvas picker, so they cannot be dragged in from the UI. Conversely, `iteration_exit`/`loop_exit` are only container exit markers on the canvas with no dedicated executor; the container schedules child nodes by `parentId` at runtime.
+</Callout>
 
 ---
 
@@ -66,7 +71,53 @@ Outputs:
 
 ---
 
-### 2. Media Generation Node (`media_generation`)
+### 2. Decision Node (`decision`)
+
+The Decision node hands one **state** to a **decision model** (`model_type: decision`, currently TypeSafe AI) and picks a branch from the returned **typed answer**. Unlike the LLM node, a decision model generates no prose — it returns only a typed answer plus a probability distribution, and the node maps that answer onto output handles.
+
+Configuration container: `node.data.decisionConfig` (with `node.data.config` retained for legacy definitions).
+
+| Field | Type | Default | Description & Constraints |
+| --- | --- | --- | --- |
+| `modelId` | UUID string | Required | Team-authorized decision model ID; the picker lists only enabled models with `model_type: decision` |
+| `stateTemplate` | string | Required (legacy alias `inputVariable`) | State handed to the model; supports `{{variables}}` and must resolve to a string |
+| `questionId` | string | `"decision"` | Question key used to read the answer back from the response (`answers[questionId]`) |
+| `questionType` | string | `"choice"` | Question type: `choice`, `score`, or `noul` (yes/no probability) |
+| `instructions` | string | Required | The judgement you ask the model to make |
+| `options` | string[] | Frontend default `["yes","no"]` | `choice`: 1–255 unique non-empty options; `score`: 2–10 unique non-empty **ordered** levels |
+| `defaultHandle` | string | `"default"` | Branch handle taken when confidence is below the threshold or the answer cannot be resolved |
+| `confidenceThreshold` | number | Unset | Optional, `0`–`1` (frontend step `0.01`); applies to `choice`/`score` only |
+
+Question-type behavior:
+- `choice`: the model picks one of `options`. Each option becomes an output handle.
+- `score`: the model rates the state against the **ordered levels** in `options`; the highest-probability level decides the branch, and the numeric `score` is exposed as an output too.
+- `noul`: returns a `0`–`1` yes/no probability; `>= 0.5` routes to `yes`, otherwise `no`. `noul` does not return a `confidence`.
+
+Branch handles:
+- `choice`/`score`: one handle per option/level, plus the fallback handle (`default` by default).
+- `noul`: fixed `yes` and `no`, plus the fallback handle.
+- Renaming options remaps existing connections onto the new handles where possible (`remapDecisionBranchEdges`); handles that cannot be mapped are flagged as errors by the validator (`decisionBranchHandleInvalid`) and must be reconnected.
+- Decision nodes that previously used `yes`/`no` as their options are auto-migrated on load (`migrateLegacyDecisionBranchEdges`).
+
+Output variables:
+- `answer` (string): the selected option/level, or `yes`/`no`
+- `selected_handle` (string): the branch handle actually activated (may be the fallback handle)
+- `usage` (object): decision-model token usage
+- `choice` + `confidence` + `probabilities` (for `choice`)
+- `score` + `confidence` + `probabilities` (for `score`)
+- `noul` (number): yes/no probability (for `noul`)
+
+<Callout type="warn" title="Failure paths">
+Missing `modelId`, `stateTemplate`, or `instructions`, an invalid `questionType`, or an option count/uniqueness violation makes the node return `validation_error` directly; an answer type or probability key set that does not match the configuration returns `decision_result_missing` — it does not silently fall through to the default branch.
+</Callout>
+
+<Callout type="info" title="Retries (node-level)">
+As a workflow node, the Decision node is subject to the **node-level** retry policy (`backend/app/services/workflow/retry.py`): the default is `RetryPolicy(max_retries=2, base_delay=1.0)`, i.e. up to 2 retries (3 attempts total), with exponential backoff (base `2.0`) plus up to 25% jitter and a per-delay cap of `60` seconds. When `enable_retry` is true (the `WorkflowOrchestrator` default) the orchestrator wraps the executor in `RetryableExecutor`, so failed results such as `validation_error` and `decision_result_missing` are retried too. This retry comes from the node policy, not from the TypeSafe adapter (the decision adapter has no retry configuration of its own).
+</Callout>
+
+---
+
+### 3. Media Generation Node (`media_generation`)
 
 Configuration container: `node.data.mediaGenerationConfig` or `node.data.config`.
 
@@ -88,7 +139,7 @@ Outputs:
 
 ---
 
-### 3. Condition Branch Node (`condition`)
+### 4. Condition Branch Node (`condition`)
 
 Configuration container: `node.data.conditionConfig` or `node.data.config`.
 
@@ -102,7 +153,7 @@ Supported Operators:
 
 ---
 
-### 4. HTTP Request Node (`http_request`)
+### 5. HTTP Request Node (`http_request`)
 
 Configuration container: `node.data.config`.
 
@@ -128,7 +179,7 @@ Outputs:
 
 ---
 
-### 5. Knowledge Retrieval Node (`knowledge_retrieval`)
+### 6. Knowledge Retrieval Node (`knowledge_retrieval`)
 
 Configuration container: `node.data.knowledgeRetrievalConfig`.
 
@@ -150,20 +201,21 @@ Outputs:
 
 ---
 
-### 6. Code Execution Node (`code`)
+### 7. Code Execution Node (`code`)
 
 Configuration container: `node.data.codeConfig` or `node.data.config`.
 
 Runs inside an isolated sandbox container with a default 30-second timeout (`CODE_TIMEOUT = 30`).
 
-- **Python Entry**: Must define `def main(inputs):`, where `inputs` is a dictionary, returning a `dict`.
-- **JavaScript Entry**: Must define `function main(params)` or `const main = (params) =>`, returning an `object`.
+- **Python Entry**: with `language: "python"`, must define `def main(inputs):`, where `inputs` is a dictionary, returning a `dict`.
+- **JavaScript Entry**: with `language: "javascript"`, must define `function main(params)` or `const main = (params) =>`, returning an `object`.
+- Any other `language` value is rejected (`unsupported_code_execution_language`).
 
 Outputs: All top-level keys returned in the dictionary/object are mapped to individual downstream variables.
 
 ---
 
-### 7. Data Transformation Nodes
+### 8. Data Transformation Nodes
 
 #### Template Transform (`template`)
 - Container: `node.data.templateConfig`.
@@ -198,7 +250,7 @@ Outputs: All top-level keys returned in the dictionary/object are mapped to indi
 
 ---
 
-### 8. Flow Control & Container Nodes
+### 9. Flow Control & Container Nodes
 
 #### Question Classifier (`question_classifier`)
 - Container: `node.data.questionClassifierConfig`.
@@ -239,7 +291,8 @@ The workflow editor uses its validation engine to **report** recognized errors a
    - The validator flags nodes without an upstream edge, except `user_input`, `trigger`, `iteration_start`, `loop_start`, and `comment`.
 2. **Node Configuration Checks**:
    - Depending on node type, it reports missing models, tools, knowledge bases, extraction parameters, assignments, or processing children inside a container.
-   - `condition`, `question_classifier`, `code`, `sub_workflow`, `agent`, `media_generation`, `pause`, and variable-processing nodes each have corresponding configuration checks.
+   - `condition`, `question_classifier`, `decision`, `code`, `sub_workflow`, `agent`, `media_generation`, `pause`, and variable-processing nodes each have corresponding configuration checks.
+   - The `decision` node validates `stateTemplate`, `instructions`, option count and uniqueness, and whether any edge still references a stale branch handle (`decisionBranchHandleInvalid`).
 3. **Variable & Container Checks**:
    - The editor reports variable references unavailable from the visible upstream graph, invalid or duplicate parameter names, and container-structure issues.
    - It also reports placement of `pause` nodes inside iteration or loop containers.
