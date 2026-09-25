@@ -56,31 +56,14 @@ Available commands:
 ✘ [ERROR] The entry-point file at ".open-next/worker.js" was not found.
 ```
 
-Cloudflare Workers Build settings must therefore be:
+Cloudflare Workers Builds uses separate **Build command** and **Deploy command** settings. It does not honor the custom `build` step in `wrangler.jsonc`, so that setting alone does not build the Worker in CI. Configure **Settings > Build > Build command** as `bun run build:cf`:
 
 | Setting | Value |
 | --- | --- |
-| Build command | `npm run build:cf` — or leave empty to use the repo's `wrangler.jsonc` `build.command` |
-| Deploy command | `npx wrangler versions upload` (preview) / `npx wrangler deploy` (production) |
+| Build command | `bun run build:cf` |
+| Deploy command | `bunx wrangler versions upload` (version upload) / `bunx wrangler deploy --minify` (production deployment) |
 
-The build is also declared in `wrangler.jsonc`:
-
-```jsonc
-"build": {
-  "command": "npm run build:cf",
-}
-```
-
-`wrangler` runs that command itself before uploading, so a missing dashboard build command (or one that runs only `next build`) can no longer break the deploy:
-
-```bash
-rm -rf .open-next
-npx wrangler versions upload --dry-run --outdir /tmp/cf-dry
-# [custom build] Running: npm run build:cf
-# [custom build] Worker saved in `.open-next/worker.js` 🚀
-# [custom build] Successfully populated static assets cache
-# Total Upload: 56324.74 KiB / gzip: 7845.52 KiB   → exit 0
-```
+Keep the `build.command` in `wrangler.jsonc` for direct local Wrangler commands, but do not rely on it for Workers Builds. `next build` alone does not produce `.open-next/worker.js`; the configured Build command must run before the Deploy command in the same build workspace.
 
 `build:cf` runs two steps, and both are required:
 
@@ -89,12 +72,16 @@ npx wrangler versions upload --dry-run --outdir /tmp/cf-dry
 
 Both artifacts are gitignored (`.open-next/`), so the deploy must always run after a build in the same workspace — never upload from a clean checkout.
 
-Local verification of the whole chain:
+Local verification — `wrangler` runs `build.command` itself, so the dry run alone proves the chain:
 
 ```bash
-npm run build:cf
-npx wrangler versions upload --dry-run --outdir /tmp/cf-dry   # validates entry point + assets without uploading
+npx wrangler versions upload --dry-run --outdir /tmp/cf-dry
+# [custom build] Running: npm run build:cf
+# [custom build] Worker saved in `.open-next/worker.js` 🚀
+# Total Upload: 56324.74 KiB / gzip: 7845.52 KiB   → exit 0
 ```
+
+Run `npm run build:cf` on its own when you only want the artifacts (for example to inspect `.open-next/assets/cdn-cgi/_next_cache`).
 
 ## Writing Docs
 
