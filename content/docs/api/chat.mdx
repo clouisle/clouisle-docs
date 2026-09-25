@@ -27,6 +27,9 @@ Agent 必须已发布。API Key 需要对应权限，并且如果绑定了 Agent
 | GET | `/api/v1/agents/{agent_id}/public` | 获取公开 Agent 基础信息，可选认证 |
 | POST | `/api/v1/agents/{agent_id}/chat` | 非流式聊天 |
 | POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE 流式聊天 |
+| POST | `/api/v1/agents/{agent_id}/chat/runs` | 创建持久运行，立即返回 `202 Accepted` |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` | 订阅运行事件流（可断点续连） |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | 协作式终止运行 |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/regenerate` | 重新生成 |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | 编辑用户消息并生成分支 |
 | GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | 查询消息版本 |
@@ -198,16 +201,88 @@ data: {"kind":"media.image","success":true,"images":[{"image":{"url":"/api/v1/up
 
 ## 持久运行与控制
 
-聊天执行由持久化的 `AgentRun` 支持，浏览器断开连接不会停止模型循环。流式端点流式传输相同的 SSE 事件；此外，运行范围的事件携带包含 `run_id`、`sequence`、`timestamp`、`round_id`、`message_id` 和 `type` 的信封，以便重连后无需重复（`after_sequence`）恢复。
+聊天执行由持久化的 `AgentRun` 支持，浏览器断开连接不会停止模型循环。`/chat` 与 `/chat/stream` 会等待本轮结果；`/chat/runs` 则把请求落库后立即入队，由 Worker 异步执行，因此连接中断、页面刷新都不会丢失这轮对话。
 
-额外的运行事件：`run_start`（运行身份/状态）、`run_status`（queued/running/waiting/stopping 转换；模型调用 `ask_user` 时为 `waiting`，并携带 `pending_tool_call_id`、`pending_tool_name`、`pending_tool_input`）、`input_accepted`（排队的引导/追问已提交）、`run_end`（恰好一个终止事件：`completed | stopped | failed | interrupted`）。
+运行范围的事件在原有 SSE 事件外多一层信封，包含 `run_id`、`sequence`、`timestamp`、`round_id`、`message_id` 和 `type`，因此客户端可以用 `after_sequence` 精确续读而不重复渲染。
+
+额外的运行事件：
+
+| 事件 | 说明 |
+| --- | --- |
+| `run_start` | 运行身份与初始状态 |
+| `run_status` | 生命周期转换（`queued` → `running` → …）；模型调用 `ask_user` 时进入 `waiting`，并携带 `pending_tool_call_id`、`pending_tool_name`、`pending_tool_input` |
+| `input_accepted` | 排队的引导（steer）或追问（follow-up）已被提交 |
+| `run_end` | 每次运行**恰好一个**终止事件，状态为 `completed`、`stopped`、`failed` 或 `interrupted` |
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
+| POST | `/api/v1/agents/{agent_id}/chat/runs` | 落库并入队一次运行（`202 Accepted`） |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` | SSE 订阅该运行的事件流（可断点续连） |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | 运行状态（所有者范围） |
-| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | 回放 N 之后的事件 |
-| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问（`delivery: steer / follow_up / auto`） |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | 回放已缓冲事件（非流式，适合补齐丢包） |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问/停止（`delivery: steer / follow_up / auto`） |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | 提交等待中 `ask_user` 调用的结构化答案 |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | 协作式终止运行 |
+
+### 创建运行
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs
+```
+
+请求体与 `POST /api/v1/agents/{agent_id}/chat` 完全相同（同一个 `ChatRequest`），区别是立即返回 **`202 Accepted`**，不等助手回复。响应数据是 `RunStartOut`：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "8f3b1c9d-2b10-4a1b-9c3d-7f3a1c9d2b10",
+    "conversation_id": "conv-123",
+    "user_message_id": "msg-456",
+    "status": "queued",
+    "stream_url": "/agents/agent-123/chat/runs/8f3b1c9d-2b10-4a1b-9c3d-7f3a1c9d2b10/stream"
+  },
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `run_id` | string | 持久运行 UUID |
+| `conversation_id` | string | 会话 UUID（请求未带 `conversation_id` 时自动创建） |
+| `user_message_id` | string | 已落库的用户消息 UUID |
+| `status` | string | 入队时的运行状态（见下方状态取值） |
+| `stream_url` | string | 该运行 SSE 流的相对路径，**不含** `/api/v1` 前缀 |
+
+<Callout type="warn">
+  `stream_url` 是相对路径，只带 `/agents/...`（embed 场景为 `/embed/agents/...`）。拼接订阅地址时必须自行补上 `/api/v1`。
+</Callout>
+
+### 订阅运行事件流
+
+```
+GET /api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N
+```
+
+返回 `text/event-stream`：先回放 `sequence` 大于 `after_sequence`（默认 `0`）的所有缓冲事件，再跟随实时事件直到该运行的终止事件。支持 JWT Bearer Token 或 API Key。
+
+重连语义：客户端记录已处理的最高 `sequence`，断开后以该值作为 `after_sequence` 重新请求，即可无重复、无丢失地继续。`after_sequence` 为负数时按 `0` 处理。需要非流式补齐时用 `GET .../events?after_sequence=N` 读取同一批事件。
+
+运行状态取值（`RunOut.status` / `RunStartOut.status`）：`queued`、`running`、`stopping`、`completing`、`waiting`、`completed`、`stopped`、`failed`、`interrupted`。其中 `completed`、`stopped`、`failed`、`interrupted` 为终态。
+
+### 终止运行
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/stop
+```
+
+无请求体。协作式终止处于 `queued`、`running` 或 `waiting` 的运行，返回更新后的 `RunOut`；随后事件流会收到 `status: "stopped"` 的终止 `run_end`。对 `waiting` 运行（等待 `ask_user` 答案）执行停止同样有效。
+
+`RunOut` 字段：`id`、`agent_id`、`conversation_id`、`mode`、`status`、`source_message_id`、`canonical_message_id`、`active_round_id`、`error_code`、`error_message`、`started_at`、`finished_at`，以及等待中的 `ask_user` 交互（`pending_tool_call_id`、`pending_tool_name`、`pending_tool_input`）。
+
+<Callout type="warn">
+  访问边界：全部运行路由按所有者（API Key 场景按 Agent）限定。运行不存在、或不属于路径中的 `{agent_id}` → `404`（业务码 `4000`，`run_not_found`）；运行所属会话属于他人 → `403`（业务码 `1004`，`access_denied`）；超级管理员绕过所有权检查。
+</Callout>
 
 提交等待中 `ask_user` 调用的答案：
 
@@ -360,8 +435,8 @@ GET /api/v1/conversations
 | `team_id` | string | 否 | - | 按团队筛选 |
 | `agent_id` | string | 否 | - | 按 Agent ID 筛选 |
 | `user_id` | string | 否 | - | 按用户筛选（仅管理员/仪表盘访问） |
-| `search` | string | 否 | - | 按标题搜索 |
-| `untitled_only` | boolean | 否 | false | 仅显示无标题会话 |
+| `search` | string | 否 | - | 按**会话标题**模糊匹配（不含消息正文） |
+| `untitled_only` | boolean | 否 | false | 仅显示无标题会话（优先于 `search`，两者同时提供时忽略 `search`） |
 
 **成功 (200 OK):**
 
@@ -481,7 +556,7 @@ PATCH /api/v1/agents/conversations/{conversation_id}
 
 ### 删除会话
 
-永久删除会话。
+永久删除会话（消息级联删除）。`DELETE /api/v1/conversations` 挂载在平台会话路由器下，需要 `conversation:delete`；超级管理员/管理员可删除可访问团队内的任意会话，普通成员只能删除自己的会话（非本人会话返回 `404`）。
 
 ```
 DELETE /api/v1/conversations/{conversation_id}
@@ -492,10 +567,39 @@ DELETE /api/v1/conversations/{conversation_id}
 ```json
 {
   "code": 0,
-  "data": null,
+  "data": {
+    "id": "conv-123"
+  },
   "msg": "Conversation deleted successfully"
 }
 ```
+
+### 批量删除会话
+
+```
+DELETE /api/v1/conversations?ids=conv-123&ids=conv-456
+```
+
+`ids` 是必填的重复查询参数（`list[UUID]`），一次删除多个会话；权限规则与单条删除相同，任一目标不可访问即整批拒绝。全部目标都不存在时返回 `404`（`6210`）。
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/conversations?ids=conv-123&ids=conv-456" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 删除单条消息
+
+平台会话路由器**没有**按消息删除的端点；删除单条消息请使用 agents 路由器下的用户端点：
+
+```
+DELETE /api/v1/agents/conversations/{conversation_id}/messages/{message_id}
+```
+
+该端点需要 `conversation:delete`，且消息必须属于调用者的会话（详见 [Agent API 的 Agent 会话](./agents#删除单条消息)）。
+
+<Callout type="warn">
+  路由能力差异：平台 `/api/v1/conversations` 只有 `GET` 列表、`GET` 详情、`DELETE` 单条、`DELETE` 批量。**重命名（PATCH）与删除单条消息都只在 agents 路由器下**（`/api/v1/agents/conversations/...`）。此外平台列表的 `search` 只匹配会话标题，不检索消息正文。
+</Callout>
 
 > 用户范围的会话端点（如 `GET /api/v1/agents/conversations/my`）详见 [会话 API](./conversations)。
 
@@ -506,6 +610,8 @@ DELETE /api/v1/conversations/{conversation_id}
 | `6200` | Agent not found | Agent 不存在 |
 | `6210` | Conversation not found | 会话不存在 |
 | `6211` | Message not found | 消息不存在 |
+| `4000` | Run not found | 持久运行不存在，或不属于路径中的 Agent |
+| `1004` | Access denied | 运行所属会话属于其他用户 |
 | `3000` | Permission denied | 权限不足 |
 | `1001` | Validation failed | 请求数据无效 |
 

@@ -1,170 +1,218 @@
 ---
 title: Profile Settings
-description: Manage personal profile, password, 2FA, connected accounts, and notification preferences
+description: Manage your profile, password, TOTP, connected accounts, and account deletion
 icon: UserRound
 ---
 
-Profile settings open from the avatar menu in the top-right corner as a dialog with **Profile** and **Account** tabs — there is no dedicated `/settings` or `/profile` route. Timezones, active-session management, data export, and privacy toggles are not implemented (Roadmap).
+Profile settings are a **dialog**, not a page: open them from the avatar menu in the top-right corner via **Profile**, and you get a **Settings** dialog with **Profile** and **Account** tabs. There is no `/settings` or `/profile` route; timezones, an active-session list, data export, and privacy toggles are not implemented (**Roadmap**).
 
 ## Profile Tab
 
-The Profile tab manages your avatar, username, and email.
+This tab maintains your avatar, username, and email.
 
 | Field | Description |
 | --- | --- |
-| Avatar | Profile picture URL (upload via the avatar picker) |
-| Username | Unique username, max `50` characters |
-| Email | Email address; changing it may require email verification |
+| **Avatar** | Click to upload; `200x200` pixels recommended; JPG / PNG / GIF |
+| **Username** | Globally unique, max `50` characters; a duplicate returns `5002` (`user_with_username_exists`) |
+| **Email** | Globally unique; a duplicate returns `5003` (`user_with_email_exists`) |
 
-**Changing email**: If email verification is enabled, click **Send Email Verification** first, then enter the 6-digit code sent to the new address before saving.
+**Changing your email**: verification of the new address is required only when the site enables `email_verification` and the address actually changes.
+
+1. Edit the email field; a verification area appears below it.
+2. Click **Send code** and a 6-digit code arrives at the new address (purpose `profile_email`).
+3. Enter the 6-digit code, then click **Save changes**.
+
+- Resending has a `60`-second cooldown; during it the button shows the remaining seconds.
+- A wrong or expired code returns `5005` (`verification_code_invalid`) and the save is rejected.
+- On success the new address is immediately marked verified and the change is written to the audit log.
+- Changing only the username or avatar needs no code; clicking save with nothing changed reports "no changes to save".
 
 ## Account Tab
 
-The Account tab manages password, TOTP two-factor authentication, and connected accounts.
+Top to bottom the tab contains: **Connected Accounts** (only when SSO connections exist) → **Two-Factor Authentication** → password → **Danger Zone**.
 
-### Changing Password
+### Connected Accounts (SSO)
 
-1. Open **Profile Settings** → **Account** tab.
-2. Find the **Change Password** section.
-3. Enter your current password, new password, and confirm the new password.
-4. Click **Change Password**.
+The card lists linked SSO providers with their icon, display name, and **last login** time.
 
-Passwords must be at least `8` characters; administrators can require a longer minimum length and mandate uppercase, digits, or special characters. See [Login & Account Security](./authentication.mdx) for details.
+- Click **Disconnect** and confirm in the dialog to unlink that provider.
+- **Anti-lockout protection**: if the account has no local password and only one SSO link remains, the backend refuses to disconnect (`cannot_disconnect_only_auth_method`).
+- There is **no user-side connect button** — connections are created automatically during login by email matching; see [SSO Configuration](./sso.mdx).
 
-### TOTP Two-Factor Authentication
+### Two-Factor Authentication (TOTP)
 
-**Enabling TOTP**:
+**While disabled**: the card shows **Two-factor authentication disabled**; click **Enable two-factor authentication** to open the wizard:
 
-1. Open **Profile Settings** → **Account** tab.
-2. In the **Two-Factor Authentication** section, select **Enable Two-Factor Authentication**.
-3. The TOTP setup wizard opens:
-   - Scan the QR code with an authenticator app (Google Authenticator, Authy, 1Password), or enter the secret manually.
-   - Enter the current 6-digit code from the authenticator.
-   - Generate the one-time backup codes. Download or copy them; each backup code works only once.
-4. Select **Finish enabling**.
+1. The first step explains what 2FA adds.
+2. The second shows a QR code (issuer `Clouisle`) to scan with an authenticator app or a secret to **enter manually**.
+3. The third asks for the current 6-digit code to confirm.
+4. The fourth shows one-time backup codes — **10** per batch in `XXXX-XXXX` format, downloadable or copyable in one click.
+5. The last step confirms completion.
 
-**Status and management**:
-- Once enabled, the card shows **Two-factor authentication enabled**, the activation timestamp, and the **remaining backup code count** (`{count} backup codes remaining`).
-- Select **Regenerate backup codes** and enter the current 6-digit code to issue a fresh batch; all previous codes are invalidated immediately.
+<Callout type="info">
+  The wizard calls `POST /api/v1/totp/setup` to generate the secret and backup codes, at which point 2FA is **not yet enabled** — only `POST /api/v1/totp/enable` verifying a code turns it on.
+</Callout>
 
-**Disabling TOTP**:
-1. Select **Disable Two-Factor Authentication**.
-2. In the confirmation dialog, verify with either your account password or the current 6-digit TOTP code.
-3. Confirm to unlink TOTP; the card returns to the disabled state.
+**While enabled**: the card shows **Two-factor authentication enabled**, the **enabled at** timestamp, and the remaining backup code count (the UI string is `{count} backup codes remaining`), plus two actions:
 
-### Connected Accounts
+- **Regenerate backup codes**: enter the current 6-digit code to issue a new batch of 10; **all previous codes stop working immediately**, and the new ones can be downloaded or copied from the dialog.
+- **Disable two-factor authentication**: the confirmation dialog needs **both** the account password and a current code (you can switch to entering a backup code instead). A wrong password returns `2003`, a wrong code `5311`. On success the secret and backup codes are cleared and the card returns to the disabled state.
 
-The **Connected Accounts** section lists linked SSO providers with the bound email and last login time.
+For wrong codes, rate limiting, and lost-access recovery, see [Login & Account Security](./authentication.mdx).
 
-- Select **Disconnect** to unlink a provider when you have a password or another authentication method configured.
-- The system prevents lockout: it **refuses to disconnect your only authentication method** (when no standalone password is set and only one SSO link remains).
+### Password
 
-<Callout type="note">
-  There is no user-side "Connect" action — SSO connections are linked automatically during login when the provider email matches your account (see [SSO Configuration](./sso.mdx)).
+The card title depends on the account type:
+
+- **Change Password** (the account has a local password): fill in **Current Password**, **New Password**, and **Confirm New Password**, then click **Update password**.
+- **Set Password** (an SSO-created account with no local password yet): only the new password and confirmation are required.
+
+The **password status block** loads only for local accounts (`auth_source === "local"`):
+
+- An expired password shows a red alert, fewer than 7 days remaining shows a yellow warning, and the **password expiration** date is always shown.
+- Users marked as exempt from the expiration policy see no status block.
+
+**Common responses**:
+
+| Case | Result |
+| --- | --- |
+| Wrong current password | `2003` (`current_password_incorrect`) |
+| Password policy violation or reused password | `1001`, with per-item reasons in the field errors |
+| Minimum password age not yet met | `5306` (`password_min_age_not_met`) with the remaining days |
+
+Success refreshes the password timestamps, recalculates expiration, clears the forced-change flag, and sends a `security.password_changed` notification.
+
+<Callout type="warn" title="Known limitation: “Set Password” does not take effect for SSO accounts">
+  The **Set Password** branch submits the new password to `PUT /api/v1/users/me`, but that endpoint only accepts `username`, `email`, `email_verification_code`, `avatar_url`, and `locale` — a `password` in the request is silently ignored, so the UI reports success while no password is stored (**Roadmap**). To set a first local password for an SSO account, have an administrator set it in [User Management](./user-management.mdx).
 </Callout>
 
 ### Deleting Your Account
 
-<Callout type="error" title="Permanent Deletion">
-  Deleting your account cannot be undone. Back up important data before proceeding.
+<Callout type="error" title="Permanent deletion">
+  Deleting your account cannot be undone, and there is no temporary deactivation or reactivation flow. Back up or transfer anything important first.
 </Callout>
 
-1. Open **Profile Settings** → **Account** tab.
-2. Find the **Delete Account** section and click **Delete Account**.
-3. Read the warning carefully.
-4. Enter your password to confirm.
-5. Click **Permanently Delete**.
+The entry point appears only when the site enables `allow_account_deletion` (when disabled the backend returns `account_deletion_disabled`).
 
-**What gets deleted**: Your profile and personal information, conversations and messages, API keys, team memberships (if not owner), and uploaded files.
+1. Click **Delete Account** in the **Danger Zone** card.
+2. Read the warning in the confirmation dialog.
+3. Enter your **current password**.
+4. Click **Delete Account**.
 
-<Callout type="warn">
-  There is no temporary deactivation or reactivation flow — deleting the account is permanent. If you are a team owner, transfer ownership before deleting your account.
-</Callout>
+Limits and effects:
 
-## Preferences
+- **Super Admins cannot delete themselves** (`cannot_delete_superuser_account`).
+- Verification uses the local password, so **SSO accounts without a local password cannot self-delete** (the check fails). Those need an administrator to handle it (note that the admin delete endpoint likewise refuses to delete Super Admins).
+- Cascading deletions: conversations and messages, Agent runs, personal memories, API keys, password history, SSO connections, team memberships (including `owner`), user notifications, and role assignments.
+- **Not deleted**: uploaded files and resources such as Agents, workflows, knowledge bases, tools, and skills — their creator field is nulled (`SET_NULL`) and the resource stays with the team. The team itself also survives, merely losing its owner (the ownership field is nulled); **nothing blocks an owner from deleting their account and nothing transfers ownership automatically**, so transfer it manually first.
 
-### Language
+Once deleted, the local token is cleared and you are redirected to the login page.
 
-Switch the interface language (e.g., English / 中文) via the **language switcher** in the navigation bar. The change takes effect immediately.
+## Appearance & Language
 
-### Theme
+Appearance and language live in the **Appearance settings** panel (`Settings Drawer`) in the navigation bar rather than in the profile dialog, and changes take effect immediately:
 
-Switch the theme via the **theme toggle** in the navigation bar:
+| Section | Options |
+| --- | --- |
+| **Theme** | System / Light / Dark |
+| **Sidebar** | Default / Inset / Floating |
+| **Layout** | Default / Compact / Full |
+| **Header layout** | Default / Centered / Minimal |
+| **Direction** | Left to right / Right to left |
+| **Language** | English / 中文 |
 
-- **Light**
-- **Dark**
-- **System** (follow the system preference)
+- Theme, sidebar, layout, header layout, and direction are stored in browser `localStorage` and affect only the current browser.
+- **Language** writes a `locale` cookie (valid for one year) and, while signed in, syncs the account's `locale` field, so it survives a browser change.
+- The **Reset** button at the bottom restores default appearance (it does not change the language or account data).
+- The login and sign-up pages have their own language switcher in the corner, usable without signing in.
 
 ## API Keys
 
-API keys are managed on a dedicated page, not in profile settings:
+API keys are managed on their own page, not in profile settings:
 
-1. Open the user menu (profile icon).
-2. Select **API Keys**.
-3. Or navigate directly to `/app/api-keys`.
+1. Open the avatar menu and select **API Keys** (shown only when the account has the `apikey:read` permission).
+2. Or navigate directly to `/app/api-keys`.
 
-See [Managing API Keys](./api-keys.mdx) for details.
+For creation, bindings, deactivation, and limits, see [API Keys](./api-keys.mdx).
 
 ## My Memories
 
-The user menu includes **My Memories** (`/app/memories`), with the subtitle "Explore what AI knows about you". Here you can:
+**My Memories** in the avatar menu (`/app/memories`) opens your personal memory graph, titled **My Memories** with the subtitle "Explore what AI knows about you". There you can:
 
 - Search memory entities by keyword or filter by entity type.
-- Switch the graph canvas across **Grid**, **Hierarchical**, and **Radial** layouts, with zoom and Fit View controls.
-- Inspect an entity's properties, outgoing and incoming relations, access count, and last-accessed timestamp.
-- Use **Select Mode** to batch-delete entities (**Delete selected**), or edit an entity's description.
-- When no memories have been formed yet, an empty state invites you to **Start conversation**.
+- Switch the graph across **Grid / Hierarchical / Radial** layouts, with zoom in, zoom out, and fit view.
+- Inspect an entity's properties, outgoing and incoming relations, access count, and last-accessed time.
+- Use **Select Mode** to batch-select entities and **Delete selected**, or edit a single entity's description and delete individual entities/relations.
+- With no memories yet, the **No memories yet** empty state invites you to **Start conversation**.
 
-For extraction rules, entity and relation types, and recency-decay scoring, see [Memory and Context](../agent/memory.mdx).
+Extraction rules, entity and relation types, retrieval, and time decay are covered in [Memory and Context](../agent/memory.mdx).
 
-## Notifications
+## Notification Center
 
-The notification center aggregates site-wide, team, and personal notifications, with search, unread filtering, and mark-as-read. Document processing, workflow runs, Agent publishing, API Key expiration, and security events can trigger automatic notifications.
+The notification center (`/app/notifications`) aggregates site-wide, team, and personal notifications with search, unread filtering, and mark-as-read; the bell in the avatar menu shows the unread count (`99+` above 99).
 
-Notification preferences (email digests, per-type toggles, quiet hours, push notifications) are global and managed by administrators. See [Notifications & External Channels](./notifications.mdx) for details.
+Automatic notifications cover document processing, workflow runs, Agent publishing, API keys expiring (reminders at 7 / 3 / 1 days remaining) and expired, password expiration, account lockouts, and new-device sign-ins.
+
+<Callout type="warn">
+  This version has **no user-facing per-type toggles, email digests, quiet hours, or push preferences** — notification channels and global switches are managed by administrators in site settings. Browser desktop notification permission is granted locally by the user.
+</Callout>
+
+See [Notifications & External Channels](./notifications.mdx) for details.
 
 ## Troubleshooting
 
 ### Cannot Save Profile
 
-1. Check your internet connection.
-2. Verify all required fields are filled.
-3. Check field validation error messages.
+1. Check your connection and make sure required fields are filled in.
+2. Read the field errors (`5002` username taken, `5003` email taken).
+3. When changing your email, make sure you requested and entered the 6-digit code (`5005` means the code is invalid or expired).
 4. Refresh the page and try again.
 
-### Email Verification Not Received
+### Email Verification Code Not Received
 
-1. Click **Send Email Verification** to get a code.
-2. Check your inbox (including spam/junk folder).
-3. Enter the 6-digit code.
-4. If not received, wait a minute and resend.
+1. After clicking **Send code**, check the inbox and the spam folder.
+2. Mind the 60-second resend cooldown and retry after it lapses.
+3. Make sure you entered the **new** address — the code only goes there.
+4. If the site has no SMTP configured, sending returns `5007` and an administrator must configure mail first.
 
-### TOTP Cannot Be Enabled or Lost Access
+### TOTP Cannot Be Enabled or Access Is Lost
 
-1. Use a backup code to log in.
-2. Contact your administrator to disable TOTP.
-3. Ensure your authenticator app's time is synced.
-4. Try a different authenticator app.
+1. Ensure the device clock is synced automatically (±30-second window).
+2. Try logging in with a one-time **backup code**.
+3. If the backup codes are exhausted, ask an administrator to unbind TOTP so you can re-enrol.
+4. Disabling TOTP requires both the password and a code — one alone will not work.
+
+### Cannot Delete the Account
+
+1. If the button is missing, the site has `allow_account_deletion` turned off.
+2. Super Admin accounts cannot delete themselves.
+3. SSO-created accounts with no local password cannot self-delete; contact an administrator.
+
+### Interface Language Did Not Change
+
+1. Wait for the page refresh the switch triggers.
+2. Clear the site cookie and sign in again so `locale` re-syncs.
+3. Check that a browser translation extension is not overriding the copy.
 
 ## Best Practices
 
-**Do**:
+**Do**
 
-- Use a strong, unique password and enable TOTP.
-- Keep your email address up to date.
-- Review connected SSO accounts regularly.
-- Mark notifications as read promptly; address security alerts immediately.
+- Use a strong, unique password with TOTP enabled, and store backup codes offline.
+- Keep your email address current — it is the only channel for password recovery and notifications.
+- Review connected SSO accounts and recent login notifications periodically.
+- Transfer team ownership and export what you need before deleting an account.
 
-**Don't**:
+**Don't**
 
-- Share your password.
-- Disable 2FA on shared devices.
-- Ignore security alerts.
-- Let notifications accumulate.
+- Disable TOTP on shared devices.
+- Ignore security notifications.
+- Rely on the profile dialog's "Set Password" to create the first password for an SSO account (see the limitation above).
 
 ## See Also
 
-- [Login & Account Security](./authentication.mdx) — password policies, TOTP, and account recovery
-- [SSO Configuration](./sso.mdx) — SSO connection management
-- [Managing API Keys](./api-keys.mdx) — API key lifecycle
-- [Notifications & External Channels](./notifications.mdx) — notification center and automatic notifications
+- [Login & Account Security](./authentication.mdx) — password policy, login protection, TOTP rate limits, and account recovery
+- [SSO Configuration](./sso.mdx) — provider setup and user lifecycle
+- [User Management](./user-management.mdx) — approval, deactivation, forced changes, and expiration management
+- [API Keys](./api-keys.mdx) — creating, binding, and revoking keys
+- [Notifications & External Channels](./notifications.mdx) — the notification center and automatic notification rules

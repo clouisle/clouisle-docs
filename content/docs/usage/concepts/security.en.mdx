@@ -12,7 +12,9 @@ Team roles are owner, administrator, member, and viewer. The owner handles owner
 
 ### Permissions
 
-Backend permission codes use `resource:action` or `admin:resource:action`. Super administrators bypass permission checks. Non-admin resources can also be authorized through team- or resource-scoped roles. The frontend hides menus based on permissions, but the backend still checks permissions on every request.
+Backend permission codes use `resource:action` or `admin:resource:action`. Super administrators bypass permission checks. Non-admin resources can also be authorized through team- or resource-scoped roles.
+
+Authorization is enforced server-side and fail-closed: team resources go through `check_team_access`, and Agents go through `check_agent_access` (a private Agent is readable only by its creator, creator-less legacy private Agents fall back to the team-admin check, and an unauthorized request gets 403 or 404 rather than empty data). The frontend is a **convenience layer**: it hides menus and buttons by permission but is not a security boundary — calling the API directly is rejected all the same, and conversely a visible button does not prove the backend allows the operation.
 
 ### Session and data isolation
 
@@ -22,9 +24,30 @@ Regular users can only see their own conversations and data; users with `admin:d
 
 The site can combine password sign-in, email verification, administrator approval, click captcha, password policy, password expiration, single session, TOTP, and SSO. SSO supports multiple connections; administrators can disable password sign-in. Active sessions default to `30` days (controlled by the `session_timeout_days` site setting); the JWT fallback token lasts `8` days.
 
+Human verification is a **one-time click captcha**, not an image-text captcha: the sign-in page fetches a challenge (`GET /api/v1/login/captcha`), a successful click is exchanged by `POST /api/v1/login/captcha/click` for a private one-time proof, and the login request then carries `captcha_id` + `captcha_token`; a missing or expired proof returns `captcha_required` / `captcha_invalid`. The security page exposes exactly **one** switch, `enable_captcha` (default `false`), with **no** failure threshold, validity window, or difficulty setting — it is a supplementary anti-automation measure, not a substitute for login lockout.
+
+What actually stops brute force is the lockout logic:
+
+- **Account lockout**: after `max_login_attempts` (default `5`) consecutive failures, the account is locked for `lockout_duration_minutes` (default `15`) minutes. The lock is evaluated before password verification, so even a correct password returns `account_locked` (with remaining seconds) while locked; a successful sign-in resets the counter.
+- **TOTP lockout**: `5` failures inside a 300-second window lock verification for `900` seconds (15 minutes), counted per user; a successful verification resets the counter.
+- **Per-IP login counter**: Redis key `login:attempts:ip:<ip>` with a `3600`-second TTL, but only read/write helpers exist and nothing in the login flow calls them, so it does **not** throttle anything today.
+
+All thresholds live in the Security group of site settings, see [Site Settings](../guides/administration/site-settings.mdx).
+
 ### API Keys
 
-API Keys start with `clou_` and are sent via `Authorization: Bearer`. A key can be restricted to Agents, Workflows, expiration, and requests per minute; when resources are unrestricted, it can access all matching resources. The per-minute request limit is counted per user, not per team.
+API Keys start with `clou_` and are sent via `Authorization: Bearer`. A key can be bound to **specific Agents and Workflows** (empty lists = access to all, the backward-compatible default), and can carry an expiration time and an enabled flag; binding is enforced server-side, so a key reaching an unauthorized Agent or Workflow gets 403.
+
+The `rate_limit` field (default `1000`/minute, `0` meaning unlimited) and the `scopes` field are **stored and displayed, but nothing reads them at runtime** — do not treat them as active throttling or permission narrowing. Keys are managed per user: users can only view and manage their own keys; only Super Admin can view all keys across teams.
+
+### Outbound network and SSRF protection
+
+Outbound access has two independent allowlists:
+
+- **External fetching (SSRF exemptions)**: the `ssrf_allowed_targets` site setting (JSON array, max 200 entries). Private, loopback, link-local, and reserved addresses are denied by default; **permanently blocked regardless of the allowlist** are cloud metadata and special ranges: `metadata.google.internal`, `169.254.169.254`, `169.254.0.0/16`, `224.0.0.0/4`, `0.0.0.0/32`. `localhost` / `local` are denied by default but **can** be allowlisted (a locally deployed model or internal service is the common case). These forms are rejected on save: `*`, `0.0.0.0/0`, `::/0`, bare `0.0.0.0` or `::`, any CIDR overlapping the metadata range, and entries containing `/ ? # @` or whitespace. Allow only the exact hosts or ranges you need — an over-broad exemption effectively disables SSRF protection.
+- **Model egress**: the base URL you enter when registering a model provider in the admin console must be in the `model_endpoint_allowlist` site setting (about 20 entries by default, including OpenAI, Anthropic, DashScope, SiliconFlow, and local `http://localhost:11434`; cap 200). Model traffic only goes through this allowlist and is not subject to the SSRF blocked-range checks above — so running Ollama locally only needs the model allowlist entry, not a change to `ssrf_allowed_targets`. Add the entry before onboarding a self-hosted or private model service, otherwise saving the model fails outright.
+
+The two checks work differently: external fetching resolves the hostname first and then validates the resolved IPs (so equivalent spellings or DNS tricks cannot slip past), while model egress canonicalizes the base URL to `scheme://host:port` (rejecting credentials, query, or fragment) and requires an exact match in the allowlist, returning the administrator-approved canonical value on success (see [Site Settings](../guides/administration/site-settings.mdx) and [Model](./model.mdx)).
 
 ### Audit and notifications
 

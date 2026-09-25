@@ -1,0 +1,276 @@
+---
+title: 两步验证（TOTP）API
+description: 为当前账号配置、启用、停用 TOTP 两步验证并管理备用码
+icon: LockKeyhole
+---
+
+TOTP API 用于给**当前登录账号**绑定基于时间的一次性口令（TOTP）两步验证：生成密钥与二维码、验证并启用、停用、重新生成备用码，以及查询状态。所有操作都作用于调用者自己的账号，基础路径为 `/api/v1/totp`。
+
+<Callout type="info" title="前置条件与认证">
+  所有端点都需要已认证的 JWT 用户会话（`Authorization: Bearer <token>`）；**不接受 API Key 认证**，也不需要任何权限码——只能操作自己的 2FA 配置。
+
+  登录时的两步验证挑战是独立端点 `POST /api/v1/login/verify-totp`（`application/x-www-form-urlencoded`，字段 `temp_token` + `code`），见 [认证与登录 API](./auth)。**不存在 `/api/v1/totp/verify` 端点。**
+</Callout>
+
+## 端点总览
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/v1/totp/setup` | 生成密钥、二维码与备用码（尚未启用） |
+| POST | `/api/v1/totp/enable` | 校验验证码并正式启用 2FA |
+| POST | `/api/v1/totp/disable` | 停用 2FA 并清除密钥与备用码 |
+| POST | `/api/v1/totp/regenerate-backup-codes` | 校验验证码后重新生成备用码 |
+| GET | `/api/v1/totp/status` | 查询启用状态、启用时间与剩余备用码数 |
+| POST | `/api/v1/login/verify-totp` | （登录流程）用 `temp_token` + `code` 换取正式令牌 |
+
+## 典型流程
+
+1. `POST /totp/setup`：拿到密钥与二维码，用验证器 App 扫描；此时 `totp_enabled` 仍为 `false`。
+2. `POST /totp/enable`：提交 App 当前显示的 6 位验证码完成启用。
+3. 之后每次登录：`POST /api/v1/login` 返回 `requires_totp` 与 `temp_token`，再调用 `POST /api/v1/login/verify-totp` 换取正式令牌。
+
+---
+
+## 1. 生成绑定信息
+
+```
+POST /api/v1/totp/setup
+```
+
+生成本次绑定使用的密钥、二维码与备用码。**不会**启用 2FA——必须再调用 `enable` 并验证一次验证码。
+
+无请求体。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "secret": "JBSWY3DPEHPK3PXP",
+    "qr_code": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg...",
+    "backup_codes": [
+      "1234-5678",
+      "8765-4321",
+      "2468-1357"
+    ]
+  },
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `secret` | string | Base32 密钥，供手动录入验证器 |
+| `qr_code` | string | `data:image/png;base64,...` 形式的二维码 |
+| `backup_codes` | array of string | **10** 个一次性备用码，格式 `XXXX-XXXX` |
+
+<Callout type="warn">
+  `backup_codes` 只在 setup 与 regenerate 两个响应中明文返回一次，服务端只保存哈希。请引导用户立即保存。
+
+  重复调用 `setup`（在尚未启用时）会用新密钥与新备用码覆盖上一次的临时数据；已启用状态下调用返回 `400` + `5314`（`totp_already_enabled`）。
+</Callout>
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `5314` | `totp_already_enabled`：2FA 已启用，不能重新生成绑定信息 |
+
+---
+
+## 2. 启用 TOTP
+
+```
+POST /api/v1/totp/enable
+```
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `code` | string | 是 | 验证器 App 当前的验证码 |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Two-factor authentication enabled successfully"
+}
+```
+
+成功时记录 `totp_enabled_at`。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `5314` | `totp_already_enabled`：已启用 |
+| `400` | `5315` | `totp_setup_expired`：未先调用 `setup`（无待绑定密钥） |
+| `400` | `5311` | `totp_invalid`：验证码错误 |
+
+---
+
+## 3. 停用 TOTP
+
+```
+POST /api/v1/totp/disable
+```
+
+需要当前账号密码，以及一个有效的验证码**或**备用码。
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `password` | string | 是 | - | 当前账号密码 |
+| `code` | string | 是 | - | TOTP 验证码或备用码 |
+| `is_backup_code` | boolean | 否 | `false` | 为 `true` 时把 `code` 当作备用码校验 |
+
+停用后会清空 `totp_enabled`、`totp_secret`、`totp_enabled_at` 与备用码哈希。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Two-factor authentication disabled successfully"
+}
+```
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `5313` | `totp_not_enabled`：当前未启用 2FA |
+| `400` | `2003` | `current_password_incorrect`：密码错误 |
+| `400` | `5311` | `totp_invalid`：验证码 / 备用码错误 |
+
+---
+
+## 4. 重新生成备用码
+
+```
+POST /api/v1/totp/regenerate-backup-codes
+```
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `code` | string | 是 | 当前有效的 TOTP 验证码（备用码不可用于此端点） |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "codes": [
+      "1234-5678",
+      "8765-4321",
+      "2468-1357"
+    ]
+  },
+  "msg": "Backup codes regenerated successfully"
+}
+```
+
+旧的备用码会**立即全部失效**，新生成 10 个 `XXXX-XXXX` 格式的备用码。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `400` | `5313` | `totp_not_enabled` |
+| `400` | `5311` | `totp_invalid` |
+
+---
+
+## 5. 查询状态
+
+```
+GET /api/v1/totp/status
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "enabled": true,
+    "enabled_at": "2026-09-26T10:15:00+00:00",
+    "remaining_backup_codes": 10
+  },
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `enabled` | boolean | 是否已启用 2FA |
+| `enabled_at` | string (ISO 8601) \| null | 启用时间；从未启用时为 `null` |
+| `remaining_backup_codes` | integer | 尚未使用的备用码数量；未启用或未生成时为 `0` |
+
+---
+
+## 6. 登录时验证（`/api/v1/login/verify-totp`）
+
+登录接口在需要 2FA 时**不返回**正式令牌，而是返回：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "requires_totp": true,
+    "temp_token": "<short-lived JWT for the next step>"
+  },
+  "msg": "..."
+}
+```
+
+随后用 `temp_token` 与验证码换取正式令牌：
+
+```
+POST /api/v1/login/verify-totp
+Content-Type: application/x-www-form-urlencoded
+
+temp_token=<temp_token>&code=123456&is_backup_code=false
+```
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `temp_token` | string | 是 | - | 登录接口返回的临时令牌 |
+| `code` | string | 是 | - | TOTP 验证码或备用码 |
+| `is_backup_code` | boolean | 否 | `false` | 为 `true` 时把 `code` 当作备用码（用后即失效） |
+
+成功返回正式 `Token` 对象；失败时返回 `400` + `5312`（`totp_rate_limited`，连续失败次数过多后临时锁定）、`5311`（`totp_invalid`）、`5313`（`totp_not_enabled`）、`2002`（`totp_setup_expired`，临时令牌过期）。完整字段与响应示例见 [认证与登录 API](./auth)。
+
+<Callout type="info">
+  站点设置 `require_totp` 为 `true` 时，未启用 2FA 的用户登录会返回 `requires_totp_setup` + `temp_token`，必须先完成 setup 与 enable 才能进入系统。
+</Callout>
+
+---
+
+## 错误处理
+
+| HTTP | 错误码 | 触发场景 |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | 缺少令牌、令牌无效或已过期 |
+| `400` | `5311` | 验证码错误 |
+| `400` | `5312` | 验证失败次数过多，临时限流（登录验证端点） |
+| `400` | `5313` | 未启用 2FA |
+| `400` | `5314` | 已启用 2FA（重复 setup / enable） |
+| `400` | `5315` | 未先 setup，缺少待绑定密钥 |
+| `400` | `2003` | 停用时密码错误 |
+| `422` | `1001` | 请求校验失败（缺少必填字段等） |
+
+## 相关文档
+
+- [认证与登录 API](./auth) — 登录、`requires_totp` / `temp_token` 流程与 `verify-totp`
+- [用户 API](./users) — 账号安全相关操作
+- [错误处理](./errors) — 按 HTTP 状态与业务错误码恢复

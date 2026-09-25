@@ -14,7 +14,7 @@ The workflow editor consists of the following parts:
 
 - **Nodes Panel (Left)**: Available node types, organized by category
   - **Model**: LLM, Media Generation
-  - **Logic**: Condition, Question Classifier, Iteration, Loop, Pause
+  - **Logic**: Condition, Question Classifier, Decision, Iteration, Loop, Pause
   - **Transform**: Code, Template, File to URL, Variable Aggregator, Variable Assignment, Parameter Extractor
   - **Extension**: Sub-workflow, Agent, Tool, Knowledge Retrieval, Answer
 - **Canvas (Center)**: Workflow design area; add, connect, and arrange nodes
@@ -84,17 +84,7 @@ Use the editor selector when referencing variables; do not hand-write names that
 
 The editor provides the following node types, organized by category:
 
-### Flow / Logic Nodes
-
-| Node | Type Identifier | Purpose |
-| --- | --- | --- |
-| User Input | `user_input` | Entry point for manually executed workflows |
-| Trigger | `trigger` | Entry point for triggered workflows |
-| Condition | `condition` | Branch based on expression result |
-| Question Classifier | `question_classifier` | Automatically classify input questions |
-| Iteration | `iteration` | Iterate over items in a list |
-| Loop | `loop` | Repeat a branch until a condition is met |
-| Pause | `pause` | Wait for approval or variable input |
+The palette organizes nodes into four categories; the tables below use the same grouping. Type identifiers are what you write in API definitions, so use the exact values from the tables.
 
 ### Model Nodes
 
@@ -103,35 +93,44 @@ The editor provides the following node types, organized by category:
 | LLM | `llm` | Call a language model for text generation and analysis |
 | Media Generation | `media_generation` | Generate media with a compatible model |
 
-### Data Nodes
+### Logic Nodes
+
+| Node | Type Identifier | Purpose |
+| --- | --- | --- |
+| User Input | `user_input` | Entry point for manually executed workflows (chosen when creating the workflow, not from the add-node menu) |
+| Trigger | `trigger` | Entry point for triggered workflows (same) |
+| Condition | `condition` | Branch based on expression result |
+| Question Classifier | `question_classifier` | Classify input text with a chat model |
+| Decision | `decision` | Ask a decision model one typed question (`choice`/`score`/`noul`) about a state and take the branch it returns |
+| Iteration | `iteration` | Iterate a list, running the container's child nodes once per item |
+| Loop | `loop` | Repeat a branch until a condition is met |
+| Pause | `pause` | Wait for approval or variable input |
+
+### Transform Nodes
 
 | Node | Type Identifier | Purpose |
 | --- | --- | --- |
 | Code | `code` | Execute Python or JavaScript custom code |
 | Template | `template` | Render a template string |
 | File to URL | `file_to_url` | Convert a file asset to an accessible URL |
-| Variable Assignment | `variable_assignment` | Assign a value to a variable |
 | Variable Aggregator | `variable_aggregator` | Combine multiple variable values |
+| Variable Assignment | `variable_assignment` | Assign a value to a variable |
 | Parameter Extractor | `parameter_extractor` | Extract structured parameters from text |
 
-### Knowledge Nodes
-
-| Node | Type Identifier | Purpose |
-| --- | --- | --- |
-| Knowledge Retrieval | `knowledge_retrieval` | Retrieve content from a knowledge base |
-
-### Integration Nodes
+### Extension Nodes
 
 | Node | Type Identifier | Purpose |
 | --- | --- | --- |
 | Sub-workflow | `sub_workflow` | Invoke another published workflow |
 | Agent | `agent` | Invoke a published Agent |
 | Tool | `tool` | Execute a configured tool |
-| HTTP Request | `http_request` | Send HTTP requests to external APIs |
+| Knowledge Retrieval | `knowledge_retrieval` | Retrieve content from a knowledge base |
 | Answer | `answer` | Define the workflow's final output |
 
 <Callout type="info">
-  Node type identifiers are used for API interactions. Use the exact values from the table above when configuring. `document_extractor` and `http_request` are executor/API-level capabilities, not shown in the builder palette. `iteration_exit` and `loop_exit` are not registered in the verified builder node catalog or workflow executor; treat them as unverified internal markers if they appear in a definition, and do not add them as standalone nodes.
+  **Iteration**, **Loop**, and **Pause** cannot be nested inside another container: opening the add-node menu inside an Iteration or Loop leaves only Condition, Question Classifier, and Decision in the Logic category, plus `iteration_exit` / `loop_exit` as the container's own end marker. Those two markers have no standalone executor — they only delimit the container, so do not connect them as independent nodes.
+
+  `http_request` and `document_extractor` have registered executors in the engine but no node component in the builder — they can only appear in definitions submitted through the API.
 </Callout>
 
 <Callout type="warn">
@@ -168,7 +167,88 @@ Configure node parameters by task:
 
 ### Question Classifier Node
 
-Classify the user's input into one of several intents/categories and route accordingly.
+Classify the user's input into one of several intents/categories and route accordingly. It puts the categories in a prompt for a **chat model** to answer as JSON, then parses `category` out of the text; use the **Decision** node below when you need probabilities, confidence, or a guarantee that the answer will not come back in the wrong shape.
+
+### Decision Node
+
+A Decision node asks a **decision model** (non-generative) one typed question about a state and takes the branch that matches the answer. The model produces no prose — it returns a probability distribution plus a confidence, so the route never depends on parsing generated text and cannot drift because the model added an extra sentence.
+
+<Callout type="info">
+  Connect a decision model first: an administrator adds **TypeSafe AI** under **Integrations** > **Model Providers** (provider is fixed to `typesafe`, default endpoint `https://api.typesafe.ai/v1`) and authorizes that model for the team with type **Decision**. The **Decision Model** dropdown lists only the current team's enabled models of type `decision`; with none available it shows "No available models".
+</Callout>
+
+| Setting | UI Label | Type | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `modelId` | Decision model | string | none (required) | An enabled decision model for the team; the checklist reports "Model not selected" when empty |
+| `stateTemplate` | State | template string | none (required) | What the model evaluates; supports `{{variables}}`. It is rendered to a string, so assemble objects or arrays into text with a Template or Variable Assignment node first |
+| `questionType` | Question type | `choice` \| `score` \| `noul` | `choice` | Determines branch handles and outputs, see below |
+| `instructions` | Instructions | string | none (required) | One sentence saying what to decide, e.g. "Decide whether this refund request should be approved automatically" |
+| `options` | Choice options / Ordered score levels | string array | `["yes", "no"]` | `choice` needs 1–255 unique options; `score` needs 2–10 **ordered** levels; empty or duplicate entries are rejected by the checklist |
+| `defaultHandle` | Fallback branch | string | `default` | Taken when confidence is below the threshold, or when no branch handle resolved |
+| `confidenceThreshold` | Confidence threshold | number `0`–`1` | unset (disabled) | Shown for choice/score only; a returned confidence **strictly below** it routes to the fallback branch |
+
+The question type determines branch handles and outputs:
+
+| Question type | UI Label | Branch handles | Confidence | Use when |
+| --- | --- | --- | --- | --- |
+| `choice` | Choose an option | one handle per option, plus the fallback branch | yes | Picking one of several mutually exclusive dispositions (refund / technical / billing / other) |
+| `score` | Score against ordered levels | one handle per level, plus the fallback branch | yes | The levels are inherently ordered (low / medium / high, P0–P3) and you also want a numeric score |
+| `noul` | Yes / No probability | fixed `yes` and `no`, plus the fallback branch | no | A single binary call: probability ≥ `0.5` routes `yes`, otherwise `no`; no confidence is returned, so the threshold does not apply |
+
+**Branch handles and renaming**
+
+- Each option (choice) or level (score) is an output handle on the canvas, named after that option or level; the fallback handle is named by `defaultHandle` (`default` by default).
+- Editing option text remaps existing connections by position as long as the number of options is unchanged. If the count changed, the leftover connections point at an outdated output handle and the checklist reports `decisionBranchHandleInvalid` — reconnect them to a current handle.
+- You do not have to connect every branch, but any branch you do connect needs downstream nodes. A low-confidence answer is rerouted to the fallback branch, so if the fallback has no downstream nodes the flow ends at this node.
+
+**Fallback branch and confidence threshold**
+
+- The threshold only fires when confidence is **strictly below** it; a confidence exactly equal to the threshold still takes the model's branch.
+- The threshold affects routing only, not outputs: `answer` is always the option/level the model picked, while `selected_handle` is the branch actually taken.
+- Without a threshold, only "no branch handle resolved" uses the fallback. `noul` never uses the fallback because it always answers yes or no.
+- A decision node is retried up to 2 times by default (1 second initial delay, exponential backoff with jitter). Retries are independent of the threshold, which exists for answers that came back uncertain.
+
+**Output variables**
+
+| Output | Type | Meaning |
+| --- | --- | --- |
+| `answer` | string | The selected option/level, or `yes`/`no` |
+| `selected_handle` | string | The branch handle actually taken (the fallback handle when the threshold rerouted it) |
+| `usage` | object | Token usage for this decision call |
+| `choice` / `score` / `noul` | type-specific | `choice` adds `choice`, `confidence`, `probabilities`; `score` adds `score`, `confidence`, `probabilities`; `noul` adds `noul` (the probability of yes) |
+
+Downstream nodes can record the verdict with `{{decisionNodeId.answer}}`, or branch again on `{{decisionNodeId.confidence}}` / `{{decisionNodeId.probabilities}}` to add a human review layer.
+
+**Failure paths**
+
+| Error | Trigger |
+| --- | --- |
+| `validation_error` | No model, no state, or no instructions; question type is not `choice`/`score`/`noul`; option count out of range, empty, or duplicated |
+| `decision_result_missing` | The model's answer type, option set, or probability set does not match the node configuration (for example it returned an option you did not configure) |
+| Provider/model errors | The decision model is not authorized for the team, the model or authorization is disabled, the endpoint is blocked by the model-endpoint allowlist, the request times out (default `60` seconds), or auth/quota errors |
+
+**Worked example: ticket triage**
+
+<Steps>
+  <Step>### Define the inputs</Step>
+  Add `ticket_text` (paragraph) and `customer_tier` (dropdown: `free`/`pro`/`enterprise`) to the start node.
+  <Step>### Configure the decision node</Step>
+  Pick a team-authorized TypeSafe decision model as **Decision model**; set **State** to `{{start.ticket_text}}`; set **Question type** to **Choose an option**; write "Decide which queue this ticket belongs to" as **Instructions**; set **Choice options** to `refund`, `technical`, `billing`, `other`.
+  <Step>### Set fallback and threshold</Step>
+  Set **Fallback branch** to `manual_review` and **Confidence threshold** to `0.6` — tickets the model is less than `0.6` sure about stop being auto-routed and go to a person.
+  <Step>### Connect the branches</Step>
+  Connect `refund` to a refund-approval sub-workflow, `technical` to a technical-support LLM node, `billing` to a billing template node, and `manual_review` to a **Pause** node (approval mode) for human handling. Leaving `other` unconnected ends the flow there.
+  <Step>### Debug and calibrate</Step>
+  Debug-run with an ambiguous ticket text and confirm it lands on `manual_review`; inspect the node's `answer`, `confidence`, and `probabilities` in the run trace to decide whether `0.6` should move up or down.
+  <Step>### Pass the checklist</Step>
+  Confirm there is no "Model not selected" and no outdated decision output handle, then publish.
+</Steps>
+
+**Debugging a decision branch**
+
+- The checklist reports each problem separately: model not selected, state empty, instructions empty, too few or too many options/levels, empty or duplicate options, and connections using an outdated handle.
+- In the run trace, read `selected_handle` (which branch ran) and `confidence` (whether the threshold rerouted it). If it always falls to the fallback, check `probabilities`: two near-equal options mean adjusting the threshold, while a flat distribution means the instructions or state need rewriting.
+- A decision node is one call with one result and no intermediate steps: you can only debug it by running the whole workflow — there are no breakpoints or single-step execution.
 
 ### Iteration / Loop Node
 
@@ -288,10 +368,16 @@ Request requirements:
 
 ### Cron Trigger
 
-After setting the trigger type to **Cron**, set the cron expression in `trigger_config.cron` (e.g., `0 9 * * 1-5` for weekdays at 9 AM).
+After setting the trigger type to **Cron**, the schedule expression is stored in `trigger_config` (e.g., `0 9 * * 1-5` for weekdays at 9 AM). The UI's frequency presets are converted into the same expression; custom mode takes `minute hour day month weekday` directly.
 
-<Callout type="warn">
-  Cron triggers require additional deployment of a scheduler task. The `workflow.check_scheduled` task implements cron evaluation logic, but is not included in the Celery Beat schedule by default. Operators who need this feature must schedule this task periodically in their deployment (e.g., every minute). Storing `trigger_type: cron` alone will not automatically run the workflow.
+<Callout type="error">
+  Saving a Cron trigger **does not** make a workflow run on its own: the `workflow.check_scheduled` task implements the cron evaluation logic, but it is neither in the shipped Celery Beat schedule (`backend/app/core/celery.py`) nor in the Celery app's `include` module list, so no supplied deployment ever schedules it. To enable scheduled triggers, an operator must do all three of these in a **custom deployment**:
+
+  1. Register the task — add `app.services.workflow.tasks` to the `celery_app` `include` list, or import the module when the worker starts.
+  2. Add it to the Beat schedule, once a minute is the intended cadence, e.g. `{"workflow-check-scheduled": {"task": "workflow.check_scheduled", "schedule": crontab(minute="*")}}`.
+  3. Align the key name: the scheduling task reads `trigger_config["cron"]`, while the **Workflow Settings** schedule form writes `trigger_config["cron_expression"]`. An expression saved through the UI has to be renamed to `cron` to match, or write the expression under the `cron` key through the API directly.
+
+  The task only selects published workflows with `trigger_type=cron`, uses `croniter` to test whether the current minute matches the expression, and fires a run with **empty inputs** `{}` attributed to the **workflow creator**. No route pattern matches it, so it lands on the `default` queue unless you set `options.queue` on the Beat entry.
 </Callout>
 
 ## Draft and Publication
@@ -333,6 +419,8 @@ Select **Checklist** and resolve the following issues before debugging and publi
 | Node Without Input | Required node lacks input connection |
 | Output Undefined | Answer node has no output variable configured |
 | Incomplete Condition Branch | Condition node missing True or False branch |
+| Incomplete Decision Configuration | Decision node has no model, an empty state or instructions, or an invalid number/uniqueness of options or levels |
+| Outdated Decision Branch Handle | A Decision node connection points at an option/level handle that no longer exists and must be reconnected |
 | Missing Required Tool Parameter | Tool node lacks required parameter mapping |
 | Incomplete Loop Container | Loop node not properly configured |
 
@@ -607,13 +695,14 @@ The Workflow API supports programmatic management of the workflow lifecycle:
 ### Schedule Not Running
 
 1. Confirm the workflow is `published` and `trigger_type` is `cron`
-2. Confirm `trigger_config.cron` contains a valid cron expression
-3. Confirm Celery Beat or another scheduler dispatches `workflow.check_scheduled` periodically
+2. Confirm `trigger_config` holds a valid cron expression (the scheduling task reads the `cron` key)
+3. Confirm the custom deployment added `app.services.workflow.tasks` to the Celery `include` list and dispatches `workflow.check_scheduled` from Beat (once a minute, for example)
+4. Confirm the worker running that task consumes the queue it actually lands on (`default`)
 
 ### High Execution Time
 
 1. Optimize nodes: Reduce LLM `max_tokens`, use faster models, optimize tool calls
-2. Use parallel execution: Identify independent nodes and execute concurrently
+2. Shorten the serial chain: the plan is layered by topology, but **nodes inside a layer still run one after another** and the canvas has no parallel node; fold repeated work into an Iteration node and shrink its input instead
 3. Add timeouts: Set reasonable node timeouts and handle gracefully
 4. Monitor performance: Review run duration statistics in run history
 
@@ -666,7 +755,8 @@ The Workflow API supports programmatic management of the workflow lifecycle:
 
 ### Performance Optimization
 
-- Use parallel execution where possible
+- Reduce serial steps: there is no parallel node, and independent nodes in the same layer still run one after another; merging nodes beats splitting them and hoping they overlap
+- Keep iteration size down: an Iteration node that exceeds its cap truncates its input, so filter out items you do not need first
 - Cache repeated operations
 - Optimize LLM prompts
 - Use appropriate models for the task

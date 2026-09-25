@@ -121,6 +121,10 @@ Authorization: Bearer YOUR_TOKEN
 | `current_prompt` | string | Yes | The prompt content to be revised |
 | `feedback` | string | Yes | Feedback, revision notes, or additional constraints |
 
+<Callout type="warn">
+  How it differs from `/generate`: `/generate` takes a JSON request body (with `Content-Type: application/json`), whereas `/optimize` has **no request body at all** — both required inputs are query parameters. `/optimize` also has **no `language` parameter**: the optimization meta-prompt is always built in Chinese, and the model returns the rewritten prompt accordingly.
+</Callout>
+
 ### Stream Event Types
 
 | Event (`event`) | Data Payload (`data`) | Description |
@@ -128,9 +132,25 @@ Authorization: Bearer YOUR_TOKEN
 | `start` | `{"model": "string"}` | Emitted when generation starts, identifying the LLM model |
 | `content_delta` | `{"delta": "string"}` | Streaming chunk of text |
 | `complete` | `{"total_length": number}` | Emitted when generation finishes, with total character length |
-| `error` | `{"code": number, "msg": "string"}` | Emitted on failure (e.g. `code: 4004` if no chat model is configured) |
+| `error` | `{"code": number, "msg": "string"}` | Emitted on failure (e.g. `code: 6100` if no chat model is configured) |
 
 ---
+
+## Error Events
+
+Both endpoints open the SSE connection with `200 OK`; failures travel as an in-stream `error` event rather than an HTTP status code:
+
+```
+event: error
+data: {"code": 6100, "msg": "No chat model available"}
+```
+
+| Trigger | Event `data.code` | Description |
+| --- | --- | --- |
+| No enabled default chat model is configured | `6100` (`MODEL_NOT_FOUND`) | The stream ends before `start` is emitted; `msg` is the localized `no_chat_model_available` text |
+| An exception is raised during generation/optimization | `1000` (`UNKNOWN_ERROR`) | `msg` is the localized generic stream-error text; the server logs the full stack trace |
+
+Clients therefore cannot judge success from the HTTP status: they must listen for the `error` event and for the connection closing early, and treat already-received `content_delta` fragments as an incomplete result.
 
 ## Error Codes
 
@@ -138,5 +158,5 @@ Authorization: Bearer YOUR_TOKEN
 | --- | --- | --- |
 | `2000` | UNAUTHORIZED | Bearer token missing or invalid |
 | `2004` | INACTIVE_USER | User account disabled or pending approval |
-| `4004` | MODEL_NOT_FOUND | Default chat model is unavailable (`no_chat_model_available`) |
-| `9999` | UNKNOWN_ERROR | Unexpected generation failure |
+| `6100` | MODEL_NOT_FOUND | Default chat model is unavailable (`no_chat_model_available`) |
+| `1000` | UNKNOWN_ERROR | Unexpected generation failure |

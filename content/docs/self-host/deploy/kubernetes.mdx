@@ -14,6 +14,38 @@ Kubernetes 部署需要 Kubernetes `1.25+`、配置好的 `kubectl`、Ingress Co
 
 默认副本数：api `2`、worker `2`、sandbox-worker `1`、beat `1`（`Recreate` 策略）、frontend `2`。manifest 不包含 HPA，副本数静态，需用 `kubectl scale` 调整。
 
+## ConfigMap 与 Secret
+
+单文件 manifest 的资源顺序为：`Namespace` → `ConfigMap` → `Secret` → PostgreSQL（StatefulSet + Headless Service + PVC）→ Redis（Deployment + Service）→ Qdrant（StatefulSet + Headless Service + PVC）→ uploads PVC → API → Worker → Sandbox Worker → Beat → Frontend → Ingress，共 13 段。
+
+`clouisle-config` 的键必须与 manifest 一致（Pod 通过 `envFrom.configMapRef` 整体注入）：
+
+| 键 | 值 | 说明 |
+| --- | --- | --- |
+| `PROJECT_NAME` / `TIMEZONE` | `Clouisle` / `Asia/Shanghai` | 应用名与时区 |
+| `API_BASE_URL` / `API_INTERNAL_BASE_URL` | `http://api:8000` | 服务端与 Worker 内部地址 |
+| `PUBLIC_API_URL` | `""` | 部署到公网域名时填写 |
+| `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | `http://api:8000` | Sandbox 产物上传 |
+| `SANDBOX_WORKER_CONCURRENCY` | `"1"` | Sandbox Worker 并发（被启动命令的 `${SANDBOX_WORKER_CONCURRENCY:-1}` 消费） |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `"true"` | 开启 bwrap 文件系统隔离 |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `"/usr/bin/bwrap"` | 镜像内 bubblewrap 绝对路径 |
+| `FRONTEND_URL` | `http://frontend:3000` | SSO 回调基址 |
+| `POSTGRES_SERVER` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_DB` | `postgres` / `5432` / `postgres` / `clouisle` | 数据库（密码在 Secret） |
+| `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis |
+| `VECTOR_BACKEND` / `QDRANT_URL` / `QDRANT_COLLECTION_PREFIX` / `QDRANT_DISTANCE` | `qdrant` / `http://qdrant:6333` / `kb_dim` / `Cosine` | 向量库 |
+| `RETRIEVAL_HYBRID_KILL_SWITCH` / `RETRIEVAL_SHADOW_ENABLED` | `"false"` / `"false"` | 检索开关 |
+| `BACKEND_CORS_ORIGINS` | `'["http://localhost:3000"]'` | 换成真实前端域名 |
+
+`clouisle-secret` 有 6 个键，**必须替换**：`SECRET_KEY`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY`、`INTERNAL_API_TOKEN`、`SANDBOX_ARTIFACT_UPLOAD_API_KEY`。模板里的值是 Base64 占位符；手动编辑时用 `echo -n 'value' | base64` 生成。
+
+`API`、`Worker`、`Sandbox Worker`、`Beat` 都带 `wait-for-postgres` initContainer，用 `pg_isready` 等到数据库可连；API 的 readiness/liveness 探针是 `GET /api/v1/health:8000`（`initialDelaySeconds` 10/20），Frontend 探针是 `GET /:3000`。Worker 与 Sandbox Worker 通过 `INTERNAL_API_TOKEN_FILE=/var/run/secrets/clouisle/internal-api-token` 读取内部 Token（由 Secret 挂载），并设 `UPLOAD_STORAGE_MODE=remote`。
+
+<Callout type="warn">
+  `frontend` Deployment 在单文件 manifest（以及 Helm 默认值）中**不设置任何环境变量**。浏览器流量走 Ingress 的 `/api` 前缀不受影响，但 Next.js 服务端取数会回退到代码默认 `BACKEND_INTERNAL_URL=http://localhost:8000`，在 Pod 内不可达。需要 SSR 取数时给 `frontend` 显式加 `BACKEND_INTERNAL_URL=http://api:8000`。
+</Callout>
+
+Ingress 使用 `nginx` class，注解 `proxy-body-size: 100m`、`proxy-read-timeout: 1800`、`proxy-send-timeout: 1800`、`proxy-http-version: 1.1`、`use-forwarded-headers: true`；路径 `/api` → `api:8000`，`/` → `frontend:3000`。host 默认 `clouisle.example.com`，必须替换为真实域名。
+
 ## Helm（推荐）
 
 ```bash

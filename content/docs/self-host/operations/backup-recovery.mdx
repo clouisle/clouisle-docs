@@ -16,15 +16,118 @@ Clouisle 的可恢复备份至少包含 PostgreSQL、Qdrant、上传存储和部
 | `.env`/Kubernetes Secret | 连接和签名配置 | 加密保管，不提交仓库 |
 | Redis | Celery/缓存/会话 | 按任务恢复要求决定 |
 
-## 恢复顺序
+## 备份命令
 
-1. 恢复 PostgreSQL 和依赖扩展。
+这是一次**在线、尽力而为**的多存储备份，不是事务一致的完整快照；需要严格跨存储一致性时，请另行安排停机窗口。命令在包含 `docker-compose.yml` 与 `.env` 的目录执行，`-T` 是 cron/非交互执行的必需参数。
+
+```bash
+# 先停掉会写入的 Worker，降低备份期间的写入
+docker compose stop worker sandbox-worker beat
+
+# PostgreSQL：自定义格式导出
+docker compose exec -T db pg_dump -U "${POSTGRES_USER:-postgres}" -Fc "${POSTGRES_DB:-clouisle}" \
+  > "postgres_$(date +%Y%m%d_%H%M%S).dump"
+
+# Redis（可选，设置了 REDIS_PASSWORD 时需认证）
+docker compose exec -T redis sh -c 'redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} --rdb -' \
+  > "redis_$(date +%Y%m%d_%H%M%S).rdb"
+
+# 上传文件：只在 api 上挂载，直接流式打包卷内容
+docker compose exec -T api tar -czf - -C /app uploads \
+  > "uploads_$(date +%Y%m%d_%H%M%S).tar.gz"
+
+# 备份完成后恢复 Worker
+docker compose start worker sandbox-worker beat
+```
+
+Qdrant 需要对**每个已有集合**创建并下载快照。官方镜像是 `qdrant/qdrant:v1.18.3`，恢复端需使用快照 API 语义兼容的版本。若启用了 `QDRANT_API_KEY`，先在 shell 里导出（Compose 不会把 `.env` 注入你的 shell）：
+
+```bash
+QDRANT_URL="${QDRANT_URL:-http://localhost:6333}"
+QDRANT_AUTH=()
+[ -n "${QDRANT_API_KEY:-}" ] && QDRANT_AUTH=(--header "api-key: $QDRANT_API_KEY")
+
+# 列出所有集合，把其中一个名字填到 COLLECTION，然后对每个集合重复
+curl --fail "${QDRANT_URL}/collections" "${QDRANT_AUTH[@]}"
+COLLECTION='替换为上面返回的集合名'
+
+curl --fail --request POST "${QDRANT_URL}/collections/${COLLECTION}/snapshots" "${QDRANT_AUTH[@]}"
+curl --fail "${QDRANT_URL}/collections/${COLLECTION}/snapshots" "${QDRANT_AUTH[@]}"
+SNAPSHOT_NAME='替换为上面返回的快照名'
+curl --fail "${QDRANT_URL}/collections/${COLLECTION}/snapshots/${SNAPSHOT_NAME}" \
+  "${QDRANT_AUTH[@]}" --output "${COLLECTION}_${SNAPSHOT_NAME}.snapshot"
+```
+
+知识库向量集合通常命名为 `kb_dim_<维度>`，记忆向量为 `memory_entities_dim_<维度>`。默认的 `http://localhost:6333` 只在 Qdrant 宿主端口仍映射时可用；若生产已移除该映射，临时改绑 `127.0.0.1:6333:6333` 或改用 network-attached 辅助容器，完成后移除。
+
+Kubernetes 对应命令（namespace `clouisle`）：
+
+```bash
+kubectl -n clouisle exec -i statefulset/postgres -- pg_dump -U postgres -Fc clouisle > postgres.dump
+kubectl -n clouisle exec -i deployment/api -- tar -czf - -C /app uploads > uploads.tar.gz
+
+# Qdrant 镜像不一定带 curl：一个终端做端口转发，另一个终端用 QDRANT_URL=http://127.0.0.1:6333 执行上面的快照命令
+kubectl -n clouisle port-forward statefulset/qdrant 6333:6333
+```
+
+## 恢复顺序与命令
+
+恢复顺序：
+
+1. 恢复 PostgreSQL 和依赖扩展（`pg_search`、`pg_stat_statements`）。
 2. 恢复 Qdrant 集合和上传文件。
 3. 恢复 Secret 与环境变量，确认 `SECRET_KEY` 保持一致。
-4. 启动 API，确认健康和数据库迁移。
+4. 启动 API，确认健康和数据库结构初始化。
 5. 启动 Worker、Sandbox Worker 和唯一 Beat。
 6. 检查文档状态、向量维度、Agent、工作流和 API Key。
 7. 运行一条知识库检索和一条 Agent/工作流冒烟请求。
+
+恢复 PostgreSQL 与 Qdrant 期间保持应用服务停止，但数据库与 Qdrant 服务本身继续运行；两个存储都恢复完再启动应用。
+
+```bash
+# Compose
+docker compose stop api worker sandbox-worker beat
+docker compose exec -T db pg_restore -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-clouisle}" \
+  --clean --if-exists < postgres.dump
+
+# Kubernetes
+kubectl -n clouisle scale deployment api worker sandbox-worker beat --replicas=0
+kubectl -n clouisle exec -i statefulset/postgres -- pg_restore -U postgres -d clouisle --clean --if-exists < postgres.dump
+```
+
+对每个备份过的集合上传快照（上传即恢复集合，不要再发额外的 `/recover` 请求）：
+
+```bash
+COLLECTION='替换为备份过的集合名'
+SNAPSHOT_FILE='替换为对应的快照文件.snapshot'
+curl --fail --request POST \
+  "${QDRANT_URL}/collections/${COLLECTION}/snapshots/upload" \
+  "${QDRANT_AUTH[@]}" \
+  --form "snapshot=@${SNAPSHOT_FILE}"
+```
+
+最后只启动 API 恢复上传归档，再恢复各工作负载副本数（官方 manifest 默认 `api=2`、`worker=2`、`sandbox-worker=1`、`beat=1`）：
+
+```bash
+# Compose
+docker compose start api
+docker compose exec -T api tar -xzf - -C /app < uploads.tar.gz
+docker compose start worker sandbox-worker beat
+
+# Kubernetes
+kubectl -n clouisle scale deployment api --replicas=2
+kubectl -n clouisle rollout status deployment/api
+kubectl -n clouisle exec -i deployment/api -- tar -xzf - -C /app < uploads.tar.gz
+kubectl -n clouisle scale deployment worker --replicas=2
+kubectl -n clouisle scale deployment sandbox-worker --replicas=1
+kubectl -n clouisle scale deployment beat --replicas=1
+```
+
+恢复后验证 `GET /api/v1/health`、登录、一次知识库检索、一次上传和一条代表性工作流。Redis 队列状态是可选的；不恢复时，重新提交故障时刻仍在排队的任务即可。
+
+## 自动化
+
+把上述 Compose 命令放进宿主 cron，或在 Kubernetes 中做成 CronJob：CronJob 需挂载显式准备的备份目标并从 Secret 读取凭据。保留加密的异地副本、定义保留期，并定期在隔离环境做恢复演练。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/backup-restore-checklist.svg" alt="备份恢复检查清单" />

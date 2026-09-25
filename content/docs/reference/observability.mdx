@@ -59,7 +59,7 @@ Clouisle 提供面向平台管理员（需 `admin:dashboard:access` 全局权限
 
 端点：`GET /api/v1/admin/observability/system/health`
 
-系统每秒收集硬件指标，并在 Redis 列表中保留最近 120 个健康快照（有效期 24 小时，通过 `GET .../system/trend` 可获取快照趋势）。健康状态阈值与指标如下：
+系统每秒收集硬件指标，并在 Redis 列表中保留最近约 120 条健康快照（`LTRIM 0..120`，整个列表有效期 24 小时，通过 `GET .../system/trend` 可获取快照趋势）。健康状态阈值与指标如下：
 
 | 监控项 | 告警状态与阈值 | 核心字段 |
 | --- | --- | --- |
@@ -97,4 +97,4 @@ Clouisle 拥有 5 个固定业务调度队列：
 Clouisle 通过全局信号量机制执行并发限制：
 - **核心环境变量**：`DB_AGGREGATE_CONCURRENCY`（默认值为 `4`，类型为大于 0 的整数）。
 - **工作机制**：在进程级别维护单一的 `asyncio.Semaphore`，针对每次聚合查询使用 `run_bounded()` 包装。
-- **架构考量**：Tortoise 共享连接池默认 `maxsize=5`，PostgreSQL 默认最大连接数 `max_connections=100`。在多进程（如 Gunicorn / Uvicorn 运行 17 个 Worker 进程）部署下，将单个聚合并发限制为 `4`，能确保任意时刻聚合分析都不会打满数据库连接。
+- **架构考量**：Tortoise 共享连接池默认 `maxsize=5`，PostgreSQL 默认最大连接数 `max_connections=100`。默认部署下已有约 17 个进程（Gunicorn / Uvicorn Worker）各持一个连接池，将单个进程的聚合并发限制为 `4`，能确保任意时刻聚合分析都不会打满数据库连接。

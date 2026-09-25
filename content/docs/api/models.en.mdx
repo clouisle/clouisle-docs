@@ -20,7 +20,7 @@ icon: Cpu
 | POST | `/api/v1/admin/models/{model_id}/set-default` | Set as default model | admin:model:update |
 | POST | `/api/v1/admin/models/{model_id}/test` | Test saved model connectivity | admin:model:update |
 | POST | `/api/v1/admin/models/test` | Test model config (no save) | admin:model:create |
-| POST | `/api/v1/admin/models/discover` | Discover provider available models | admin:model:read |
+| POST | `/api/v1/admin/models/discover` | Discover provider available models | admin:model:create |
 
 <Callout type="warn">
   `/api/v1/admin/models/*` are protected endpoints used by the admin console, requiring the corresponding administrator permission scopes.
@@ -36,13 +36,13 @@ These endpoints are used to discover available providers and models, without req
 GET /api/v1/models/providers
 ```
 
-No authentication required. Returns all LLM providers supported by the system.
+No authentication required. Returns all **23** providers supported by the system with their default configuration.
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/models/providers"
 ```
 
-**Success Response (200 OK):**
+**Success Response (200 OK, excerpt):**
 
 ```json
 {
@@ -55,28 +55,66 @@ curl -X GET "https://your-domain.com/api/v1/models/providers"
       "icon": "openai"
     },
     {
+      "code": "openai_responses",
+      "name": "OpenAI Responses",
+      "base_url": "https://api.openai.com/v1",
+      "icon": "openai"
+    },
+    {
       "code": "anthropic",
       "name": "Anthropic",
       "base_url": "https://api.anthropic.com",
       "icon": "anthropic"
     },
     {
-      "code": "azure",
-      "name": "Azure OpenAI",
-      "base_url": null,
-      "icon": "azure"
+      "code": "typesafe",
+      "name": "TypeSafe AI",
+      "base_url": "https://api.typesafe.ai/v1",
+      "icon": "typesafe"
     }
   ],
   "msg": "success"
 }
 ```
 
+Full provider list (`code` is the `provider` value to use when creating a model):
+
+| `code` | `name` | Default `base_url` |
+| --- | --- | --- |
+| `openai` | OpenAI | `https://api.openai.com/v1` |
+| `openai_responses` | OpenAI Responses | `https://api.openai.com/v1` |
+| `anthropic` | Anthropic | `https://api.anthropic.com` |
+| `google` | Google AI | `https://generativelanguage.googleapis.com/v1beta` |
+| `azure_openai` | Azure OpenAI | `null` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` |
+| `moonshot` | Moonshot | `https://api.moonshot.cn/v1` |
+| `zhipu` | Zhipu AI | `https://open.bigmodel.cn/api/paas/v4` |
+| `qwen` | Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `baichuan` | Baichuan | `https://api.baichuan-ai.com/v1` |
+| `minimax` | MiniMax | `https://api.minimax.chat/v1` |
+| `volcengine` | Volcengine | `https://ark.cn-beijing.volces.com/api/v3` |
+| `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` |
+| `xai` | xAI (Grok) | `https://api.x.ai/v1` |
+| `ollama` | Ollama | `http://localhost:11434` |
+| `runway` | Runway | `https://api.dev.runwayml.com` |
+| `pika` | Pika | `https://api.pika.art/v1` |
+| `luma` | Luma AI | `https://api.lumalabs.ai/dream-machine/v1` |
+| `kling` | Kling | `https://api.klingai.com` |
+| `stability` | Stability AI | `https://api.stability.ai` |
+| `midjourney` | Midjourney | `null` |
+| `typesafe` | TypeSafe AI | `https://api.typesafe.ai/v1` |
+| `custom` | OpenAI Compatible | `null` |
+
 | Field | Type | Description |
 | --- | --- | --- |
 | `code` | string | Provider identifier |
 | `name` | string | Display name |
-| `base_url` | string | Default API base URL (`null` if none) |
+| `base_url` | string | Default API base URL (`null` when there is no default, e.g. `azure_openai`, `midjourney`, `custom`) |
 | `icon` | string | Icon identifier |
+
+<Callout type="info">
+  `openai_responses` speaks the OpenAI Responses API (not Chat Completions), `typesafe` backs `decision`-type models, and `custom` represents any OpenAI-compatible endpoint.
+</Callout>
 
 ### List Model Types
 
@@ -103,11 +141,14 @@ curl -X GET "https://your-domain.com/api/v1/models/types"
     { "code": "stt", "name": "STT", "description": "语音识别" },
     { "code": "audio_generation", "name": "Audio Generation", "description": "音频生成" },
     { "code": "text_to_image", "name": "Text to Image", "description": "文生图" },
-    { "code": "text_to_video", "name": "Text to Video", "description": "文生视频" }
+    { "code": "text_to_video", "name": "Text to Video", "description": "文生视频" },
+    { "code": "decision", "name": "Decision", "description": "决策模型" }
   ],
   "msg": "success"
 }
 ```
+
+`decision` is a **non-generative** typed-decision type (choice/score/yes-no judgments) and is only available from the `typesafe` provider; creating a `decision` model with any other provider returns `1001 model_type_not_supported`.
 
 ### List Available Models
 
@@ -277,7 +318,7 @@ curl -X GET "https://your-domain.com/api/v1/admin/models?page=1&page_size=20" \
 | `provider` | string | Provider identifier |
 | `provider_display_name` | string | Optional user-facing provider/gateway name |
 | `model_id` | string | Model identifier (e.g. `gpt-4-turbo-preview`) |
-| `model_type` | string | Model type: `chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, `text_to_video` |
+| `model_type` | string | Model type: `chat`, `embedding`, `rerank`, `decision`, `tts`, `stt`, `audio_generation`, `text_to_image`, `text_to_video` |
 | `base_url` | string | Custom API URL |
 | `has_api_key` | boolean | Whether an API key is configured (key itself is hidden) |
 | `context_length` | integer | Context length |
@@ -337,7 +378,7 @@ Requires `admin:model:create` permission.
 | `name` | string | Yes | Display name (max 100 chars) |
 | `provider` | string | Yes | Provider identifier (must be a supported provider) |
 | `model_id` | string | Yes | Model identifier (max 100 chars) |
-| `model_type` | string | Yes | Model type |
+| `model_type` | string | Yes | Model type; `decision` requires the `typesafe` provider and `embedding` is also restricted to specific providers — a mismatch returns `1001 model_type_not_supported` |
 | `provider_display_name` | string | No | Optional user-facing provider or gateway name |
 | `base_url` | string | No | Custom API URL (max 512 chars) |
 | `api_key` | string | No | API key (optional for local providers) |
@@ -583,13 +624,21 @@ curl -X POST "https://your-domain.com/api/v1/admin/models/test" \
 }
 ```
 
+<Callout type="info" title="Decision-model test behavior">
+  When `model_type` is `decision`, both test endpoints build a built-in decision request (a `state` describing a support scenario and one `noul`-type question) and call the provider through the Decision adapter; the test succeeds only if the answer set is non-empty, otherwise it returns `1001 model_test_empty_decision_result`. `decision` is only supported by the `typesafe` provider; any other provider is rejected first with `1001 model_type_not_supported`.
+</Callout>
+
+<Callout type="warn">
+  `POST /api/v1/admin/models/test` checks the endpoint policy (SSRF allowlist) before testing. A custom `base_url` that is not allowlisted is rejected outright instead of being called.
+</Callout>
+
 ### Discover Provider Models
 
 ```
 POST /api/v1/admin/models/discover
 ```
 
-Requires `admin:model:read` permission. Lists models exposed by a provider without persisting the supplied key.
+Requires `admin:model:create` permission. Lists models exposed by a provider without persisting the supplied key.
 
 ```json
 {
@@ -598,6 +647,23 @@ Requires `admin:model:read` permission. Lists models exposed by a provider witho
   "api_key": "sk-..."
 }
 ```
+
+Supported discovery providers and request paths:
+
+| `provider` | Discovery path | Authentication |
+| --- | --- | --- |
+| `openai`, `openai_responses`, `anthropic`, `baichuan`, `minimax`, `siliconflow`, `xai`, `custom` | `/v1/models` | `Authorization: Bearer <api_key>` |
+| `deepseek` | `/models` | `Authorization: Bearer <api_key>` |
+| `google` | `/v1beta/models` | Query parameter `key=<api_key>` |
+| `zhipu` | `/api/paas/v4/models` | `Authorization: Bearer <api_key>` |
+| `qwen` | `/compatible-mode/v1/models` | `Authorization: Bearer <api_key>` |
+| `volcengine` | `/api/v3/models` | `Authorization: Bearer <api_key>` |
+| `ollama` | `/api/tags` | No key required |
+| `typesafe` | See the note below | `Authorization: Bearer <api_key>` |
+
+The `typesafe` path is derived from the configured `base_url`: if the base URL's path ends with `/v1`, `/models` is **appended to that path** (giving `<configured path>/models`); if the base URL has some other non-empty path, the full `/v1/models` path is appended to it; otherwise the default `/v1/models` is used. TypeSafe discovery therefore hits the **configured base path**, not a fixed `/v1/models`.
+
+Unsupported providers return `model_discovery_not_supported`; an invalid `base_url` or one outside the SSRF allowlist returns `model_discovery_base_url_invalid` or `model_endpoint_not_allowlisted`; a required key that is missing returns `model_discovery_api_key_required`. Failures still use HTTP `200` with `data.success` set to `false`.
 
 **Success Response (200 OK):**
 

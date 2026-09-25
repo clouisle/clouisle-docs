@@ -1,40 +1,50 @@
 ---
-title: Workflow Versioning & Templates API
-description: Version snapshot control, publishing, visual diff, rollback, and template marketplace endpoints
+title: Workflow Versions API
+description: Version snapshots, history, diff, publish, archive, rollback, and forking for workflow graphs
 icon: GitBranch
 ---
 
-The Workflow Versioning & Templates API enables complete lifecycle management of workflow graph graphs (nodes & edges), including snapshots, version history, visual diff comparison, rollback, and forking, as well as managing and instantiating community or private templates.
+The Workflow Versions API manages version snapshots of a workflow graph (nodes & edges): history, diff, publish, archive, rollback, and forking.
 
-- **Versioning Base Path**: `/api/v1/workflow-versions`
-- **Templates Base Path**: `/api/v1/workflow-templates`
+- **Version management base path**: `/api/v1/workflow-versions` (most success responses in this module **do not** use the `code`/`data`/`msg` envelope — they return the payload directly; errors still use the standard envelope)
+- **Version snapshot base path**: `/api/v1/workflows/{workflow_id}/versions` (uses the standard `{code, data, msg}` envelope)
 
----
+<Callout type="info">
+  Two unrelated version APIs share similar naming. Decide which one you need first:
 
-## Workflow Versioning
+  | | `/api/v1/workflow-versions/...` | `/api/v1/workflows/{workflow_id}/versions` |
+  | --- | --- | --- |
+  | Version identifier | Opaque string `version_id` (UUID) | Integer `version` (the workflow's version counter) |
+  | Response envelope | Most endpoints return the payload directly | Standard `{code, data, msg}` |
+  | Capabilities | History, diff, publish, archive, rollback, fork | Snapshot list, detail, create snapshot, restore |
+</Callout>
+
+## Version Management (`/api/v1/workflow-versions`)
 
 ### Endpoint Overview
 
-| Method | Path | Purpose | Auth / Scope |
-| --- | --- | --- | --- |
-| POST | `/api/v1/workflow-versions` | Create a new version snapshot | Bearer JWT (write) |
-| GET | `/api/v1/workflow-versions/{workflow_id}/history` | Retrieve version history list | Bearer JWT |
-| GET | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}` | Get specific version details | Bearer JWT |
-| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | Publish a version to production | Bearer JWT (`workflow:publish`) |
-| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | Archive a version | Bearer JWT (write) |
-| GET | `/api/v1/workflow-versions/{workflow_id}/diff` | Diff nodes and edges between two versions | Bearer JWT |
-| POST | `/api/v1/workflow-versions/{workflow_id}/rollback` | Rollback workflow to an earlier version | Bearer JWT (write) |
-| POST | `/api/v1/workflow-versions/{workflow_id}/fork` | Fork an existing version into a new workflow | Bearer JWT (write) |
-| GET | `/api/v1/workflow-versions/{workflow_id}/stats` | Get version statistics summary | Bearer JWT |
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/workflow-versions` | Create a new version snapshot (write access) |
+| GET | `/api/v1/workflow-versions/{workflow_id}/history` | Retrieve version history |
+| GET | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}` | Get a specific version |
+| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | Publish a version (requires `workflow:publish`) |
+| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | Archive a version (write access) |
+| GET | `/api/v1/workflow-versions/{workflow_id}/diff` | Diff two versions (requires `from_version` and `to_version`) |
+| POST | `/api/v1/workflow-versions/{workflow_id}/rollback` | Roll back to an earlier version (write access) |
+| POST | `/api/v1/workflow-versions/{workflow_id}/fork` | Fork a version into another workflow (source readable, target write access) |
+| GET | `/api/v1/workflow-versions/{workflow_id}/stats` | Version statistics (write access) |
 
-### Version Status Enum (`VersionStatus`)
+Every endpoint requires an authenticated JWT user session, and the caller must be able to access the target workflow; "write access" means write access to the workflow (PRIVATE workflows are creator-only, team workflows need a team role). If `version_id` does not belong to that workflow, the call returns `404 workflow_version_not_found`.
+
+### Version Status Enum
 
 - `draft`: Draft version under development
-- `published`: Currently published version serving active runs
+- `published`: The currently published version serving active runs
 - `archived`: Archived previous version
 - `deprecated`: Deprecated version
 
-### 1. Create Version Snapshot
+### 1. Create a Version Snapshot
 
 ```http
 POST /api/v1/workflow-versions HTTP/1.1
@@ -55,11 +65,13 @@ Content-Type: application/json
 }
 ```
 
-#### Response (200 OK)
+`config` is optional (default `{}`) and is merged with `nodes`/`edges` into the version definition; `description` is optional (defaults to an empty string).
+
+**Response (200 OK, no envelope):**
 
 ```json
 {
-  "version_id": "v_7f9c2d1e-1234-4567-89ab-cdef01234567",
+  "version_id": "7f9c2d1e-1234-4567-89ab-cdef01234567",
   "version_number": 3,
   "status": "draft",
   "created_at": "2026-09-14T10:30:00Z"
@@ -73,6 +85,14 @@ GET /api/v1/workflow-versions/{workflow_id}/history?limit=20&offset=0&status=pub
 Authorization: Bearer YOUR_TOKEN
 ```
 
+| Query parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `limit` | integer | No | `20` | Number of versions, range `1-100` |
+| `offset` | integer | No | `0` | Offset, minimum `0` |
+| `status` | string | No | - | Filter by status: `draft`, `published`, `archived`, `deprecated` |
+
+The response is `{ "versions": [...], "total": N }`, where `total` is the number of versions returned in this call (not the database total).
+
 ### 3. Compare Versions (Diff)
 
 ```http
@@ -80,25 +100,76 @@ GET /api/v1/workflow-versions/{workflow_id}/diff?from_version=v_1&to_version=v_2
 Authorization: Bearer YOUR_TOKEN
 ```
 
-#### Response (200 OK)
+`from_version` and `to_version` are both **required** and are version IDs (`version_id`), not semantic version names or integer version numbers.
+
+**Response (200 OK, no envelope):**
 
 ```json
 {
   "from_version": "v_1",
   "to_version": "v_2",
   "diff": {
-    "added_nodes": [{"id": "node_2", "type": "llm"}],
-    "removed_nodes": [],
-    "modified_nodes": [],
-    "added_edges": [{"id": "e1-2", "source": "node_1", "target": "node_2"}],
-    "removed_edges": []
+    "from_version": "v_1",
+    "to_version": "v_2",
+    "nodes_added": [{"id": "node_2", "type": "llm", "label": "Summarize"}],
+    "nodes_removed": [],
+    "nodes_modified": [
+      {
+        "id": "node_http_query",
+        "type": "http",
+        "changes": [
+          {"field": "data.timeout", "from": 30, "to": 60},
+          {"field": "position", "type": "moved"}
+        ]
+      }
+    ],
+    "edges_added": [{"source": "node_1", "target": "node_2", "sourceHandle": null}],
+    "edges_removed": [],
+    "config_changes": {},
+    "has_changes": true,
+    "change_summary": "+1 nodes, ~1 nodes modified, +1 edges"
   }
 }
 ```
 
-### 4. Rollback & Fork
+The outer payload is always `{from_version, to_version, diff}`; the `diff` object contains `nodes_added`, `nodes_removed`, `nodes_modified`, `edges_added`, `edges_removed`, `config_changes`, `has_changes`, and `change_summary`. A missing workflow or a version that does not belong to it returns `404`.
 
-#### Rollback
+### 4. Publish a Version
+
+```http
+POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+Besides workflow write access, this requires the team permission `workflow:publish`.
+
+**Response (200 OK, no envelope):**
+
+```json
+{
+  "success": true,
+  "status": "published"
+}
+```
+
+### 5. Archive a Version
+
+```http
+POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response (200 OK, no envelope):**
+
+```json
+{
+  "success": true,
+  "status": "archived"
+}
+```
+
+### 6. Rollback to a Version
+
 ```http
 POST /api/v1/workflow-versions/{workflow_id}/rollback HTTP/1.1
 Authorization: Bearer YOUR_TOKEN
@@ -110,7 +181,22 @@ Content-Type: application/json
 }
 ```
 
-#### Fork
+`create_backup` is optional and defaults to `true`.
+
+**Response (200 OK, no envelope):**
+
+```json
+{
+  "success": true,
+  "new_version_id": "v3-uuid",
+  "backup_version_id": null
+}
+```
+
+### 7. Fork a Workflow
+
+Forking copies one version's graph definition into **another existing** workflow; both `version_id` (the source version) and `new_workflow_id` (the target workflow) are required.
+
 ```http
 POST /api/v1/workflow-versions/{workflow_id}/fork HTTP/1.1
 Authorization: Bearer YOUR_TOKEN
@@ -123,49 +209,100 @@ Content-Type: application/json
 }
 ```
 
----
+**Response (200 OK, no envelope):**
 
-## Workflow Template Marketplace
-
-### Endpoint Overview
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/v1/workflow-templates` | Paginated template search (filter by category, visibility, tags) |
-| GET | `/api/v1/workflow-templates/featured` | List featured templates |
-| GET | `/api/v1/workflow-templates/search` | Search templates by query string |
-| GET | `/api/v1/workflow-templates/categories` | Retrieve all template category definitions |
-| GET | `/api/v1/workflow-templates/{template_id}` | Get template detail schema |
-| POST | `/api/v1/workflow-templates` | Publish a new template |
-| POST | `/api/v1/workflow-templates/{template_id}/instantiate` | Instantiate template into a concrete workflow |
-| POST | `/api/v1/workflow-templates/{template_id}/rate` | Rate template (1.0 to 5.0) |
-| DELETE | `/api/v1/workflow-templates/{template_id}` | Delete template (author only) |
-| GET | `/api/v1/workflow-templates/stats/summary` | Global marketplace statistics |
-
-### Instantiate Template Example
-
-```http
-POST /api/v1/workflow-templates/{template_id}/instantiate HTTP/1.1
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
+```json
 {
-  "template_id": "tpl-doc-summary",
-  "variables": {
-    "llm_model": "gpt-4o-mini",
-    "max_length": 500
-  },
-  "workflow_name": "Documentation Summary Workflow"
+  "success": true,
+  "new_version_id": "v1-uuid-fork"
 }
 ```
 
----
+### 8. Version Statistics
+
+```http
+GET /api/v1/workflow-versions/{workflow_id}/stats HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+Requires workflow write access. The payload is returned directly (no envelope):
+
+```json
+{
+  "total_versions": 4,
+  "published_versions": 2,
+  "draft_versions": 1,
+  "archived_versions": 1,
+  "first_version_date": "2026-01-04T10:15:00",
+  "latest_version_date": "2026-02-11T09:02:31"
+}
+```
+
+## Version Snapshots (`/api/v1/workflows/{workflow_id}/versions`)
+
+These routes belong to the [Workflows router](/api/workflow) and manage **integer-numbered** snapshots of a single workflow. They are separate from the `/api/v1/workflow-versions/...` routes above and use the standard `{code, data, msg}` envelope.
+
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET | `/api/v1/workflows/{workflow_id}/versions` | List snapshots (newest version first) | `workflow:read` + workflow access |
+| GET | `/api/v1/workflows/{workflow_id}/versions/{version}` | Get a snapshot by integer version | `workflow:read` + workflow access |
+| POST | `/api/v1/workflows/{workflow_id}/versions` | Snapshot the workflow's current state | Workflow write access + `workflow:update` |
+| POST | `/api/v1/workflows/{workflow_id}/versions/{version}/restore` | Restore a snapshot | Workflow write access + `workflow:update` |
+
+`{version}` is the workflow's `version` counter (an integer), not a UUID. `page` (default `1`) and `page_size` (default `20`) are query parameters for the list endpoint.
+
+### List Snapshots
+
+```http
+GET /api/v1/workflows/{workflow_id}/versions?page=1&page_size=20 HTTP/1.1
+Authorization: Bearer <token>
+```
+
+Each item in `data.items` contains `id`, `workflow_id`, `version`, `description`, `created_by_id`, and `created_at`.
+
+### Create a Snapshot
+
+```http
+POST /api/v1/workflows/{workflow_id}/versions HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "description": "Before refactor"
+}
+```
+
+This snapshots the workflow's **current** state at its current `version` number; the counter is not incremented. `data` is the created `WorkflowVersionOut`.
+
+### Restore a Snapshot
+
+```http
+POST /api/v1/workflows/{workflow_id}/versions/3/restore HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "description": "Restored after bad edit"
+}
+```
+
+Restore first saves the current state as an automatic backup snapshot, then writes back the target snapshot's `definition`/`variables`/`trigger_type`/`trigger_config`, increments the workflow's `version` counter, and creates another snapshot for the restored state. `description` is optional; when omitted, a default localized description is generated. `data` is the updated `WorkflowOut`.
+
+## Workflow Template Marketplace
+
+<Callout type="warn" title="Not implemented / Roadmap">
+  There is **no** workflow template marketplace HTTP API. A template manager, `TemplateManager` (`backend/app/services/workflow/templates.py`), exists in code and is unit-tested, but **no router mounts it**, so `/api/v1/workflow-templates` and all of the endpoints previously listed here (list, featured, search, categories, detail, publish, instantiate, rate, delete, stats) are **not implemented**. `TemplateManager` is service-only and cannot be reached over HTTP.
+</Callout>
 
 ## Error Codes
 
 | Code | Identifier | Description |
 | --- | --- | --- |
 | `2000` | UNAUTHORIZED | Authentication missing or invalid |
-| `3000` | FORBIDDEN | Insufficient permissions or lacking `workflow:publish` |
-| `4000` | NOT_FOUND | Workflow, version, or template not found |
-| `1001` | VALIDATION_ERROR | Invalid parameters or failed template instantiation |
+| `3000` | FORBIDDEN | Insufficient permissions or missing `workflow:publish` |
+| `4000` | NOT_FOUND | Workflow or workflow version not found (`workflow_version_not_found`, `workflow_version_diff_not_found`) |
+| `1001` | VALIDATION_ERROR | Invalid request parameters |
+
+---
+
+**Last Updated**: 2026-09-26

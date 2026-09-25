@@ -1,27 +1,65 @@
 ---
 title: Limits & Quotas
-description: Request rate limits and quotas
+description: Request rate limiting and quotas
 icon: Timer
 ---
 
-API rate limiting comes from three layers: API Keys, team model authorizations, and external model providers. They are independent of each other; when troubleshooting, first determine which layer rejected the request.
+Clouisle does **not** implement per-endpoint or per-API-key request-throttling middleware, and it does not return `X-RateLimit-*` or `Retry-After` headers on ordinary responses. Rate limiting exists only for a few security-sensitive or quota-bound operations, and each mechanism has its own independent window and counter.
 
-## API Key Rate Limits
+## The API Key `rate_limit` Field
 
-When creating an API Key, `rate_limit` defaults to `1000`, in requests per minute; setting it to `0` means unlimited. Reaching the limit usually returns HTTP `429` with business error code `5400`. Clients should back off exponentially and reduce concurrency instead of retrying aggressively.
+When creating an API key you can set `rate_limit`, default `1000`, in requests per minute, where `0` means unlimited.
 
-## Model Quotas
-
-Team model authorizations can set daily/monthly Token and request count limits separately. All four fields are non-negative integers; leaving them empty means unlimited. Responses provide current usage and percentage. Exceeding the model quota returns `6103`; a model not authorized for the team returns `6104`.
-
-## Provider Rate Limits
-
-Even with sufficient API Key and team quota, upstream model providers may still return rate limit or quota errors. Preserve the provider response category and request trace ID, and use exponential backoff with jitter; for streaming requests, do not resubmit messages with tool side effects from the start.
-
-## Recommended Configuration
-
-Production integrations use single-purpose API Keys, bound to the necessary Agents/workflows, with a finite expiration and an explicit per-minute limit. Alert separately on provider quota, team quota, and Clouisle API Key so that not every `429` is attributed to the same component.
-
-<Callout type="warn">
-  `rate_limit=0` means unlimited, not disabled. To block calls immediately, disable the API Key or revoke the team model authorization.
+<Callout type="warn" title="This field is not currently enforced">
+`rate_limit` is stored and displayed per key, but the **backend does not currently enforce it in the request path**, and no rate-limit response headers are emitted. Any user with `apikey:create` can change the value. It is therefore declarative metadata today, not real traffic protection. To block calls immediately, disable the API key or revoke the team model authorization.
 </Callout>
+
+## Rate-Limiting Mechanisms That Actually Apply
+
+### 1. Login Attempt Lockout
+
+Failed password logins accumulate and eventually lock the account. Defaults are configurable via the site settings `max_login_attempts` and `lockout_duration_minutes`:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `max_login_attempts` | `5` | Consecutive failures before the account is locked |
+| `lockout_duration_minutes` | `15` | Lockout duration in minutes |
+
+- Before lockout, a failed login returns `2003` (`INVALID_CREDENTIALS`) with `data.remaining_attempts`.
+- Once the limit is reached it returns `5300` (`ACCOUNT_LOCKED`) with `data.remaining_seconds`.
+
+### 2. TOTP Verification Lockout
+
+Repeated TOTP two-factor failures temporarily lock verification (constants in `backend/app/core/totp_security.py`):
+
+| Constant | Default |
+| --- | --- |
+| `MAX_ATTEMPTS` | `5` failures |
+| `ATTEMPT_WINDOW` | `300` seconds (5 minutes) |
+| `LOCKOUT_DURATION` | `900` seconds (15 minutes) |
+
+After 5 failures within 5 minutes, verification is locked for 15 minutes and returns `5312` (`TOTP_RATE_LIMITED`) with the remaining seconds.
+
+### 3. Bulk Email Quota
+
+`POST /api/v1/admin/users/send-email` is limited to **100 emails per hour per sender**; exceeding it returns `5400` (`RATE_LIMITED`):
+
+- On reaching the cap, `data` carries `limit` and `period` (e.g. `100` / `hour`).
+- When the remaining quota cannot cover the recipient list, `data` carries `requested` and `remaining`.
+
+There is also a **per-recipient daily cap of 5 emails**: recipients beyond it are skipped (counted in `skipped_count`) rather than failing the whole request.
+
+### 4. Upstream Model Provider Rate Limits
+
+Even when Clouisle imposes no limit, an upstream model provider may still return HTTP 429. In that case:
+
+- During knowledge base document processing (embedding), a provider `RateLimitError` is mapped to application code `5400`; other provider errors map to quota (`6103`), configuration (`6104`), or not-found (`6100`) codes.
+- During streaming chat, a provider rate limit is delivered as an SSE `error` event, and the partial response is preserved.
+- There is no fixed retry schedule on the server side; retry after the provider's limit window resets.
+
+## Recommended Practice
+
+- Back off exponentially with jitter on `5300`, `5312`, `5400`, and `6103` rather than retrying immediately and densely.
+- Back off client-side on failed logins too, to avoid tripping account lockout.
+- Monitor the bulk email quota and upstream provider quota, and alert on them separately from team model quotas.
+- Do not rely on `X-RateLimit-*` headers or a `retry_after` field (they do not exist), and do not treat `5400` as a global API rate limit — it maps only to email quota or provider rate limits.

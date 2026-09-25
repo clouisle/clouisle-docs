@@ -1,611 +1,617 @@
 ---
 title: Users API
-description: Manage current user profile and password, plus admin user CRUD and password lifecycle endpoints
+description: Manage your own profile and password, plus administrator user CRUD, email, and password lifecycle
 icon: Users
 ---
 
+The Users API splits into two groups: **self-service for the current user** (`/api/v1/users/me/*`, any authenticated user) and **administrator user management** (`/api/v1/admin/users/*`, requiring `admin:user:*` permission codes).
+
 ## Overview
 
-The Users API provides current user profile/password management, plus admin user CRUD and password lifecycle operations.
-
-- **Current user**: `GET/PUT /api/v1/users/me`, `POST /api/v1/users/me/change-password`
-- **Admin**: list, detail, create, update, delete, activate/deactivate, and password lifecycle under `/api/v1/admin/users`
-
-Admin endpoints require the corresponding `admin:user:*` permission; current user endpoints require an authenticated JWT session.
+- **Current user**: `GET|PUT /api/v1/users/me`, `POST /api/v1/users/me/change-password`, `GET /api/v1/users/me/password-status`, `DELETE /api/v1/users/me`
+- **Administrators**: list, statistics, detail, create, update, delete, activate/deactivate, bulk email, and password lifecycle endpoints under `/api/v1/admin/users`
 
 ## Authentication
 
-All endpoints require `Authorization: Bearer <token>`.
+All endpoints use `Authorization: Bearer <JWT>`. API keys cannot be used on user-management endpoints.
 
-Admin endpoints additionally require:
+Administrator endpoints additionally require these permission codes:
 
 | Permission | Purpose |
 | --- | --- |
-| `admin:user:read` | View user info, statistics, password expiration stats |
+| `admin:user:read` | List, detail, user statistics, password expiration statistics, and the expiring-password list |
 | `admin:user:create` | Create users |
-| `admin:user:update` | Update users, activate/deactivate, password lifecycle |
+| `admin:user:update` | Update users, activate/deactivate, bulk email, all password lifecycle operations |
 | `admin:user:delete` | Delete users |
 
-## Current User Endpoints
+Superusers bypass the permission-code check. Insufficient permission returns HTTP `403` / `3000`.
 
-### Get Current User
+## Current-User Endpoints
+
+### Get the current user
 
 ```
 GET /api/v1/users/me
 ```
-
-Returns the full profile of the currently authenticated user.
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/users/me" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-**Success (200 OK):**
+**Response (200 OK):**
 
 ```json
 {
   "code": 0,
   "data": {
-    "id": "user-123",
+    "id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
     "username": "johndoe",
     "email": "john.doe@example.com",
     "is_active": true,
     "approval_status": "approved",
     "is_superuser": false,
-    "avatar_url": "https://example.com/avatars/johndoe.jpg",
+    "email_verified": true,
+    "avatar_url": "https://example.com/avatars/johndoe.png",
     "locale": "en",
     "created_at": "2026-01-15T10:00:00Z",
-    "last_login": "2026-02-11T14:30:00Z",
+    "last_login": "2026-09-24T14:30:00Z",
     "auth_source": "local",
     "external_id": null,
-    "email_verified": true,
-    "force_password_change": false,
-    "password_expiration_exempt": false,
-    "status": "active",
-    "roles": [],
-    "sso_connections": []
-  },
-  "msg": "success"
-}
-```
-
-### Update Current User
-
-```
-PUT /api/v1/users/me
-```
-
-Update the currently authenticated user's profile. All fields are optional; include only the fields you want to update.
-
-```bash
-curl -X PUT "https://your-domain.com/api/v1/users/me" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "johnsmith",
-    "avatar_url": "https://example.com/avatars/new-avatar.jpg"
-  }'
-```
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `username` | string | No | New username (must be unique) |
-| `email` | string | No | New email (must be unique; requires verification code if email verification is enabled) |
-| `email_verification_code` | string | No | Verification code required when changing email |
-| `avatar_url` | string | No | Avatar image URL |
-| `locale` | string | No | Interface language (e.g. `en`, `zh`) |
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "user-123",
-    "username": "johnsmith",
-    "email": "john.doe@example.com",
-    "is_active": true,
-    "approval_status": "approved",
-    "is_superuser": false,
-    "avatar_url": "https://example.com/avatars/new-avatar.jpg",
-    "locale": "en",
-    "created_at": "2026-01-15T10:00:00Z",
-    "last_login": "2026-02-11T14:30:00Z",
-    "auth_source": "local",
-    "external_id": null,
-    "email_verified": true,
-    "force_password_change": false,
-    "password_expiration_exempt": false,
-    "status": "active",
-    "roles": [],
-    "sso_connections": []
-  },
-  "msg": "Profile updated successfully"
-}
-```
-
-### Change Password
-
-```
-POST /api/v1/users/me/change-password
-```
-
-Change the currently authenticated user's password.
-
-```bash
-curl -X POST "https://your-domain.com/api/v1/users/me/change-password" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "current_password": "old_password",
-    "new_password": "new_secure_password"
-  }'
-```
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `current_password` | string | Yes | Current password |
-| `new_password` | string | Yes | New password (validated against password policy) |
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": null,
-  "msg": "Password changed successfully"
-}
-```
-
-**Error (400 Bad Request):** When the current password is incorrect, `BusinessError` uses the default 400 transport status; the response code remains `2003` (`INVALID_CREDENTIALS`).
-
-```json
-{
-  "code": 2003,
-  "data": null,
-  "msg": "Current password is incorrect"
-}
-```
-
-## Admin Endpoints
-
-### List Users
-
-```
-GET /api/v1/admin/users
-```
-
-Get a list of all users (admin only), with pagination, status filtering, search, and role filtering.
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/admin/users?page=1&page_size=20" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
-```
-
-| Query Parameter | Type | Required | Default | Description |
-| --- | --- | --- | --- | --- |
-| `page` | integer | No | 1 | Page number |
-| `page_size` | integer | No | 20 | Items per page |
-| `status` | array | No | - | Filter by status: `active`, `inactive`, `pending` (repeatable) |
-| `search` | string | No | - | Search by username or email |
-| `role` | array | No | - | Filter by role name (repeatable) |
-| `exclude_user_id` | array | No | - | User IDs to exclude from results (repeatable) |
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": {
-    "items": [
-      {
-        "id": "user-123",
-        "username": "johndoe",
-        "email": "john.doe@example.com",
-        "is_active": true,
-        "approval_status": "approved",
-        "is_superuser": false,
-        "avatar_url": "https://example.com/avatars/johndoe.jpg",
-        "locale": "en",
-        "created_at": "2026-01-15T10:00:00Z",
-        "last_login": "2026-02-11T14:30:00Z",
-        "auth_source": "local",
-        "external_id": null,
-        "email_verified": true,
-        "force_password_change": false,
-        "password_expiration_exempt": false,
-        "status": "active",
-        "roles": [],
-        "sso_connections": []
-      }
-    ],
-    "total": 156,
-    "page": 1,
-    "page_size": 20
-  },
-  "msg": "success"
-}
-```
-
-### Get User
-
-```
-GET /api/v1/admin/users/{user_id}
-```
-
-Get details of a specific user (admin only).
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/admin/users/user-123" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
-```
-
-| Path Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `user_id` | string | Yes | User UUID |
-
-**Success (200 OK):** Returns a single `UserSchema` with the same structure as list items.
-
-### Create User
-
-```
-POST /api/v1/admin/users
-```
-
-Create a new user (admin only).
-
-```bash
-curl -X POST "https://your-domain.com/api/v1/admin/users" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "alice",
-    "email": "alice@example.com",
-    "password": "secure_password"
-  }'
-```
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `username` | string | Yes | Username (unique) |
-| `email` | string | Yes | Email (unique) |
-| `password` | string | Yes | Initial password |
-| `is_active` | boolean | No | Active status (default: `true`) |
-| `approval_status` | string | No | Approval status (default: `approved`) |
-| `is_superuser` | boolean | No | Superuser flag (default: `false`) |
-| `avatar_url` | string | No | Avatar image URL |
-| `locale` | string | No | Interface language (default: `en`) |
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "user-789",
-    "username": "alice",
-    "email": "alice@example.com",
-    "is_active": true,
-    "approval_status": "approved",
-    "is_superuser": false,
-    "avatar_url": null,
-    "locale": "en",
-    "created_at": "2026-02-11T16:00:00Z",
-    "last_login": null,
-    "auth_source": "local",
-    "external_id": null,
-    "email_verified": false,
-    "force_password_change": false,
-    "password_expiration_exempt": false,
-    "status": "active",
-    "roles": [],
-    "sso_connections": []
-  },
-  "msg": "User created successfully"
-}
-```
-
-**Error (409 Conflict):**
-
-```json
-{ "code": 5002, "data": null, "msg": "Username already exists" }
-{ "code": 5003, "data": null, "msg": "Email already exists" }
-```
-
-### Update User
-
-```
-PUT /api/v1/admin/users/{user_id}
-```
-
-Update a user's information (admin only). All fields are optional; include only the fields you want to update.
-
-```bash
-curl -X PUT "https://your-domain.com/api/v1/admin/users/user-789" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "is_active": true,
-    "roles": ["admin"]
-  }'
-```
-
-| Path Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `user_id` | string | Yes | User UUID |
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `email` | string | No | New email |
-| `password` | string | No | New password |
-| `is_active` | boolean | No | Active status |
-| `avatar_url` | string | No | Avatar image URL |
-| `locale` | string | No | Interface language |
-| `roles` | array | No | Role names to assign |
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "user-789",
-    "username": "alice",
-    "email": "alice@example.com",
-    "is_active": true,
-    "approval_status": "approved",
-    "is_superuser": false,
-    "avatar_url": null,
-    "locale": "en",
-    "created_at": "2026-02-11T16:00:00Z",
-    "last_login": null,
-    "auth_source": "local",
-    "external_id": null,
-    "email_verified": false,
     "force_password_change": false,
     "password_expiration_exempt": false,
     "status": "active",
     "roles": [
       {
-        "id": "role-admin",
-        "name": "admin",
+        "id": "9d8e4f7a-8b6c-4d5e-a1f2-3b4c5d6e7f80",
+        "name": "user",
         "description": null,
         "is_system_role": true,
         "permissions": []
       }
     ],
-    "sso_connections": []
+    "sso_connections": [
+      {
+        "id": "4d5e6f70-1a2b-4c3d-9e8f-7a6b5c4d3e2f",
+        "provider_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "provider_name": "github",
+        "provider_display_name": "GitHub",
+        "provider_icon_url": null,
+        "provider_user_id": "12345678",
+        "provider_username": "johndoe",
+        "provider_email": "john.doe@example.com",
+        "first_login": "2026-02-01T08:00:00Z",
+        "last_login": "2026-09-24T14:30:00Z"
+      }
+    ]
   },
-  "msg": "User updated successfully"
+  "msg": "success"
 }
 ```
 
-### Delete User
+<Callout type="warn">
+  The `status` field in this response is the response model's **default value** — these endpoints always return `"active"` and it does not reflect the real account state. Use `is_active` (enabled or not) combined with `approval_status` (`approved` / `pending`) instead; front-end lists derive the `active` / `inactive` / `pending` buckets from those two fields.
+</Callout>
+
+### Update the current user
+
+```
+PUT /api/v1/users/me
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `username` | string | No | New username, globally unique |
+| `email` | string | No | New email, globally unique; when email verification is enabled a code is required in the same request |
+| `email_verification_code` | string | No | Verification code for the email change; validated only, never stored on the profile |
+| `avatar_url` | string | No | Avatar URL |
+| `locale` | string | No | UI language, for example `en` or `zh` |
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/users/me" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "johnsmith", "locale": "en"}'
+```
+
+Failure paths:
+
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `5002` | Username already taken |
+| `400` | `5003` | Email already taken |
+| `400` | `5005` | Incorrect verification code for the email change (when email verification is enabled) |
+
+The response returns the full updated user object (same shape as “Get the current user”) with `msg` set to `Profile updated successfully`.
+
+<Callout type="warn">
+  Changing the email does not silently refresh `email_verified`: when email verification is enabled you must complete the code check before submitting the new address, otherwise the next login can be blocked by `5004` (`EMAIL_NOT_VERIFIED`).
+</Callout>
+
+### Change the password
+
+```
+POST /api/v1/users/me/change-password
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `current_password` | string | Yes | Current password |
+| `new_password` | string | Yes | New password |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/users/me/change-password" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "OldPassword123!", "new_password": "NewPassword456!"}'
+```
+
+A successful change also clears the `force_password_change` flag, records the new password-change timestamp, and sends a security notification.
+
+Failure paths:
+
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `2003` | Current password is incorrect |
+| `400` | `5306` | Minimum password age (`password_min_age_days`) not reached; cannot change yet |
+| `400` | `1001` | New password violates the policy; `data.errors.new_password` lists the reasons |
+
+The password policy comes from site settings (defaults): at least `min_password_length` = `8` characters, at least one uppercase letter (`require_uppercase` = `true`), at least one digit (`require_number` = `true`), and no special-character requirement by default (`require_special_char` = `false`). A change is also compared against the last `password_history_count` = `5` passwords and rejected with `password_recently_used` on a match.
+
+**Response (200 OK):**
+
+```json
+{ "code": 0, "data": null, "msg": "Password changed successfully" }
+```
+
+### Check password status
+
+```
+GET /api/v1/users/me/password-status
+```
+
+Use this on the account-security screen to warn about an imminent expiry instead of forcing a redirect at login time.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "is_exempt": false,
+    "password_changed_at": "2026-06-01T08:00:00+00:00",
+    "password_expires_at": "2026-08-30T08:00:00+00:00",
+    "is_expired": false,
+    "days_until_expiration": 12,
+    "force_change_required": false
+  },
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `is_exempt` | boolean | Whether the account is exempt from the expiry policy |
+| `password_changed_at` | string \| null | Last change time (ISO 8601) |
+| `password_expires_at` | string \| null | Computed expiry time; `null` when the expiry policy is disabled |
+| `is_expired` | boolean | Whether the password has expired |
+| `days_until_expiration` | integer \| null | Days until expiry; `null` when there is no expiry time |
+| `force_change_required` | boolean | Whether an administrator forced a password change |
+
+### Delete your own account
+
+```
+DELETE /api/v1/users/me
+```
+
+The body requires the password as a second confirmation:
+
+```json
+{ "password": "CurrentPassword123!" }
+```
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/users/me" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"password": "CurrentPassword123!"}'
+```
+
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `2003` | Password is incorrect |
+| `400` | `3000` | Self-service deletion is disabled (`allow_account_deletion` = `false`), or the account is a superuser |
+
+<Callout type="error">
+  Deletion is irreversible. Success returns `{"code": 0, "data": null, "msg": "Account deleted successfully"}` and the account's tokens and API keys stop working. To keep the account for auditing, deactivate it instead.
+</Callout>
+
+## Administrator Endpoints
+
+### List users
+
+```
+GET /api/v1/admin/users
+```
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number |
+| `page_size` | integer | `20` | Items per page |
+| `status` | string[] | — | `active` (`is_active = true`), `inactive` (deactivated and approved), `pending` (deactivated and awaiting approval); repeatable |
+| `search` | string | — | Case-insensitive match on username or email |
+| `role` | string[] | — | Filter by role name (repeatable, de-duplicated) |
+| `exclude_user_id` | UUID[] | — | Exclude specific users (repeatable) |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/users?page=1&page_size=20&status=pending" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+The paginated body is `{ items, total, page, page_size }`, and each item matches “Get the current user”.
+
+### User statistics
+
+```
+GET /api/v1/admin/users/stats
+```
+
+Requires `admin:user:read`:
+
+```json
+{
+  "code": 0,
+  "data": { "total": 156, "active": 150, "inactive": 2, "pending": 4 },
+  "msg": "success"
+}
+```
+
+`total` counts every user while `active` counts only `is_active = true`; both `inactive` and `pending` require `is_active = false` and are split by `approval_status`.
+
+### Get user detail
+
+```
+GET /api/v1/admin/users/{user_id}
+```
+
+Returns a single user object; a missing user returns HTTP `404` / `4001`.
+
+### Create a user
+
+```
+POST /api/v1/admin/users
+```
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `username` | string | Yes | — | Username, must be unique |
+| `email` | string | Yes | — | Email, must be unique |
+| `password` | string | Yes | — | Initial password, validated against the password policy |
+| `is_active` | boolean | No | `true` | Whether the account starts enabled |
+| `is_superuser` | boolean | No | `false` | Whether the account is a superuser |
+| `avatar_url` | string | No | `null` | Avatar URL |
+| `locale` | string | No | Site default language | UI language |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/users" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "email": "alice@example.com", "password": "SecurePassword123"}'
+```
+
+<Callout type="warn">
+  Users created by an administrator are **always** `approval_status = "approved"`: an `approval_status` in the request is ignored. If you want the new account to wait for approval, use the open registration flow instead. `terms_accepted`, `captcha_id`, and `captcha_token` are registration-endpoint fields — do not send them here.
+</Callout>
+
+Failure paths: duplicate username HTTP `400` / `5002`; duplicate email HTTP `400` / `5003`; password outside the policy HTTP `400` / `1001`.
+
+A successful creation returns the full user object (with an empty `roles` array) and writes an audit log entry.
+
+### Update a user
+
+```
+PUT /api/v1/admin/users/{user_id}
+```
+
+All fields are optional:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `email` | string | New email |
+| `password` | string | Reset the password (validated against the policy, but history is not checked) |
+| `is_active` | boolean | Enable or deactivate |
+| `avatar_url` | string | Avatar URL |
+| `locale` | string | UI language |
+| `roles` | string[] | Role names, **replacing** the current set entirely |
+
+<Callout type="info">
+  Administrators **cannot** change `username`, `is_superuser`, or `approval_status` here — those fields are not part of the request model and any values sent are ignored. The username can only be changed by the user through `PUT /users/me`.
+</Callout>
+
+Role replacement has one safety constraint: if the target user is currently an `owner` or `admin` of any team and the new role set contains no role carrying the `team:manage` permission, the request is rejected with HTTP `403` / `3000` (the `permission` field is `team:manage`). This prevents leaving a team with nobody able to manage it.
+
+### Delete a user
 
 ```
 DELETE /api/v1/admin/users/{user_id}
 ```
 
-Permanently delete a user (admin only).
+- Missing user: HTTP `404` / `4001`
+- Target is a superuser: HTTP `400` / `5201` (`CANNOT_DELETE_SUPERUSER`)
 
-```bash
-curl -X DELETE "https://your-domain.com/api/v1/admin/users/user-789" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
-```
+`data` in the response is the **deleted user object** (returned for audit echo), not `null`.
 
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": null,
-  "msg": "User deleted successfully"
-}
-```
-
-### Activate / Deactivate User
+### Activate / deactivate a user
 
 ```
 POST /api/v1/admin/users/{user_id}/activate
 POST /api/v1/admin/users/{user_id}/deactivate
 ```
 
-Toggle a user's active status.
+Both return the updated user object. Calling either in the current state is an error:
 
-```bash
-curl -X POST "https://your-domain.com/api/v1/admin/users/user-789/deactivate" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `5212` | `activate` on an already-active user |
+| `400` | `5213` | `deactivate` on an already-inactive user |
+| `400` | `5214` | Attempting to deactivate a superuser |
+| `404` | `4001` | User not found |
+
+### Send bulk email
+
+```
+POST /api/v1/admin/users/send-email
 ```
 
-**Success (200 OK):** Returns the updated `UserSchema` with `is_active` toggled.
+Requires `admin:user:update` and an enabled SMTP configuration.
 
-## Password Lifecycle Management (Admin)
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `subject` | string | Yes | Email subject |
+| `content` | string | Yes | Email body (plain text, rendered with line breaks into the HTML template) |
+| `user_ids` | UUID[] | Yes | Recipient user list |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/users/send-email" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"subject": "Maintenance notice", "content": "The system is down on Saturday.", "user_ids": ["3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c"]}'
+```
+
+Quotas and throttling: up to `100` emails per hour per administrator, and up to `5` per day to the same recipient address. Over-quota recipients are skipped rather than failing the whole batch.
+
+```json
+{
+  "code": 0,
+  "data": { "sent_count": 1, "skipped_count": 0, "total": 1 },
+  "msg": "Emails have been queued for sending"
+}
+```
+
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `5007` | SMTP is not configured |
+| `400` | `5400` | Not enough sending quota; `data` is `{"limit": 100, "period": "hour"}` or `{"requested": 3, "remaining": 1}` |
+| `400` | `4000` | No valid user in `user_ids` |
+
+Sending happens in a background task, so the response only means “queued”, not “delivered”.
+
+## Password Lifecycle Management (Administrators)
 
 <Callout type="info">
-There is no direct admin password-reset endpoint. Administrators manage password-expiration state with these JWT-authenticated endpoints; each requires `admin:user:update` unless noted.
+  There is no dedicated “administrator resets password” endpoint. To reset a password, set the `password` field on `PUT /api/v1/admin/users/{user_id}`. The endpoints below manage the password **expiry policy** and require `admin:user:update` unless noted.
 </Callout>
 
-### Force Password Change
+### Force a password change
 
 ```
 POST /api/v1/admin/users/{user_id}/force-password-change
 ```
 
-Sets `force_password_change` so the user must change the password at next login. Response is `200 OK` with `data: null`.
+Sets `force_password_change`, so the next login asks for a new password (login still returns `code: 0` but with `force_password_change: true` and a `reason`). Responds `200 OK` with `data: null`.
 
-### Reset Password Expiration
+### Reset the password expiration
 
 ```
 POST /api/v1/admin/users/{user_id}/reset-password-expiration
 ```
 
-Resets the password-change timestamp and recalculates expiration. Response is `200 OK` with `data: null`.
+Recomputes the expiry from the current time — effectively “confirm this user just changed the password”. Responds `200 OK` with `data: null`.
 
-### Set Expiration Exemption
+### Set the expiry exemption
 
 ```
 POST /api/v1/admin/users/{user_id}/exempt-password-expiration
 ```
 
 ```json
-{"exempt": true}
+{ "exempt": true }
 ```
 
-Sets whether the user is exempt from password expiration. Response is `200 OK` with `data: null`.
+Useful for service accounts that should not be forced to rotate. Responds `200 OK` with `data: null`.
 
-### Force Password Change for Multiple Users
+### Bulk force password change
 
 ```
 POST /api/v1/admin/users/bulk-force-password-change
 ```
 
 ```json
-{"user_ids": ["user-123", "user-456"]}
+{ "user_ids": ["3f2a1b0c-...", "9d8e4f7a-..."] }
 ```
 
-Response is `200 OK` with `data: {"count": 2}` (the count reflects users actually updated).
+`data.count` is the number of users actually updated. An empty `user_ids` returns `400` / `1001`; when none of the IDs exist the response is `400` / `4001`.
 
-### Password Expiration Statistics
+### Password expiration statistics
 
 ```
 GET /api/v1/admin/users/password-expiration-stats
 ```
 
-Requires `admin:user:read`. Response contains `total_users`, `expired_count`, `expiring_soon_count`, `force_change_count`, and `exempt_count`.
+Requires `admin:user:read`. The response contains `total_users`, `expired_count`, `expiring_soon_count`, `force_change_count`, and `exempt_count`.
 
-### List Expiring Passwords
+<Callout type="info">
+  When the deployment has the expiry policy disabled (`password_expiration_enabled = false`), this endpoint returns **all zeros** without computing anything. Front-end code should also check the policy switch so that a zero is not read as “nobody is expiring”. The statistics cover only `auth_source = "local"` accounts; SSO accounts are outside the expiry policy.
+</Callout>
+
+### List users with expiring passwords
 
 ```
 GET /api/v1/admin/users/expiring-passwords?page=1&page_size=20&filter=expiring
 ```
 
-Requires `admin:user:read`. `filter` is one of `all`, `expired`, `expiring`, or `force_change`; `page_size` is bounded to 1–100. The paginated response uses only `items`, `total`, `page`, and `page_size`.
+Requires `admin:user:read`.
 
-## User Statistics
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `filter` | string | `all` | One of `all`, `expired`, `expiring`, `force_change` |
+| `page` | integer | `1` | Page number, ≥ 1 |
+| `page_size` | integer | `20` | Items per page, 1–100 |
 
-```
-GET /api/v1/admin/users/stats
-```
-
-Requires `admin:user:read`. Response is `200 OK` with counts `total`, `active`, `inactive`, and `pending`.
+<Callout type="warn">
+  Route order matters: `/api/v1/admin/users/stats`, `/send-email`, `/bulk-force-password-change`, `/password-expiration-stats`, and `/expiring-passwords` are fixed paths that must appear before `/{user_id}`, otherwise they would be parsed as user IDs. SDKs handle this for you; when hand-writing paths, keep the fixed segments.
+</Callout>
 
 ## Error Codes
 
-| Code | Message | Description |
+| HTTP | Code | Scenario |
 | --- | --- | --- |
-| `4001` | User not found | User does not exist |
-| `2003` | Invalid credentials | Wrong password |
-| `3000` | Permission denied | Insufficient permissions |
-| `1001` | Validation failed | Invalid request data |
-| `5002` | Username already exists | Username is taken |
-| `5003` | Email already exists | Email is taken |
-
-<Callout type="info">
-No per-endpoint rate limits are implemented. There is no rate-limit middleware on these endpoints.
-</Callout>
+| `400` | `1001` | Request validation failed (password policy, empty `user_ids`) |
+| `400` | `2003` | Current password is wrong (change password, self-deletion) |
+| `403` | `2003` | JWT cannot be decoded or has expired |
+| `400` | `3000` | Self-service deletion is disabled, or deleting your own superuser account |
+| `403` | `3000` | Missing an `admin:user:*` permission, or a role replacement that would strip `team:manage` from a team administrator |
+| `404` | `4001` | User not found |
+| `400` | `5002` | Username already taken |
+| `400` | `5003` | Email already taken |
+| `400` | `5005` | Invalid verification code for the email change |
+| `400` | `5007` | SMTP is not configured during bulk email |
+| `400` | `5201` | Superusers cannot be deleted |
+| `400` | `5212` | User is already active |
+| `400` | `5213` | User is already inactive |
+| `400` | `5214` | Superusers cannot be deactivated |
+| `400` | `5306` | Minimum password age not reached |
+| `400` | `5400` | Insufficient email sending quota |
 
 ## Best Practices
 
-### Profile Updates
+### Profile and security
 
-- Validate email format
-- Use strong passwords
-- Update preferences regularly
-- Keep profile information current
-
-<Callout type="error">
-Don't share account credentials, use weak passwords, skip email verification, or ignore security settings.
-</Callout>
-
-### Admin Operations
-
-- Verify user information before creation
-- Use strong initial passwords
-- Send welcome emails
-- Document user changes
-- Review user activity regularly
+- Complete the verification code before changing an email, so the next login is not blocked by `5004`.
+- Use `GET /me/password-status` to warn about an imminent expiry instead of forcing a redirect at login.
+- Before allowing self-deletion, confirm the deployment's `allow_account_deletion` setting; enterprise deployments usually disable it and deactivate accounts instead.
 
 <Callout type="error">
-Don't create users without verification, use default passwords, skip welcome emails, forget to audit changes, or delete users without backup.
+  Do not share accounts, use weak passwords, skip email verification, or run day-to-day work from a superuser account.
 </Callout>
+
+### Administrator operations
+
+- Use strong initial passwords and enable “force password change on first login” where appropriate.
+- Prefer deactivation over deletion: deactivation is reversible, while deletion also drops audit associations.
+- Before changing roles, confirm whether the target user manages a team, to avoid tripping the `team:manage` constraint.
+- Check `user_ids` before bulk email, and remember the 5-per-recipient-per-day cap.
 
 ## Code Examples
 
 ### Python
 
 ```python
+import os
 import requests
 
-def get_current_user(token):
-    """Get current user information."""
-    url = "https://your-domain.com/api/v1/users/me"
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.get(url, headers=headers)
-    result = response.json()
-    if result['code'] == 0:
-        return result['data']
-    raise Exception(f"Error: {result['msg']}")
+BASE = "https://your-domain.com/api/v1"
 
-def update_profile(token, username, avatar_url=None, locale=None):
-    """Update user profile."""
-    url = "https://your-domain.com/api/v1/users/me"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    data = {"username": username, "avatar_url": avatar_url, "locale": locale}
-    response = requests.put(url, headers=headers, json=data)
+
+def get_password_status(token: str) -> dict:
+    """Check password status so you can warn before expiry."""
+    response = requests.get(
+        f"{BASE}/users/me/password-status",
+        headers={"Authorization": f"Bearer {token}"},
+    )
     result = response.json()
-    if result['code'] == 0:
-        return result['data']
-    raise Exception(f"Error: {result['msg']}")
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
+
+
+def change_password(token: str, current_password: str, new_password: str) -> None:
+    """Change the current user's password."""
+    response = requests.post(
+        f"{BASE}/users/me/change-password",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"current_password": current_password, "new_password": new_password},
+    )
+    result = response.json()
+    if result["code"] != 0:
+        # on 1001, data.errors.new_password lists the policy reasons
+        raise RuntimeError(f"{result['code']} {result['msg']} {result.get('data')}")
+
+
+def bulk_send_email(admin_token: str, subject: str, content: str, user_ids: list[str]) -> dict:
+    """Send bulk email as an administrator; returns queue statistics."""
+    response = requests.post(
+        f"{BASE}/admin/users/send-email",
+        headers={"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"},
+        json={"subject": subject, "content": content, "user_ids": user_ids},
+    )
+    result = response.json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
+
 
 # Usage
-user = get_current_user("YOUR_TOKEN")
-print(f"User: {user['username']}")
-updated = update_profile("YOUR_TOKEN", "johnsmith", locale="en")
-print(f"Updated: {updated['username']}")
+token = os.environ["USER_TOKEN"]
+status = get_password_status(token)
+print(f"password expires in {status['days_until_expiration']} days")
 ```
 
 ### JavaScript
 
 ```javascript
+const BASE = 'https://your-domain.com/api/v1';
+
 async function getCurrentUser(token) {
-  const response = await fetch(
-    'https://your-domain.com/api/v1/users/me',
-    { headers: { 'Authorization': `Bearer ${token}` } }
-  );
+  const response = await fetch(`${BASE}/users/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   const result = await response.json();
-  if (result.code === 0) return result.data;
-  throw new Error(result.msg);
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
 }
 
-async function updateProfile(token, username, avatarUrl = null, locale = null) {
-  const response = await fetch(
-    'https://your-domain.com/api/v1/users/me',
-    {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ username, avatar_url: avatarUrl, locale }),
-    }
-  );
+async function updateProfile(token, { username, locale, avatarUrl } = {}) {
+  const response = await fetch(`${BASE}/users/me`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username, locale, avatar_url: avatarUrl }),
+  });
   const result = await response.json();
-  if (result.code === 0) return result.data;
-  throw new Error(result.msg);
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
+}
+
+async function setUserActive(adminToken, userId, active) {
+  const action = active ? 'activate' : 'deactivate';
+  const response = await fetch(`${BASE}/admin/users/${userId}/${action}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${adminToken}` },
+  });
+  const result = await response.json();
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
 }
 
 // Usage
-const user = await getCurrentUser('YOUR_TOKEN');
-console.log('User:', user.username);
-const updated = await updateProfile('YOUR_TOKEN', 'johnsmith', null, 'en');
-console.log('Updated:', updated.username);
+const token = process.env.USER_TOKEN;
+const user = await getCurrentUser(token);
+console.log('user:', user.username);
 ```
 
 ## Related Documentation
 
-- [Authentication](./get-started) - Authentication methods
-- [Admin API Boundaries](./admin) - Admin console endpoint permission boundaries
+- [Authentication & Login API](./auth) — login, registration, email verification, and password recovery
+- [Teams API](./teams) — team member roles and management
+- [API Errors and Retries](./errors) — unified handling for `4001`, `5002`, `5003`, and `5212`-`5214`

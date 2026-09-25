@@ -1,21 +1,33 @@
 ---
 title: Memory and Context
-description: Configure cross-conversation memory graphs, background extraction, and context compression
+description: Configure cross-conversation memory graphs, background extraction, and single-summary context compression
 icon: Brain
 ---
 
-Clouisle organizes context across three tiers to balance continuity against model context windows and cost:
-1. **Active message branch and context compression**: real-time turn history kept within budget via progressive compression so context windows never overflow.
-2. **Conversation summary**: an asynchronous summary of earlier turns that serves later turns inside the same conversation.
-3. **Cross-conversation Memory Graph**: a persistent knowledge network of entities and directional relations that retains user preferences, project background, and verified facts across separate conversations.
+Clouisle uses two layers to keep conversations continuous while bounding cost:
+
+1. **In-conversation context (message branch + single context summary)**: the live history of an ongoing session. When the assembled request exceeds budget, the system compresses the older history into **one generated summary** and keeps the recent stretch verbatim, so the model window never overflows.
+2. **Cross-conversation Memory Graph**: a persistent knowledge network of entities and directional relations that retains user preferences, project background, and core facts across separate conversations.
+
+<Callout type="info">
+  There is no separate "conversation summary" subsystem and no three-tier (warning / selective / blocking) compression: compression produces exactly one artifact — a model-generated context summary. The memory feature is itself the entity/relation graph, not an accumulation of raw conversation text.
+</Callout>
 
 ## Enable Cross-Conversation Memory
 
 1. Open the Agent's **Orchestration** > **Memory**.
-2. Turn on **Enable Memory**.
+2. Turn on **Enable Memory** (`enable_memory`, off by default).
 3. Set the maximum number of memories per retrieval, range `1-50`, default `10`.
 4. Turn on **Auto-extract Memories** as needed; it is on by default.
 5. Save and publish the Agent. When a user chats across different conversations, the Agent automatically recalls previously stored facts.
+
+The Agent's memory configuration (`memory_config`):
+
+| Field | Default | Range | Description |
+| --- | --- | --- | --- |
+| `max_memories_per_retrieval` | `10` | `1-50` | Maximum entities injected into the model per memory retrieval |
+| `auto_extract` | `true` | Boolean | Auto-extract and store memories from conversations; turning it off leaves only the read tools |
+| `importance_threshold` | `medium` | `low` / `medium` / `high` | Minimum importance for auto-extracted memories |
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-memory-settings.png" alt="Agent memory configuration" />
@@ -24,7 +36,7 @@ Clouisle organizes context across three tiers to balance continuity against mode
 
 ## The Memory Graph
 
-Persistent memory is structured as a directed topological knowledge graph of **Entities** and **Relations**, rather than a flat blob of text.
+Persistent memory is a directed topological knowledge graph of **Entities** and **Relations**, not a flat blob of text.
 
 You can inspect and manage your memory graph visually under the user menu > **My Memories** (`/app/memories`) or in the admin dashboard (`/memories`).
 
@@ -51,7 +63,7 @@ The system predefines 10 entity types:
 
 ### Relation Types
 
-Entities connect through directional relations used during graph traversal:
+Entities connect through 9 directional relation types used during graph traversal:
 
 | Relation Type | Meaning |
 | --- | --- |
@@ -76,21 +88,21 @@ Entities connect through directional relations used during graph traversal:
 
 When an Agent retrieves memory, it balances semantic similarity with exponential recency decay using a weighted score:
 
-`Combined Score = (1 - w) * Similarity + w * Recency`
+`Combined score = (1 - w) × similarity + w × recency`
 
-- **Recency calculation**: uses an exponential half-life decay model with a default half-life of **30 days** (memories older than 30 days without updates receive half the temporal score).
+- **Recency calculation**: exponential half-life decay (`exp(-ln2 / half-life × days)`) with a default half-life of **30 days** (memories untouched for 30 days score half the temporal value).
 - **Weighting**: the recency weight `w` defaults to `0.15` (similarity accounts for `0.85`), balancing relevance with freshness.
 - **Time window filtering**: callers can pass `time_window_days` to restrict retrieval to memories created or touched within the last N days.
-- **Subgraph expansion**: after identifying candidate entities, the retriever can traverse outward `1-3` hops (`max_depth`) to supply a connected contextual subgraph to the LLM.
+- **Subgraph expansion**: after finding candidate entities, the retriever expands outward `1-3` hops (`max_depth`, default `1`; at most `5` seed entities; direction `incoming` / `outgoing` / `both`) to supply a connected contextual subgraph to the LLM.
 
 ## Background Memory Extraction
 
 Administrators configure background extraction under **Site Settings** > **Memory** (`/site-settings/memory`):
 
-| Setting | Default | Type | Description |
+| Setting | Default | Constraint | Description |
 | --- | --- | --- | --- |
 | `memory_async_extraction_enabled` | `false` | Boolean | Global switch for background extraction |
-| `memory_extraction_model_id` | empty | String | Model used for extraction; falls back to default model chain |
+| `memory_extraction_model_id` | empty | String | Model used for extraction; falls back to the default model chain when empty |
 | `memory_extraction_cooldown_seconds` | `180` | `10-3600`s | Debounce interval to avoid spamming extraction runs |
 | `memory_extraction_max_pending_turns` | `6` | `1-50` turns | Triggers extraction immediately once pending turns hit this threshold |
 
@@ -100,19 +112,35 @@ Administrators configure background extraction under **Site Settings** > **Memor
 
 ## How Long Conversations Are Compressed
 
-Context compression is on by default. It computes available input budget from the model context window, reserving `4000` output Tokens and a `1000` Token safety margin by default.
+Context compression is on by default (`context_compression_config.enabled = true`) and performs exactly one kind of work: handing the older history to a model to **generate a single summary** (policy `preflight_summary`), replacing that history with the summary and keeping the most recent stretch verbatim.
 
-- At `70%` utilization, warning pressure begins.
-- At `80%` utilization, selective compression triggers.
-- At `92%` utilization, it escalates to blocking-level macro compression.
-- By default, the last `3` raw turns and `2` tool turns are preserved intact.
-- On context-length errors, the system performs at most one aggressive retry.
+### Budget calculation
 
-Streaming APIs send `compression_start` and `compression_end` events to notify clients when history reorganization occurs.
+Compression computes the usable input budget from the model context window:
 
-## Conversation Summary
+`input budget = context window − output reserve − safety margin`
 
-A conversation-level summary is extracted asynchronously after at least `4` turns by default, with an injection budget of `400` Tokens. After `3` consecutive failures, the circuit breaker opens and cools down for `600` seconds. Summaries serve only the current session and never replace cross-conversation memory.
+- **Context window**: taken from the model's own configuration; falls back to `32000` when absent.
+- **Output reserve**: defaults to `4000`, capped to `min(4000, model max output, context window ÷ 3)`.
+- **Safety margin**: fixed at `1000`.
+
+### Trigger condition
+
+The summary is generated when the assembled request exceeds the **trigger budget**:
+
+`trigger budget = min(context window − max(window × 15%, output reserve), input budget)`
+
+For the default 32,000 window: output reserve 4,000, safety margin 1,000, input budget 27,000, so the trigger budget is `min(32000 − 4800, 27000) = 27000` — roughly 84% of the window. The `trigger_ratio` constant reported in SSE events is fixed at `0.9`, but the trigger budget above is what actually decides when compression runs.
+
+### Retention and generation
+
+- **Verbatim tail**: keeps up to the newest `20000` tokens of history, clamped so the system prompt, summary, current turn, and output reserve all fit. The newest turn is always kept; rounds whose tool calls are still open are never cut.
+- **Summary length**: `1000` tokens by default (`summary_max_tokens`, range `128-8000`), truncated to whatever the budget allows.
+- **Retries**: at most `3` attempts, `2` seconds apart, `180` seconds each; if all fail the call returns `context_summarization_failed`.
+- **Persistence**: the summary text and its watermark (the last covered message) live on the conversation (`context_summary_text` / `context_summary_watermark_id`); later turns reuse and incrementally update the same summary instead of stacking new ones.
+- **Still over budget after summarizing**: raises `ContextLengthError` (`retryable: false`, reason `context_summary_did_not_fit`) instead of retrying indefinitely.
+
+When `emit_sse_events` is true (the default), streaming APIs send `compression_start` and `compression_end` so clients can explain the reorganization; `compression_end` carries `before_tokens`, `after_tokens`, `input_budget`, `summary_saved_tokens`, and related fields.
 
 ## API Endpoints
 
@@ -137,7 +165,7 @@ GET /api/v1/memories/graph?entity_ids={id1}&entity_ids={id2}&max_depth=2
 
 ## Troubleshooting
 
-- **Preferences not remembered**: confirm the Agent has memory enabled, the facts reached the extraction threshold, and you are logged in as the same user.
-- **Early details lost**: long sessions may have been compressed; restate key constraints or start a new conversation.
-- **Frequent compression**: inspect model context window size, output reservation, and tool output payload sizes.
+- **Preferences not remembered**: confirm the Agent has memory enabled, the facts reached the importance threshold, and you are logged in as the same user.
+- **Early details ignored**: long sessions may have compressed early history into the summary; restate key constraints or start a new conversation.
+- **Frequent compression**: inspect the model context window, output reservation, and tool result sizes — large tool payloads fill the budget faster.
 - **Inaccurate facts recorded**: navigate to `/app/memories`, locate the faulty entity via search, and click **Edit** or **Delete**.

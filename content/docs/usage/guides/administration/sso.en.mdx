@@ -1,85 +1,191 @@
 ---
 title: Configure Single Sign-On
-description: Configure OIDC, OAuth2, SAML 2.0, or CAS login connections
+description: Configure OIDC, SAML 2.0, or CAS login connections and manage the SSO user lifecycle
 icon: KeyRound
 ---
 
-SSO connections are managed by a super administrator in **Site settings** > **SSO**. The fields for each connection depend on the protocol; prepare the identity provider's callback address, client credentials, and certificates/metadata before saving.
+SSO is managed by a Super Admin under **Site settings** → **SSO**: turn on the global switch first, then add providers one by one. Each provider's protocol configuration is a JSON document whose fields depend on the protocol; prepare the identity provider's callback address, client credentials, and certificate before saving.
+
+<Callout type="info">
+  Prerequisites:
+  1. `sso_enabled` is on in site settings (off by default) — otherwise the login page never fetches the provider list.
+  2. The operator holds `admin:sso:read` (view) or `admin:sso:update` (create, edit, delete, test, unlink).
+  3. The identity provider can reach Clouisle's **public backend address**, or the callback never arrives (see the next section).
+</Callout>
 
 ## Callback Address
 
-The callback address format is `{API_BASE_URL}/api/v1/sso/callback/{provider_name}`. The `provider_name` must match the name set in Clouisle; a mismatched callback address is the most common cause of SSO login failure.
+The callback address you register with the identity provider is:
 
-## Protocol Fields
+```
+{BACKEND_ORIGIN}/api/v1/sso/callback/{provider_name}
+```
+
+`BACKEND_ORIGIN` is the **public origin of the request itself** — the domain the browser actually reached the backend through (with a reverse proxy, the forwarded external address). A `:3000` port here is automatically rewritten to `:8000`. It is **not** `API_BASE_URL` (an internal service address) and is unaffected by `FRONTEND_URL`; getting it wrong causes a 404 callback or a redirect to the wrong domain.
+
+<Callout type="note">
+  The code keeps a `BACKEND_URL` override hook, but that setting is not declared in the settings class, so **the `BACKEND_URL` environment variable cannot override it** — the origin always comes from the request. Make sure the identity provider can reach that public domain.
+</Callout>
+
+`{provider_name}` must **exactly** match the provider name registered in Clouisle (case-sensitive). A mismatched callback address is the most common cause of SSO login failure.
+
+## Adding a Provider
+
+In **Site settings** → **SSO**, click **Add Provider**. The dialog has three tabs — **Basic Info / Configuration / Attribute Mapping**:
+
+| Field | Required | Constraint |
+| --- | --- | --- |
+| **Provider Name** | Yes | `^[a-z][a-z0-9_-]*$`: starts with a lowercase letter, then lowercase letters, digits, `-`, `_` only; max `100`; globally unique (a duplicate returns `6305`) |
+| **Protocol** | Yes | `oidc` (OAuth2/OIDC) / `saml2` (SAML 2.0) / `cas` (CAS) |
+| **Display Name** | Yes | Shown in lists and on the connected-accounts card; max `100` |
+| **Button Text** | No | Login button label, max `50`, e.g. "Sign in with Google" |
+| **Icon URL** | No | Must start with `http://` or `https://`; max `512` |
+| **Enabled** | — | When off, the provider disappears from the login page |
+| **Allow Signup** | — | Whether this provider may auto-create users |
+| **Require Approval** | — | Whether users created through this provider need admin approval |
+
+<Callout type="warn">
+  **Provider name and protocol cannot be changed after creation** (both are disabled when editing). Name it to match the identity provider configuration — renaming means recreating the provider.
+</Callout>
+
+## Protocol Configuration
+
+The **Configuration** tab is a free-form JSON editor pre-filled with a template when you pick a protocol. Field names must match the tables below; a typo is not rejected on save and only surfaces as a configuration error during login.
 
 ### OAuth2 / OIDC
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `client_id` | Yes | Client ID from the provider |
-| `client_secret` | Yes | Client Secret from the provider |
-| `authorization_url` | Yes | Provider authorization endpoint |
+| `client_id` | Yes | Client ID issued by the provider |
+| `client_secret` | Yes | Client Secret issued by the provider |
+| `authorization_url` | Yes | Authorization endpoint |
 | `token_url` | Yes | Token exchange endpoint |
-| `userinfo_url` | Yes | User info endpoint |
-| `scopes` | No | Space-separated scopes (default `openid email profile`) |
+| `userinfo_url` | Yes | User info endpoint (its response is what login reads) |
+| `scopes` | No | Space-separated scopes, default `openid email profile` |
 
-Common provider endpoints: GitHub uses `https://github.com/login/oauth/authorize` / `…/login/oauth/access_token` / `https://api.github.com/user`; Google uses `https://accounts.google.com/o/oauth2/v2/auth` / `https://oauth2.googleapis.com/token` / `https://openidconnect.googleapis.com/v1/userinfo`.
+Login uses the authorization-code flow with PKCE (`S256`) and generates a `nonce`. Common provider endpoints:
+
+```json
+{
+  "client_id": "your-github-client-id",
+  "client_secret": "your-github-client-secret",
+  "authorization_url": "https://github.com/login/oauth/authorize",
+  "token_url": "https://github.com/login/oauth/access_token",
+  "userinfo_url": "https://api.github.com/user",
+  "scopes": "read:user user:email"
+}
+```
+
+<Callout type="note">
+  The current implementation has **no `issuer_url` field and performs no ID-Token signature/JWKS validation**: user information always comes from the `userinfo_url` response (`validate_id_token` exists but has no callers). As a result, a wrong `client_secret` only shows up when tokens are actually exchanged — see [Testing the Connection](#testing-the-connection).
+</Callout>
 
 ### SAML 2.0
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `sp_entity_id` | Yes | Service Provider Entity ID (your Clouisle instance identifier) |
-| `idp_entity_id` | Yes | Identity Provider Entity ID |
-| `sso_url` | Yes | IdP Single Sign-On URL |
-| `x509_cert` | Yes | IdP X.509 certificate (PEM, without header/footer) |
-| `acs_url` | Yes | Assertion Consumer Service URL (`{API_BASE_URL}/api/v1/sso/callback/{provider_name}`) |
+| `sp_entity_id` | Yes | Service Provider Entity ID (this instance's identifier) |
+| `idp_entity_id` | Yes | IdP Entity ID |
+| `sso_url` | Yes | IdP Single Sign-On URL (HTTP-Redirect binding) |
+| `x509_cert` | Yes | IdP X.509 certificate, PEM content but **without** the `-----BEGIN/END CERTIFICATE-----` lines |
+| `acs_url` | Yes | ACS address; the runtime callback URL overrides it, so this is a placeholder/reference |
 | `slo_url` | No | SP Single Logout URL |
 | `idp_slo_url` | No | IdP Single Logout URL |
-| `name_id_format` | No | NameID format (default `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified`) |
+| `name_id_format` | No | NameID format, default `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified` |
+
+```json
+{
+  "sp_entity_id": "clouisle",
+  "idp_entity_id": "https://idp.example.com/metadata",
+  "sso_url": "https://idp.example.com/sso",
+  "x509_cert": "MIIC...truncated...",
+  "acs_url": "https://your-domain.com/api/v1/sso/callback/azure-ad"
+}
+```
+
+`strict` mode is enabled, so SAML responses must pass signature validation; a large clock skew between the IdP and Clouisle fails immediately.
+
+<Callout type="warn">
+  `slo_url` / `idp_slo_url` are only written into the SAML configuration — **no SP-initiated single logout flow is implemented**, so logging out at the IdP does not terminate the Clouisle session.
+</Callout>
 
 ### CAS
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `server_url` | Yes | CAS server base URL |
-| `service_url` | Yes | Service URL for CAS validation |
-| `version` | No | CAS protocol version `1`/`2`/`3` (default `3`) |
+| `version` | No | Protocol version `1` / `2` / `3`, default `3`, selecting the validation endpoint (`/validate`, `/serviceValidate`, `/p3/serviceValidate`) |
+| `service_url` | No | **Has no effect**: the `service` parameter always uses the runtime callback address |
+
+The CAS user identifier comes from `<cas:user>` in the validation response; version `3` also reads attributes from `<cas:attributes>` for [attribute mapping](#attribute-mapping).
 
 ## Attribute Mapping
 
-Attribute mapping maps provider user fields to Clouisle user fields: `email`, `username`, `avatar_url`. Use dot paths for simple nested objects:
+The **Attribute Mapping** tab is another JSON document that maps provider response data onto the fields Clouisle needs:
+
+| Clouisle field | Purpose |
+| --- | --- |
+| `email` | Account email (**required**; missing it fails the login, see below) |
+| `username` | Username; duplicates get a numeric suffix |
+| `avatar_url` | Avatar URL |
+
+Two path styles:
+
+- **Dot path** (default): `{"email": "email", "username": "profile.name"}` reads nested objects.
+- **JSONPath**: starting with `$`, suited to arrays or filtering, e.g. `{"email": "$.emails[0].value"}`; the first match wins.
+
+The default mapping when adding a provider:
 
 ```json
 {
   "email": "email",
-  "username": "profile.name",
-  "avatar_url": "profile.picture"
+  "username": "name",
+  "avatar_url": "picture"
 }
 ```
 
-For complex structures (arrays, filters), use JSONPath expressions starting with `$`; when multiple values match, the first is used.
+GitHub's payload differs from the OIDC standard claims, so change it to `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`.
+
+<Callout type="warn">
+  Mapped values are merged with the provider's **raw response, and a same-named raw field wins**. In other words the mapping only helps for fields that do not already exist in the raw payload; if the provider already returns `email`, the mapped `email` is overwritten. Log the raw response first when chasing mismapped fields.
+</Callout>
+
+<Callout type="error">
+  The final data must contain a non-empty `email`, or new-user creation fails with a validation error (`email_required`). The provider user identifier comes from OIDC's `sub`/`id`, SAML's NameID, or CAS's `<cas:user>`; an empty identifier also fails the login.
+</Callout>
+
+## Testing the Connection
+
+**Test Connection** in the list calls `POST /api/v1/admin/sso/providers/{id}/test`:
+
+- Server-side it **only builds an authorization URL locally** (with a placeholder callback) to check that the required keys are present, then returns the first 100 characters of that URL.
+- It **never contacts the identity provider**, so a wrong client secret, a mismatched callback address, or an expired certificate are all **invisible** to it — verify with a real login.
+- A `status: error` response only means a key is missing or a value cannot be used to build an authorization URL.
 
 ## Admin Permissions and API
 
-Listing providers requires `admin:sso:read`; creating, updating, deleting, testing providers, and disconnecting user SSO connections require `admin:sso:update` (the `Admin` role only has `admin:sso:read` by default; `admin:sso:update` is limited to Super Admin). The public endpoint `GET /api/v1/sso/providers` returns the enabled providers (for rendering login buttons).
+| Action | Endpoint | Permission |
+| --- | --- | --- |
+| List all providers (with `config`) | `GET /api/v1/admin/sso/providers` | `admin:sso:read` |
+| Create / update / delete | `POST` / `PUT` / `DELETE /api/v1/admin/sso/providers[/{id}]` | `admin:sso:update` |
+| Test configuration | `POST /api/v1/admin/sso/providers/{id}/test` | `admin:sso:update` |
+| Unlink any user's connection | `DELETE /api/v1/admin/sso/connections/{connection_id}` | `admin:sso:update` |
+| Providers for the login page | `GET /api/v1/sso/providers` | Public |
+| Start login / callback | `GET /api/v1/sso/login/{provider_name}`, `GET /api/v1/sso/callback/{provider_name}` | Public |
+| Unlink your own connection | `DELETE /api/v1/sso/connections/{connection_id}` | Any signed-in user |
 
-```http
-GET    /api/v1/sso/admin/providers
-POST   /api/v1/sso/admin/providers
-PUT    /api/v1/sso/admin/providers/{provider_id}
-DELETE /api/v1/sso/admin/providers/{provider_id}
-POST   /api/v1/sso/admin/providers/{provider_id}/test
-```
+<Callout type="note">
+  When `sso_enabled=false`, `GET /api/v1/sso/providers` returns an **empty array even if providers are enabled** — if the login page has no buttons, check the global switch first.
+</Callout>
 
 ## General Flow
 
-1. Enable SSO.
-2. Select the protocol and fill in the provider name, display name, and button text.
-3. Configure the client ID, client secret, Issuer/authorization endpoint, Token endpoint, user info mapping, or SAML metadata.
-4. Set the auto-creation, email matching, and approval policies.
-5. After saving, copy the callback address shown by Clouisle to the identity provider.
-6. In an incognito window, test new users, existing users, and failed callbacks.
+1. Enable SSO in site settings and adjust the global policies (allow password login, auto-create, require approval, match by email).
+2. Add a provider: fill in the basic info and pick a protocol.
+3. Enter the protocol JSON on the **Configuration** tab.
+4. Map email, username, and avatar to provider fields on the **Attribute Mapping** tab.
+5. After saving, add the callback address Clouisle shows to the identity provider's allowlist/redirect URIs.
+6. Verify three cases in an incognito window: a new user, an existing user, and a failing callback.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/sso-connection-form.png" alt="SSO connection configuration" />
@@ -88,11 +194,72 @@ POST   /api/v1/sso/admin/providers/{provider_id}/test
 
 ## User Lifecycle
 
-- When **Auto-create** is on, the first SSO login can create a user.
-- When **Match by email** is on, the SSO email can link to an existing account.
-- When **Approval required** is on, new accounts remain pending approval.
-- When **Allow password login** is off, the site enters SSO-only mode.
+Global settings and provider switches combine with **OR** semantics:
+
+| Outcome | Rule |
+| --- | --- |
+| Link an existing account | `sso_match_by_email=true` (default) and the returned email matches an existing user; linking also ensures that user joins the default team |
+| Create an account | Either the global `sso_auto_create_users` **or** the provider's **Allow Signup** is on |
+| Creation refused | Global auto-create off **and** the provider's **Allow Signup** off → `6302` (`sso_registration_disabled`) |
+| Approval required | Either the global `sso_require_approval` **or** the provider's **Require Approval** is on → the account is `pending` and cannot log in |
+| SSO-only | Global `sso_allow_password_login=false` → password login returns `6306` |
+
+Newly created SSO users behave as follows:
+
+- They have **no local password** (`hashed_password` is an empty string), so password login is impossible.
+- Their email is marked verified immediately (the provider's email is trusted).
+- The username comes from the mapped `username`; if missing, the local part of the email; if that is missing too, `user_<first 8 chars of the provider user id>`; duplicates get a numeric suffix.
+- The role comes from the provider's `default_role_id` (**API-only; there is no field for it in the UI**), falling back to the global default role; the user is then added to the default team via `default_team_id`.
 
 ## Common Errors
 
-`SSO_INVALID_CONFIGURATION` (`6304`) means the configuration is missing or malformed; `SSO_AUTHENTICATION_FAILED` (`6303`) means the identity provider rejected the request or callback validation failed; expired sessions return `6301`. Start by checking the Issuer, callback URL, clock, certificates, and email mapping.
+| Code | Meaning |
+| --- | --- |
+| `6300` | Provider not found |
+| `6301` | SSO login session expired (sessions last **10 minutes**; abandoning authorization mid-way expires it) |
+| `6302` | Registration not allowed for this provider (both auto-create and Allow Signup are off) |
+| `6303` | The provider rejected authentication or callback validation failed |
+| `6304` | Missing configuration / unsupported protocol |
+| `6305` | Provider name already exists |
+| `6306` | The site is SSO-only and password login is disabled |
+
+On a failed callback the backend redirects to `/sso-callback?error=...`, where `error` may be `sso_provider_not_found`, `sso_session_expired`, or `sso_login_failed`; a deactivated or pending-approval account yields `inactive` or `pending_approval`.
+
+## Troubleshooting
+
+### No SSO Buttons on the Login Page
+
+1. Check that `sso_enabled` is `true`.
+2. Check that the provider itself is **enabled**.
+3. Request `GET /api/v1/sso/providers` directly — an empty response means the frontend renders no buttons.
+
+### Callback Errors / Stuck on the Same Page
+
+1. Verify the callback **domain and provider name** match the configuration exactly.
+2. Confirm the public address (from the request/reverse proxy) is reachable by the identity provider.
+3. Check whether the authorization code expired (a long pause gives `6301`).
+4. Look at `sso_login_failed` entries and messages in the audit log.
+
+### Login Succeeds but Fields Are Mismapped
+
+1. Check the path style per [Attribute Mapping](#attribute-mapping) (dot path vs `$` JSONPath).
+2. Remember that a same-named raw field overrides the mapped value.
+3. Non-standard providers such as GitHub need explicit mapping (`login`, `avatar_url`).
+
+### SAML Validation Fails
+
+1. The certificate must be PEM content **with the header/footer lines removed**.
+2. Confirm the IdP and server clocks are in sync (excessive skew invalidates the response).
+3. Confirm `idp_entity_id` exactly matches the Entity ID in the IdP metadata.
+
+### Nobody Can Reach the Admin Console After Disabling Password Login
+
+This is the classic SSO-only accident: confirm at least one Super Admin has an SSO connection bound before switching. If you are already locked out, set `sso_allow_password_login` back to `true` server-side and restart.
+
+## Related Documentation
+
+- [SSO API](/en/api/sso) — endpoints, request bodies, and response fields
+- [Login & Account Security](./authentication.mdx) — login protection and first-time SSO login behavior
+- [Profile Settings](./profile.mdx) — disconnecting links and anti-lockout protection
+- [Site Settings reference](/en/reference/site-settings) — defaults for the `sso_*` keys
+- [Environment Variables](/en/self-host/configuration/environment-variables) — how `FRONTEND_URL`, `PUBLIC_API_URL`, and `API_V1_STR` differ

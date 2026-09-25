@@ -1,46 +1,74 @@
 ---
-title: Statuses & Errors Reference
+title: Status & Error Reference
 description: Look up resource statuses, run statuses, and error code families
 icon: CircleAlert
 ---
 
-The Clouisle API uses a unified response structure for both success and failure:
+The Clouisle API uses a unified response envelope for success and failure:
 
 ```json
 {"code": 0, "data": {}, "msg": "success"}
 ```
 
-Paginated data lives in `data.items` and includes `total`, `page`, `page_size`.
+Paginated data lives in `data.items` along with `total`, `page`, and `page_size`. The `code` field in the body is the authoritative application-level error code; the HTTP status is only a transport-level hint, and the two are not 1:1.
 
 ## Common Resource Statuses
 
 | Resource | Statuses |
 | --- | --- |
-| Agent/Workflow | `draft`, `published` |
+| Agent / Workflow | `draft`, `published` |
 | Knowledge Base | `active`, `processing`, `error`, `archived` |
 | Document | `pending`, `processing`, `completed`, `error` |
-| Workflow run | `pending`, `running`, `success`, `failed`, `cancelled`, `timeout` |
-| Node execution | `pending`, `running`, `success`, `failed`, `cancelled`, `timeout`, `skipped` |
-| API Key | active, inactive, expired |
+| Workflow Run | `pending`, `running`, `waiting`, `success`, `failed`, `cancelled`, `timeout` |
+| Node Execution | `pending`, `running`, `waiting`, `success`, `failed`, `skipped` |
+| Pause Request | `pending`, `submitted`, `cancelled` |
+| API Key | `active`, `inactive`, `expired` (derived from `is_active` and `expires_at`) |
+
+<Callout type="info" title="Where waiting, cancelled, and timeout belong">
+`waiting` means the run or node is paused at a `pause` node awaiting an external variable submission or approval (`RunStatus.WAITING` / `NodeStatus.WAITING`). `cancelled` and `timeout` exist only at the **run** level; **node**-level statuses do not include them and instead include `skipped` (bypassed by a condition or branch).
+</Callout>
 
 ## Error Code Families
 
 | Range | Meaning |
 | --- | --- |
-| `1000-1999` | General validation and server errors |
-| `2000-2999` | Authentication, Tokens, and account status |
-| `3000-3999` | Permission, team membership, and administrator requirements |
-| `4000-4999` | User, role, team, and other resources not found |
-| `5000-5499` | Registration, security captcha, TOTP, and rate limits |
-| `6000-6099` | Knowledge Base, documents, and chunks |
-| `6100-6199` | Models, authorizations, quotas, and capabilities |
-| `6200-6299` | Agents, conversations, and messages |
-| `6300-6399` | SSO configuration, authentication, and sessions |
+| `0` | Success |
+| `1000-1999` | General errors: unknown, validation, bad request, internal |
+| `2000-2999` | Authentication, token, and account status |
+| `3000-3999` | Permission, team membership, and admin requirements (e.g. `3002` not a team member, `3003` team admin required) |
+| `4000-4999` | Resource not found (user, role, team, etc.) |
+| `5000-5099` | Registration and email verification |
+| `5100-5199` | Resource already exists (duplicate) |
+| `5200-5299` | Operation forbidden (system role/permission protection, ownership protection, state conflicts) |
+| `5300-5399` | Login security: account lockout, captcha, password policy |
+| `5310-5319` | TOTP two-factor verification |
+| `5400-5499` | Rate limiting and quota mapping |
+| `6000-6099` | Knowledge base, document, and chunk errors |
+| `6100-6199` | Model, authorization, quota, and capability errors |
+| `6200-6299` | Agent, conversation, and message errors |
+| `6300-6399` | SSO configuration, authentication, and session errors |
+
+### HTTP Status vs Application Code
+
+| Scenario | HTTP Status | Application Code |
+| --- | --- | --- |
+| Business error (`BusinessError` default) | `400` | Its own `code` (e.g. `5002` username exists) |
+| Request body validation failure (Pydantic) | `422` | `1001` (`VALIDATION_ERROR`) |
+| JWT authentication failure | `403` | `2003` (`INVALID_CREDENTIALS`) |
+| Invalid / expired API key | `401` | `2001` (`INVALID_TOKEN`) / `2002` (`TOKEN_EXPIRED`) |
+| No authentication provided | `401` | `2000` (`UNAUTHORIZED`) |
+| Insufficient permission | `403` | `3000` (`PERMISSION_DENIED`) / `3001` (`INSUFFICIENT_PRIVILEGES`) |
+
+Many `BusinessError`s carry an explicit `status_code` (404 not found, 403 permission, 401 authentication, etc.), so clients should branch on the `code` in the response body rather than the HTTP status alone.
 
 ## Recovery Principles
 
-`401`/`2000`-`2002`: refresh the login or replace the API Key; `403`/`3000`: check roles, teams, and resource scopes; `4000`/`6000`: confirm IDs and resource statuses; `5400` or provider quota errors: back off and retry; document/workflow failures: first check resource-level error details, fix the configuration, then reprocess or rerun.
-
+- `401` / `2000`-`2002`: refresh the login or replace the API key (an expired key must be recreated).
+- `403` / `3000`-`3003`: check global role permissions, team membership, and resource scope; `3003` means a team `owner`/`admin` is required.
+- `404` / `4000`-`4999`, `6000`-`6002`: confirm the ID and the resource state.
+- `5400`: email quota or upstream provider rate limit — back off for the relevant window and retry.
+- `6103` / `6104`: team model quota exceeded / model not authorized — check team model authorization and usage.
+- Document processing failure (`6004`) or a failed workflow run: inspect the resource-level error detail first, fix the configuration, then reprocess or re-run.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/api-error-response.svg" alt="API error response" />

@@ -8,19 +8,32 @@ icon: CircleAlert
 
 ## API 无法连接数据库
 
-检查 `POSTGRES_SERVER`、`POSTGRES_PORT`、数据库密码和 PostgreSQL 就绪状态。Compose 使用 `db`，源码开发使用 `localhost`。确认 pg_search 与 `pg_stat_statements` 已预加载，并重启数据库后再检查扩展。
+检查 `POSTGRES_SERVER`、`POSTGRES_PORT`、数据库密码和 PostgreSQL 就绪状态。服务名按部署方式不同：Compose 用 `db`，K8s 用 `postgres`，源码开发用 `localhost`。确认 pg_search 与 `pg_stat_statements` 已预加载（官方镜像启动参数含 `shared_preload_libraries=pg_search,pg_stat_statements -c pg_stat_statements.track=all`），并重启数据库后再检查扩展。K8s 中 API/Worker/Beat 都有 `wait-for-postgres` initContainer，Pod 若一直 `Init` 说明数据库尚未就绪。
 
 ## 前端无法访问 API
 
-确认外部代理将 `/api/*` 路由到 `api:8000`，浏览器构建时 `NEXT_PUBLIC_API_URL`正确。不要在容器内将 API 地址设置为浏览器无法解析的内部主机，也不要把 `localhost` 用作 Sandbox Worker 的 API 地址。
+确认外部代理/Ingress 将 `/api` 路由到 `api:8000`，且前端构建期 `NEXT_PUBLIC_API_URL` 与后端 `API_V1_STR`（默认 `/api/v1`）前缀一致。不要在容器内将 API 地址设置为浏览器无法解析的内部主机，也不要把 `localhost` 用作 Sandbox Worker 的 API 地址。
+
+浏览器请求正常但页面服务端取数失败时，检查 `frontend` 是否设置了 `BACKEND_INTERNAL_URL`：代码默认 `http://localhost:8000`（Compose 注入 `http://api:8000`），单文件 K8s manifest 与 Helm 默认不注入该变量，SSR 会打到 Pod 内的 `localhost:8000`。
 
 ## Worker 不处理任务
 
 检查 Redis 连接、密码、队列名称和 Worker 日志。知识库使用 Celery 后台处理；`beat` 只能运行一个副本。清理或重启 Worker 前先确认没有正在处理的生产文档。
 
+按队列定位积压。五条队列分别是 `default`、`agent`、`knowledge`、`workflow`（由 `worker` 消费）和 `sandbox`（由 `sandbox-worker` 消费）：
+
+```bash
+# 设置了 REDIS_PASSWORD 时加 -a
+docker compose exec redis redis-cli llen agent
+docker compose exec redis redis-cli llen knowledge
+docker compose logs -f worker
+```
+
+任务进了队列但没人消费，说明消费该队列的 Worker 命令/部署不对。最典型的是 `worker` 的 `-Q` 少了 `agent`：持久化 AgentRun 全部堆在 `agent` 队列，会话一直停在运行中且不报错。队列与任务的完整对应关系见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
+
 ## Sandbox 产物上传失败
 
-确认 `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`、API 与 Sandbox Worker 使用相同签名配置，或配置专用 `SANDBOX_ARTIFACT_UPLOAD_API_KEY`。检查产物路径是否位于 `/workspace`、文件是否超过 `10MB` 默认上限。
+确认 `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`、API 与 Sandbox Worker 使用相同签名配置，或配置专用 `SANDBOX_ARTIFACT_UPLOAD_API_KEY`。产物必须位于 `/workspace` 内（否则策略直接拒绝），上传走内部端点 `/api/v1/upload/sandbox-artifact`，单文件与总量默认均不超过 `10MB`。Worker 和 Sandbox Worker 不挂 uploads 卷，必须能通过 `API_INTERNAL_BASE_URL` 访问 API。
 
 ## 沙箱任务报 bwrap 用户命名空间错误 [#bwrap-user-namespace-error]
 

@@ -42,6 +42,14 @@ curl -X POST "$API_BASE_URL/api/v1/upload/file" \
   -F "file=@/path/to/report.pdf"
 ```
 
+Both `/upload/image` and `/upload/file` accept a `category` query parameter, defaulting to `general`; other common values are `avatar` and `icon`. It selects the storage folder and appears in the returned `url`:
+
+```bash
+curl -X POST "$API_BASE_URL/api/v1/upload/image?category=avatar" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "file=@/path/to/avatar.png"
+```
+
 The response contains a generated storage filename. When submitting a chat attachment, use the returned `url`, `filename`, `size`, and `mime_type`; do not construct `/upload/files/{asset_id}` from the asset ID.
 
 ```json
@@ -75,7 +83,7 @@ curl -X POST "$API_BASE_URL/api/v1/upload/parse?max_content_length=100000&trunca
 
 A successful knowledge-base document upload returns `pending`. Configure chunk settings and call the knowledge-base process endpoint to start embedding and indexing.
 
-The sandbox artifact endpoint accepts a JWT or `clou_` API key. Internal sandbox requests may instead use timestamp and signature headers. Its size limit is controlled by `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB`.
+The sandbox artifact endpoint accepts a JWT or `clou_` API key. Internal sandbox requests may instead use a signature: the `X-Sandbox-Artifact-Timestamp` (Unix seconds) and `X-Sandbox-Artifact-Signature` headers, rejected when the timestamp differs from the current time by more than `300` seconds. Its size limit comes from the `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` site setting.
 
 ## Access Control and Errors
 

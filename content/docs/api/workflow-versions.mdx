@@ -1,33 +1,43 @@
 ---
-title: 工作流版本与模板 API
-description: 工作流历史版本控制、发布、差异比对、回滚以及模板市场管理接口
+title: 工作流版本 API
+description: 工作流图结构的版本快照、历史追溯、差异比对、发布、归档、回滚与派生
 icon: GitBranch
 ---
 
-工作流版本与模板 API 提供了工作流图结构（Nodes & Edges）的版本快照、历史追溯、差异比对（Diff）、快速回滚与分支派生（Fork）能力，同时集成了工作流模板市场的创建、搜索、实例化与评分。
+工作流版本 API 提供工作流图结构（Nodes & Edges）的版本快照、历史追溯、差异比对（Diff）、发布、归档、回滚与分支派生（Fork）能力。
 
-- **版本控制基础路径**：`/api/v1/workflow-versions`
-- **模板市场基础路径**：`/api/v1/workflow-templates`
+- **版本管理基础路径**：`/api/v1/workflow-versions`（该模块的多数成功响应**不使用** `code`/`data`/`msg` 包裹，而是直接返回载荷；错误仍使用标准包裹）
+- **版本快照基础路径**：`/api/v1/workflows/{workflow_id}/versions`（使用标准 `{code, data, msg}` 包裹）
 
----
+<Callout type="info">
+  同名资源有两套互不相通的版本 API，先确认你要用哪一套：
 
-## 工作流版本控制
+  | | `/api/v1/workflow-versions/...` | `/api/v1/workflows/{workflow_id}/versions` |
+  | --- | --- | --- |
+  | 版本标识 | 不透明字符串 `version_id`（UUID） | 整数 `version`（工作流的版本计数器） |
+  | 响应包裹 | 多数端点直接返回载荷 | 标准 `{code, data, msg}` |
+  | 能力 | 历史、Diff、发布、归档、回滚、Fork | 快照列表、详情、创建快照、恢复 |
+</Callout>
+
+## 版本管理（`/api/v1/workflow-versions`）
 
 ### 端点总览
 
-| 方法 | 路径 | 说明 | 鉴权/权限 |
-| --- | --- | --- | --- |
-| POST | `/api/v1/workflow-versions` | 创建新版本快照 | Bearer JWT (写权限) |
-| GET | `/api/v1/workflow-versions/{workflow_id}/history` | 获取工作流历史版本列表 | Bearer JWT |
-| GET | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}` | 获取特定版本详情 | Bearer JWT |
-| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | 发布指定版本为生产运行版本 | Bearer JWT (`workflow:publish`) |
-| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | 归档指定版本 | Bearer JWT (写权限) |
-| GET | `/api/v1/workflow-versions/{workflow_id}/diff` | 比对两个版本之间的图节点与连线差异 | Bearer JWT |
-| POST | `/api/v1/workflow-versions/{workflow_id}/rollback` | 将工作流回滚至历史指定版本 | Bearer JWT (写权限) |
-| POST | `/api/v1/workflow-versions/{workflow_id}/fork` | 基于历史版本派生出全新工作流 | Bearer JWT (写权限) |
-| GET | `/api/v1/workflow-versions/{workflow_id}/stats` | 获取工作流版本统计概览 | Bearer JWT |
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/v1/workflow-versions` | 创建新版本快照（需写权限） |
+| GET | `/api/v1/workflow-versions/{workflow_id}/history` | 获取工作流历史版本列表 |
+| GET | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}` | 获取特定版本详情 |
+| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish` | 发布指定版本（需 `workflow:publish`） |
+| POST | `/api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive` | 归档指定版本（需写权限） |
+| GET | `/api/v1/workflow-versions/{workflow_id}/diff` | 比对两个版本（需 `from_version`、`to_version`） |
+| POST | `/api/v1/workflow-versions/{workflow_id}/rollback` | 回滚到历史版本（需写权限） |
+| POST | `/api/v1/workflow-versions/{workflow_id}/fork` | 基于历史版本派生（源版本需可读，目标工作流需写权限） |
+| GET | `/api/v1/workflow-versions/{workflow_id}/stats` | 版本统计（需写权限） |
 
-### 版本状态枚举（VersionStatus）
+所有端点都需要已认证的 JWT 用户会话，且调用者必须能访问目标工作流；"写权限"以上均指对工作流的写访问（PRIVATE 工作流仅创建者、团队工作流需要团队角色）。`version_id` 不属于该工作流时统一返回 `404 workflow_version_not_found`。
+
+### 版本状态枚举
 
 - `draft`：草稿版本
 - `published`：当前已发布并对外提供服务的版本
@@ -55,11 +65,13 @@ Content-Type: application/json
 }
 ```
 
-#### 响应（200 OK）
+`config` 可选（默认 `{}`），会与 `nodes`/`edges` 合并进版本定义；`description` 可选（默认空字符串）。
+
+**响应（200 OK，无包裹）：**
 
 ```json
 {
-  "version_id": "v_7f9c2d1e-1234-4567-89ab-cdef01234567",
+  "version_id": "7f9c2d1e-1234-4567-89ab-cdef01234567",
   "version_number": 3,
   "status": "draft",
   "created_at": "2026-09-14T10:30:00Z"
@@ -73,6 +85,14 @@ GET /api/v1/workflow-versions/{workflow_id}/history?limit=20&offset=0&status=pub
 Authorization: Bearer YOUR_TOKEN
 ```
 
+| 查询参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `limit` | integer | 否 | `20` | 返回条数，范围 `1-100` |
+| `offset` | integer | 否 | `0` | 偏移量，最小 `0` |
+| `status` | string | 否 | - | 按状态过滤：`draft`、`published`、`archived`、`deprecated` |
+
+响应为 `{ "versions": [...], "total": N }`，`total` 是本次返回的条数（不是数据库总数）。
+
 ### 3. 版本差异比对（Diff）
 
 ```http
@@ -80,25 +100,76 @@ GET /api/v1/workflow-versions/{workflow_id}/diff?from_version=v_1&to_version=v_2
 Authorization: Bearer YOUR_TOKEN
 ```
 
-#### 响应（200 OK）
+`from_version` 与 `to_version` 均为**必填**，且是版本 ID（`version_id`），不是语义化版本号或整数版本号。
+
+**响应（200 OK，无包裹）：**
 
 ```json
 {
   "from_version": "v_1",
   "to_version": "v_2",
   "diff": {
-    "added_nodes": [{"id": "node_2", "type": "llm"}],
-    "removed_nodes": [],
-    "modified_nodes": [],
-    "added_edges": [{"id": "e1-2", "source": "node_1", "target": "node_2"}],
-    "removed_edges": []
+    "from_version": "v_1",
+    "to_version": "v_2",
+    "nodes_added": [{"id": "node_2", "type": "llm", "label": "Summarize"}],
+    "nodes_removed": [],
+    "nodes_modified": [
+      {
+        "id": "node_http_query",
+        "type": "http",
+        "changes": [
+          {"field": "data.timeout", "from": 30, "to": 60},
+          {"field": "position", "type": "moved"}
+        ]
+      }
+    ],
+    "edges_added": [{"source": "node_1", "target": "node_2", "sourceHandle": null}],
+    "edges_removed": [],
+    "config_changes": {},
+    "has_changes": true,
+    "change_summary": "+1 nodes, ~1 nodes modified, +1 edges"
   }
 }
 ```
 
-### 4. 版本回滚与分支派生
+外层固定为 `{from_version, to_version, diff}`；`diff` 内部字段为 `nodes_added`、`nodes_removed`、`nodes_modified`、`edges_added`、`edges_removed`、`config_changes`、`has_changes`、`change_summary`。工作流不存在或版本不属于该工作流时返回 `404`。
 
-#### 回滚至指定版本
+### 4. 发布版本
+
+```http
+POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/publish HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+除工作流写访问外，还需团队权限 `workflow:publish`。
+
+**响应（200 OK，无包裹）：**
+
+```json
+{
+  "success": true,
+  "status": "published"
+}
+```
+
+### 5. 归档版本
+
+```http
+POST /api/v1/workflow-versions/{workflow_id}/version/{version_id}/archive HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+**响应（200 OK，无包裹）：**
+
+```json
+{
+  "success": true,
+  "status": "archived"
+}
+```
+
+### 6. 回滚到指定版本
+
 ```http
 POST /api/v1/workflow-versions/{workflow_id}/rollback HTTP/1.1
 Authorization: Bearer YOUR_TOKEN
@@ -110,7 +181,22 @@ Content-Type: application/json
 }
 ```
 
-#### 派生新工作流（Fork）
+`create_backup` 可选，默认 `true`。
+
+**响应（200 OK，无包裹）：**
+
+```json
+{
+  "success": true,
+  "new_version_id": "v3-uuid",
+  "backup_version_id": null
+}
+```
+
+### 7. 派生新工作流（Fork）
+
+Fork 会把某一版本的图定义复制到**另一个已存在的工作流**中；`version_id`（源版本）与 `new_workflow_id`（目标工作流）均为必填。
+
 ```http
 POST /api/v1/workflow-versions/{workflow_id}/fork HTTP/1.1
 Authorization: Bearer YOUR_TOKEN
@@ -123,49 +209,100 @@ Content-Type: application/json
 }
 ```
 
----
+**响应（200 OK，无包裹）：**
 
-## 工作流模板市场
-
-### 端点总览
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/workflow-templates` | 分页列出模板库（支持按分类、可见性、标签筛选） |
-| GET | `/api/v1/workflow-templates/featured` | 获取精选推荐模板列表 |
-| GET | `/api/v1/workflow-templates/search` | 全文搜索模板 |
-| GET | `/api/v1/workflow-templates/categories` | 获取全部模板分类定义 |
-| GET | `/api/v1/workflow-templates/{template_id}` | 获取模板详情（含节点、变量定义） |
-| POST | `/api/v1/workflow-templates` | 发布新模板 |
-| POST | `/api/v1/workflow-templates/{template_id}/instantiate` | 将模板实例化为具体工作流定义 |
-| POST | `/api/v1/workflow-templates/{template_id}/rate` | 为模板打分（1.0 ~ 5.0 星） |
-| DELETE | `/api/v1/workflow-templates/{template_id}` | 删除模板（仅作者本人） |
-| GET | `/api/v1/workflow-templates/stats/summary` | 查询模板市场统计总览 |
-
-### 实例化模板示例
-
-```http
-POST /api/v1/workflow-templates/{template_id}/instantiate HTTP/1.1
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
+```json
 {
-  "template_id": "tpl-doc-summary",
-  "variables": {
-    "llm_model": "gpt-4o-mini",
-    "max_length": 500
-  },
-  "workflow_name": "我的文档总结工作流"
+  "success": true,
+  "new_version_id": "v1-uuid-fork"
 }
 ```
 
----
+### 8. 版本统计
+
+```http
+GET /api/v1/workflow-versions/{workflow_id}/stats HTTP/1.1
+Authorization: Bearer YOUR_TOKEN
+```
+
+需要工作流写访问。响应直接返回统计对象（无包裹）：
+
+```json
+{
+  "total_versions": 4,
+  "published_versions": 2,
+  "draft_versions": 1,
+  "archived_versions": 1,
+  "first_version_date": "2026-01-04T10:15:00",
+  "latest_version_date": "2026-02-11T09:02:31"
+}
+```
+
+## 版本快照（`/api/v1/workflows/{workflow_id}/versions`）
+
+这组路由属于[工作流路由](/api/workflow)，管理单个工作流的**整数编号**快照，与上一节的 `/api/v1/workflow-versions/...` 相互独立，且使用标准 `{code, data, msg}` 包裹。
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/workflows/{workflow_id}/versions` | 分页列出快照（按版本号倒序） | `workflow:read` + 工作流访问权 |
+| GET | `/api/v1/workflows/{workflow_id}/versions/{version}` | 获取指定整数版本的快照 | `workflow:read` + 工作流访问权 |
+| POST | `/api/v1/workflows/{workflow_id}/versions` | 以当前状态创建快照 | 工作流写权限 + `workflow:update` |
+| POST | `/api/v1/workflows/{workflow_id}/versions/{version}/restore` | 恢复到某个快照 | 工作流写权限 + `workflow:update` |
+
+`{version}` 是工作流的 `version` 计数器（整数），不是 UUID。列表的 `page`（默认 `1`）与 `page_size`（默认 `20`）为查询参数。
+
+### 列出快照
+
+```http
+GET /api/v1/workflows/{workflow_id}/versions?page=1&page_size=20 HTTP/1.1
+Authorization: Bearer <token>
+```
+
+响应 `data.items` 中每项包含 `id`、`workflow_id`、`version`、`description`、`created_by_id`、`created_at`。
+
+### 创建快照
+
+```http
+POST /api/v1/workflows/{workflow_id}/versions HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "description": "重构前"
+}
+```
+
+以工作流**当前的** `version` 编号落一份快照，`version` 计数器不变。`data` 为创建的 `WorkflowVersionOut`。
+
+### 恢复快照
+
+```http
+POST /api/v1/workflows/{workflow_id}/versions/3/restore HTTP/1.1
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "description": "误改后恢复"
+}
+```
+
+恢复流程为：先把当前状态自动存为一份备份快照，然后写回目标快照的 `definition`/`variables`/`trigger_type`/`trigger_config`，把工作流 `version` 计数器加一，并为恢复后的状态再建一份快照。`description` 可选，省略时生成默认的本地化描述。`data` 为更新后的 `WorkflowOut`。
+
+## 工作流模板市场
+
+<Callout type="warn" title="尚未实现 / Roadmap">
+  **不存在**工作流模板市场的 HTTP API。代码中存在模板管理器 `TemplateManager`（`backend/app/services/workflow/templates.py`）并且有单元测试，但**没有任何路由挂载它**，因此 `/api/v1/workflow-templates` 及其曾列出的全部端点（列表、精选、搜索、分类、详情、发布、实例化、评分、删除、统计）均**未实现**。`TemplateManager` 目前仅作为服务层被内部调用，不能通过 HTTP 访问。
+</Callout>
 
 ## 错误代码
 
 | 错误码 | 标识 | 说明 |
 | --- | --- | --- |
 | `2000` | UNAUTHORIZED | 未认证或令牌无效 |
-| `3000` | FORBIDDEN | 无操作权限或无 `workflow:publish` 权限 |
-| `4000` | NOT_FOUND | 工作流、工作流版本或模板不存在 |
-| `1001` | VALIDATION_ERROR | 请求参数校验未通过，或模板实例化参数错误 |
+| `3000` | FORBIDDEN | 无操作权限，或缺少 `workflow:publish` 权限 |
+| `4000` | NOT_FOUND | 工作流或工作流版本不存在（含 `workflow_version_not_found`、`workflow_version_diff_not_found`） |
+| `1001` | VALIDATION_ERROR | 请求参数校验未通过 |
+
+---
+
+**Last Updated**: 2026-09-26

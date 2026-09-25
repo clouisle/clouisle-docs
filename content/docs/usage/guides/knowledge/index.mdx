@@ -4,10 +4,38 @@ description: 创建知识库、导入文档、调整分块并验证检索质量
 icon: Database
 ---
 
+知识库为团队保存可检索的文档集合：原始文件或网页先被解析为文本、切分成**分块**（chunk），再由团队的**嵌入模型**转成向量写入向量库。检索时按相似度召回分块，交给 Agent 或工作流作为上下文使用。本栏目按使用顺序覆盖五个环节，其余参数细节见[知识库设置参考](/reference/knowledge-settings)。
+
+<Callout type="info" title="前置条件">
+  你的团队必须已获授权一个 `embedding` 模型才能创建可检索的知识库；要启用重排序还需授权一个 `rerank` 模型。授权与供应商配置见[模型管理](../models/manage-models.mdx)，未授权模型会在创建或检索时被拒绝。
+</Callout>
+
 <Cards>
-  <Card title="创建知识库" href="/usage/guides/knowledge/create-knowledge-base">选择团队、嵌入模型和重排序模型。</Card>
-  <Card title="导入文档" href="/usage/guides/knowledge/import-documents">上传文件或从网址导入，并处理失败文档。</Card>
-  <Card title="浏览文档与元数据" href="/usage/guides/knowledge/browse-documents">查看文档系统字段、提取元数据与编辑文档名。</Card>
-  <Card title="分块与处理" href="/usage/guides/knowledge/chunking">预览、处理、重新分块和编辑分块。</Card>
-  <Card title="检索与质量调优" href="/usage/guides/knowledge/retrieval">使用检索实验室比较检索配置与诊断结果。</Card>
+  <Card title="创建知识库" href="/usage/guides/knowledge/create-knowledge-base">选择团队、嵌入模型和重排序模型，并理解哪些设置创建后不可改。</Card>
+  <Card title="导入文档" href="/usage/guides/knowledge/import-documents">上传文件或从网址导入，理解上传与处理为何是两个阶段。</Card>
+  <Card title="浏览文档与元数据" href="/usage/guides/knowledge/browse-documents">查看文档系统字段、提取元数据，识别共享来源徽章。</Card>
+  <Card title="分块与处理" href="/usage/guides/knowledge/chunking">分开理解预览、处理、重新处理与编辑分块，避免丢失手工修改。</Card>
+  <Card title="检索与质量调优" href="/usage/guides/knowledge/retrieval">在检索实验室比较检索模式、权重与重排序，并诊断失败阶段。</Card>
 </Cards>
+
+## 关键默认值
+
+| 项目 | 默认值 | 说明 |
+| --- | --- | --- |
+| 分块大小 `chunk_size` | `1000` 字符 | 最小 `100`；字符而非 Token |
+| 分块重叠 `chunk_overlap` | `100` 字符 | 最小 `0` |
+| 重排序 `rerank_enabled` | `true` | 未绑定 `rerank` 模型时不产生效果 |
+| 重排序候选池 `rerank_candidate_k` | `10` | 范围 `1-100` |
+| 检索请求 `search_mode` | `hybrid` | 知识库设置中默认留空（`null`） |
+| 检索请求 `top_k` | `5` | 请求范围 `1-20` |
+| 单文件上传上限 | `50MB` | 站点设置 `kb_document_max_upload_size_mb`，范围 `1-1024` |
+
+## 一条文档的生命周期
+
+```text
+上传/导入 → pending → 预览分块（可选） → 处理 → 提取文本 → 清理 → 分块 → 生成嵌入 → 建立全文索引 → completed
+```
+
+只有 `completed` 的文档会参与检索。`pending` 只是「文件已保存」，不等于已建立索引，详见[导入文档](./import-documents.mdx)。
+
+调优建议（分块粒度、权重、阈值如何取舍）见[知识库优化](/usage/best-practices/kb-optimization)，概念层面的摄取与检索全流程见[知识库概念](/usage/concepts/knowledge-base)。

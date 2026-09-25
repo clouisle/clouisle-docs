@@ -1,62 +1,102 @@
 ---
 title: Teams API
-description: Manage teams and memberships
+description: Manage team details, member roles, ownership transfer, and team model authorization
 icon: UsersRound
 ---
 
+The Teams API covers three groups of endpoints: **platform-side team and member management** (`/api/v1/teams`), **admin team management** (`/api/v1/admin/teams`, where creation and deletion live), and **team model authorization** (`/api/v1/teams/{team_id}/models*`, writable only by superusers).
+
+<Callout type="warn" title="No platform-side create/delete team endpoints">
+  The platform routes are only `GET /api/v1/teams/my`, `GET|PUT /api/v1/teams/{team_id}`, member management, `leave`, and `transfer-ownership`. There is **no** `POST /api/v1/teams` and **no** `DELETE /api/v1/teams/{team_id}`; creating and deleting teams belongs to the admin panel at `POST /api/v1/admin/teams` and `DELETE /api/v1/admin/teams/{team_id}`.
+</Callout>
+
+## Roles and Permission Model
+
+| Role | Description |
+| --- | --- |
+| `owner` | Team owner, exactly one per team. Can change member roles, transfer ownership, and update the team; cannot leave directly — ownership must be transferred first |
+| `admin` | Team administrator. Can update the team and add/remove members (changing a role to `admin` requires the target user to already hold the global `team:manage` permission) |
+| `member` | Regular member. The default role; operations follow global permissions |
+| `viewer` | Read-only member. Allowed only read permissions (`team:read`, `agent:read`, `workflow:read`, `kb:read`, `tool:read`, `conversation:read`, and similar); any write operation is rejected |
+
+How permission codes map to operations:
+
+| Permission | Operations covered |
+| --- | --- |
+| `team:read` | View team details, view members, leave the team (self-removal) |
+| `team:update` | Update team name, description, avatar |
+| `team:manage` | Add/remove members, change member roles, transfer ownership |
+| `admin:team:read` | List all teams in the admin panel |
+| `admin:team:create` | Create a team in the admin panel |
+| `admin:team:delete` | Delete a team in the admin panel |
+
+The check order (`check_team_permission`) is the same for every platform endpoint:
+
+1. The team must exist, otherwise `404` / `4004`.
+2. Superusers pass immediately and skip the remaining checks.
+3. The caller must be a team member, otherwise `403` / `3002`.
+4. For management actions (`team:update`, `team:manage`, or an endpoint that asks explicitly) the role must be `owner` or `admin`, otherwise `403` / `3003`.
+5. A `viewer` role may only perform read-only permissions, otherwise `403` / `3000`.
+6. Finally the user's global permission code is checked; if missing, `403` / `3000`.
+
+<Callout type="info">
+  Step 3 also means non-members cannot read team details: even when a team is visible to administrators, a regular user must be a member first. For a full deployment-wide team list, use the admin endpoint.
+</Callout>
+
+## Base URLs and Authentication
+
+- Platform endpoints: `/api/v1/teams`
+- Admin endpoints: `/api/v1/admin/teams`
+- Team model authorization: `/api/v1/teams/{team_id}/models*`
+
+Every team endpoint requires an authenticated **JWT user session**; API keys are not accepted.
+
 ## Endpoints
 
-| Method | Path | Purpose | Scope |
+### Platform routes
+
+| Method | Path | Purpose | Permission / role |
 | --- | --- | --- | --- |
-| GET | `/api/v1/teams/my` | List teams the current user belongs to | `team:read` |
-| GET | `/api/v1/teams/{team_id}` | Get team details (includes member list) | `team:read` |
+| GET | `/api/v1/teams/my` | List the teams the caller belongs to, with roles | Any authenticated user |
+| GET | `/api/v1/teams/{team_id}` | Team details including the member list | `team:read` |
+| PUT | `/api/v1/teams/{team_id}` | Update team info | `team:update` + owner/admin |
+| POST | `/api/v1/teams/{team_id}/members` | Add a member | `team:manage` + owner/admin |
+| PUT | `/api/v1/teams/{team_id}/members/{user_id}` | Change a member role | `team:manage` + owner/admin, and the caller must be owner (or superuser) |
+| DELETE | `/api/v1/teams/{team_id}/members/{user_id}` | Remove a member (self-removal supported) | Self-removal needs `team:read`; removing others needs `team:manage` + owner/admin |
+| POST | `/api/v1/teams/{team_id}/leave` | Leave the team | `team:read` |
+| POST | `/api/v1/teams/{team_id}/transfer-ownership` | Transfer ownership | `team:manage` + owner (or superuser) |
+
+### Admin routes
+
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET | `/api/v1/admin/teams` | List all teams with pagination | `admin:team:read` |
 | POST | `/api/v1/admin/teams` | Create a team | `admin:team:create` |
-| PUT | `/api/v1/teams/{team_id}` | Update team information | `team:update` |
 | DELETE | `/api/v1/admin/teams/{team_id}` | Delete a team | `admin:team:delete` |
-| POST | `/api/v1/teams/{team_id}/members` | Add a team member | `team:manage` |
-| PUT | `/api/v1/teams/{team_id}/members/{user_id}` | Update a member's role | `team:manage` |
-| DELETE | `/api/v1/teams/{team_id}/members/{user_id}` | Remove a team member | `team:manage` |
 
-## Base URLs
-
-- Platform: `/api/v1/teams`
-- Admin: `/api/v1/admin/teams`
-
-## Authentication
-
-All team endpoints require an authenticated JWT user session. API-key authentication is not accepted.
-
-**Required scopes:**
-
-| Scope | Description |
-| --- | --- |
-| `team:read` | View team information |
-| `team:update` | Update team details |
-| `team:manage` | Manage team members and membership operations |
-| `admin:team:create` | Create teams (admin) |
-| `admin:team:delete` | Delete teams (admin) |
+There is no `GET /admin/teams/{team_id}` and no `PUT /admin/teams/{team_id}`: reading and updating still go through the platform routes (which require team membership).
 
 ## List My Teams
-
-Get all teams the current user belongs to, with the user's role in each.
 
 ```
 GET /api/v1/teams/my
 ```
+
+No permission code is required. Returns every membership of the caller, in `TeamMember` record order:
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/teams/my" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-**Success (200 OK):**
+**Response (200 OK):**
 
 ```json
 {
   "code": 0,
   "data": [
     {
-      "id": "team-123",
+      "id": "8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f",
       "name": "Marketing Team",
       "description": "Marketing and content creation team",
       "avatar_url": null,
@@ -68,66 +108,56 @@ curl -X GET "https://your-domain.com/api/v1/teams/my" \
 }
 ```
 
-<Callout type="info">
-  There is no `GET /api/v1/teams` list endpoint for all teams. Admins can list all teams (paginated, with `search` by name or description) via `GET /api/v1/admin/teams` (page/page_size, default page_size 50), which requires `admin:team:read`.
-</Callout>
+The body is a **plain array**, not a paginated envelope. There is no `GET /api/v1/teams` that lists all teams; for a deployment-wide list use the admin endpoint:
 
-## Get Team
+```
+GET /api/v1/admin/teams?page=1&page_size=50&search=marketing
+```
 
-Get details of a specific team, including the member list.
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `page` | integer | `1` | Page number |
+| `page_size` | integer | `50` | Items per page (note the admin default is 50, not the platform-wide 20) |
+| `search` | string | — | Case-insensitive match on team name or description |
+
+## Get Team Details
 
 ```
 GET /api/v1/teams/{team_id}
 ```
 
-**Path Parameters:**
+| Path parameter | Type | Required |
+| --- | --- | --- |
+| `team_id` | string (UUID) | Yes |
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team_id` | string | Yes | Team UUID |
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/teams/team-123" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-**Success (200 OK):**
+**Response (200 OK):**
 
 ```json
 {
   "code": 0,
   "data": {
-    "id": "team-123",
+    "id": "8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f",
     "name": "Marketing Team",
     "description": "Marketing and content creation team",
     "avatar_url": null,
     "is_default": false,
     "owner": {
-      "id": "user-456",
+      "id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
       "username": "alice",
       "email": "alice@example.com",
-      "avatar_url": "https://example.com/avatars/alice.jpg"
+      "avatar_url": "https://example.com/avatars/alice.png"
     },
     "created_at": "2026-01-15T10:00:00Z",
     "updated_at": "2026-02-11T15:30:00Z",
     "members": [
       {
-        "id": "membership-001",
-        "user_id": "user-456",
+        "id": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e",
+        "user_id": "3f2a1b0c-9d8e-4f7a-8b6c-5d4e3f2a1b0c",
         "username": "alice",
         "email": "alice@example.com",
-        "avatar_url": "https://example.com/avatars/alice.jpg",
+        "avatar_url": "https://example.com/avatars/alice.png",
         "role": "owner",
         "joined_at": "2026-01-15T10:00:00Z"
-      },
-      {
-        "id": "membership-002",
-        "user_id": "user-789",
-        "username": "bob",
-        "email": "bob@example.com",
-        "avatar_url": null,
-        "role": "member",
-        "joined_at": "2026-01-16T10:00:00Z"
       }
     ]
   },
@@ -135,306 +165,251 @@ curl -X GET "https://your-domain.com/api/v1/teams/team-123" \
 }
 ```
 
-## Create Team
+There is no standalone member-list endpoint: the complete member list is returned **only** by this response. `members` is not paginated, so large teams need client-side slicing.
 
-Create a new team (admin only).
-
-```
-POST /api/v1/admin/teams
-```
-
-**Request Body:**
-
-```json
-{
-  "name": "Sales Team",
-  "description": "Sales and customer relations team",
-  "avatar_url": null
-}
-```
-
-**Request Fields:**
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | string | Yes | Team name |
-| `description` | string | No | Team description |
-| `avatar_url` | string | No | Team avatar URL |
-
-```bash
-curl -X POST "https://your-domain.com/api/v1/admin/teams" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "Sales Team",
-    "description": "Sales and customer relations team"
-  }'
-```
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "team-456",
-    "name": "Sales Team",
-    "description": "Sales and customer relations team",
-    "avatar_url": null,
-    "is_default": false,
-    "owner": null,
-    "created_at": "2026-02-11T16:00:00Z",
-    "updated_at": "2026-02-11T16:00:00Z"
-  },
-  "msg": "Team created successfully"
-}
-```
-
-## Update Team
-
-Update team information.
+## Update a Team
 
 ```
 PUT /api/v1/teams/{team_id}
 ```
 
-**Path Parameters:**
+Requires the `team:update` permission code and an `owner` or `admin` role. All fields are optional; send only what you want to change.
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team_id` | string | Yes | Team UUID |
-
-**Request Body:** All fields are optional. Only include fields you want to update.
-
-```json
-{
-  "name": "Updated Team Name",
-  "description": "Updated description",
-  "avatar_url": null
-}
-```
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | string | Team name, globally unique |
+| `description` | string | Team description |
+| `avatar_url` | string | Team avatar URL |
 
 ```bash
-curl -X PUT "https://your-domain.com/api/v1/teams/team-123" \
+curl -X PUT "https://your-domain.com/api/v1/teams/8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "name": "Updated Team Name"
-  }'
+  -d '{"name": "Growth Team"}'
 ```
 
-**Success (200 OK):**
+The response returns the updated team object (with `owner`, without `members`). A duplicate name returns HTTP `400` / `5102` (`TEAM_NAME_EXISTS`).
 
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "team-123",
-    "name": "Updated Team Name",
-    "description": null,
-    "avatar_url": null,
-    "is_default": false,
-    "owner": {
-      "id": "user-456",
-      "username": "alice",
-      "email": "alice@example.com",
-      "avatar_url": null
-    },
-    "created_at": "2026-01-15T10:00:00Z",
-    "updated_at": "2026-02-11T16:05:00Z"
-  },
-  "msg": "Team updated successfully"
-}
-```
+<Callout type="info">
+  Only fields explicitly present in the request body are applied: passing `"description": null` counts as “not provided” and is skipped, so you cannot currently clear a description or avatar this way.
+</Callout>
 
-## Delete Team
-
-Delete a team permanently (admin only).
-
-```
-DELETE /api/v1/admin/teams/{team_id}
-```
-
-**Path Parameters:**
-
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team_id` | string | Yes | Team UUID |
-
-```bash
-curl -X DELETE "https://your-domain.com/api/v1/admin/teams/team-123" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
-```
-
-**Success (200 OK):**
-
-```json
-{
-  "code": 0,
-  "data": null,
-  "msg": "Team deleted successfully"
-}
-```
-
-## Add Team Member
-
-Add a member to a team.
+## Add a Team Member
 
 ```
 POST /api/v1/teams/{team_id}/members
 ```
 
-**Path Parameters:**
+Requires the `team:manage` permission code and an `owner`/`admin` role.
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team_id` | string | Yes | Team UUID |
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `user_id` | string (UUID) | One of the two | — | Target user UUID |
+| `identifier` | string | One of the two | — | Exact username match, or exact email match (case-insensitive) |
+| `role` | string | No | `member` | Member role: `member`, `admin`, or `viewer` |
 
-**Request Body:**
-
-```json
-{
-  "user_id": "user-999",
-  "role": "member"
-}
-```
-
-**Request Fields:**
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `user_id` | string | Yes | User UUID to add |
-| `role` | string | No | Member role: `admin`, `member`, `viewer` (default: `member`) |
+Provide at least one of `user_id` or `identifier`; providing neither returns HTTP `400` / `1001`.
 
 ```bash
-curl -X POST "https://your-domain.com/api/v1/teams/team-123/members" \
+curl -X POST "https://your-domain.com/api/v1/teams/8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f/members" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user-999",
-    "role": "member"
-  }'
+  -d '{"identifier": "carol@example.com", "role": "member"}'
 ```
 
-**Success (200 OK):**
+Four business rules apply:
 
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "membership-003",
-    "user_id": "user-999",
-    "username": "carol",
-    "email": "carol@example.com",
-    "avatar_url": null,
-    "role": "member",
-    "joined_at": "2026-02-11T16:00:00Z"
-  },
-  "msg": "Member added successfully"
-}
-```
+1. The target user must exist, otherwise HTTP `404` / `4001`.
+2. The target user must not already be a member, otherwise HTTP `400` / `5103` (`ALREADY_TEAM_MEMBER`).
+3. The role cannot be `owner`: that returns HTTP `400` / `5206` (`CANNOT_ADD_AS_OWNER`). Ownership changes only through the transfer endpoint.
+4. To add someone as `admin`, the target user must already hold the global `team:manage` permission, otherwise HTTP `403` / `3000` (the response includes a `permission` field naming the missing code).
 
-## Update Team Member
+**Response (200 OK):** the new membership record (`id`, `user_id`, `username`, `email`, `avatar_url`, `role`, `joined_at`). Both the added user and the whole team receive an in-app notification.
 
-Update a team member's role.
+## Change a Member Role
 
 ```
 PUT /api/v1/teams/{team_id}/members/{user_id}
 ```
 
-**Path Parameters:**
+| Path parameter | Type | Required |
+| --- | --- | --- |
+| `team_id` | string (UUID) | Yes |
+| `user_id` | string (UUID) | Yes |
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team_id` | string | Yes | Team UUID |
-| `user_id` | string | Yes | User UUID |
-
-**Request Body:**
+Request body:
 
 ```json
-{
-  "role": "admin"
-}
+{ "role": "admin" }
 ```
 
-```bash
-curl -X PUT "https://your-domain.com/api/v1/teams/team-123/members/user-999" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "role": "admin"
-  }'
-```
+`role` is required. Constraints:
 
-**Success (200 OK):**
+- Only the `owner` (or a superuser) can change roles; an `admin` caller gets HTTP `403` / `3004` (`TEAM_OWNER_REQUIRED`).
+- The `owner`'s own role cannot be changed (HTTP `400` / `5207`, `CANNOT_CHANGE_OWNER_ROLE`).
+- A member cannot be promoted directly to `owner` (HTTP `400` / `5208`, `CANNOT_PROMOTE_TO_OWNER`) — use ownership transfer instead.
+- Setting the role to `admin` requires the target user to already hold the global `team:manage` permission, otherwise HTTP `403` / `3000`.
+- A missing target user returns `404` / `4001`; a missing membership returns `404` / `4005`.
 
-```json
-{
-  "code": 0,
-  "data": {
-    "id": "membership-003",
-    "user_id": "user-999",
-    "username": "carol",
-    "email": "carol@example.com",
-    "avatar_url": null,
-    "role": "admin",
-    "joined_at": "2026-02-11T16:00:00Z"
-  },
-  "msg": "Member role updated successfully"
-}
-```
+The response returns the updated membership record with the new `role`, and the affected user is notified.
 
-## Remove Team Member
-
-Remove a member from a team.
+## Remove a Team Member
 
 ```
 DELETE /api/v1/teams/{team_id}/members/{user_id}
 ```
 
-**Path Parameters:**
+| Path parameter | Type | Required |
+| --- | --- | --- |
+| `team_id` | string (UUID) | Yes |
+| `user_id` | string (UUID) | Yes |
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team_id` | string | Yes | Team UUID |
-| `user_id` | string | Yes | User UUID |
+Authorization depends on whether the target is the caller:
 
-```bash
-curl -X DELETE "https://your-domain.com/api/v1/teams/team-123/members/user-999" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+- **Self-removal** (`user_id` equals the caller): only `team:read` is needed; this is equivalent to leaving.
+- **Removing someone else**: requires `team:manage` and an `owner`/`admin` role.
 
-**Success (200 OK):**
+The `owner` cannot be removed (HTTP `400` / `5209`, `CANNOT_REMOVE_OWNER`). A missing target user returns `404` / `4001`; a missing membership returns `404` / `4005`.
+
+**Response (200 OK):**
 
 ```json
 {
   "code": 0,
-  "data": null,
-  "msg": "Member removed successfully"
+  "data": { "user_id": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e" },
+  "msg": "Team member removed successfully"
 }
 ```
 
-## Unimplemented Features
+Both the removed user and the team receive a notification.
+
+## Leave a Team
+
+```
+POST /api/v1/teams/{team_id}/leave
+```
+
+Requires `team:read` (regular members and `viewer` roles can call it).
+
+- A non-member gets HTTP `404` / `3002` (`NOT_TEAM_MEMBER`).
+- The `owner` cannot leave: HTTP `400` / `5210` (`OWNER_CANNOT_LEAVE`). Transfer ownership first.
+
+**Response (200 OK):**
+
+```json
+{ "code": 0, "data": { "team_id": "8f14e45f-..." }, "msg": "You have left the team" }
+```
+
+## Transfer Ownership
+
+```
+POST /api/v1/teams/{team_id}/transfer-ownership?new_owner_id=<new owner UUID>
+```
 
 <Callout type="warn">
-  The following features are not yet implemented and are on the roadmap:
-  - **List team members**: There is no separate `GET /teams/{team_id}/members` endpoint. The full member list is included in the `GET /api/v1/teams/{team_id}` response (see [Get Team](#get-team)).
-  - **Team statistics**: There is no team statistics endpoint.
+  `new_owner_id` is a **query parameter**, not a body field. Sending it in a JSON body is ignored and returns `422` (missing required query parameter `new_owner_id`).
 </Callout>
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/teams/8f14e45f-ceea-467a-9d0f-1a2b3c4d5e6f/transfer-ownership?new_owner_id=b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Constraints:
+
+1. The caller needs the `team:manage` permission code, an `owner`/`admin` role, and additionally the `owner` role itself (superusers bypass only the `owner` role requirement).
+2. The user referenced by `new_owner_id` must **already be a member of this team**, otherwise HTTP `404` / `4005`.
+3. The new owner must hold the global `team:manage` permission, otherwise HTTP `403` / `3000`.
+4. Ownership cannot be transferred to the current owner, which returns HTTP `400` / `5208` (`CANNOT_PROMOTE_TO_OWNER`).
+
+On success the new owner's role becomes `owner`, the previous owner is demoted to `admin`, and `team.owner` is updated. Both users receive a notification. The response returns the updated team object.
+
+<Callout type="info">
+  Can a superuser make a member without any `team:manage` permission the owner? No — rule 3 also applies to the incoming owner, so even a superuser cannot bypass the new owner's permission requirement.
+</Callout>
+
+## Admin Panel: Create and Delete Teams
+
+### Create a team
+
+```
+POST /api/v1/admin/teams
+```
+
+Requires `admin:team:create`.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Yes | Team name, globally unique |
+| `description` | string | No | Description |
+| `avatar_url` | string | No | Avatar URL |
+
+The creator becomes the team's `owner` and an `owner` membership record is written, so a new team immediately has exactly one owner. A duplicate team name returns HTTP `400` / `5102`.
+
+### Delete a team
+
+```
+DELETE /api/v1/admin/teams/{team_id}
+```
+
+Requires `admin:team:delete`. A missing team returns `404` / `4004`; the default team (`is_default = true`) cannot be deleted and returns HTTP `400` / `5205` (`CANNOT_DELETE_DEFAULT_TEAM`).
+
+`data` in the response is the **deleted team object** (returned for audit echo), not `null`.
+
+<Callout type="error">
+  Deleting a team also removes its memberships and related authorizations. Resources inside the team — Agents, workflows, knowledge bases — are not transferred automatically, so migrate or archive them first.
+</Callout>
+
+## Team Model Authorization
+
+Which models a team may use is decided by team model authorization records, and read and write access differ:
+
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/{team_id}/models` | List authorized models (optional `model_type` filter) | Superuser or team member |
+| POST | `/api/v1/teams/{team_id}/models` | Authorize one model and set its quotas | **Superuser only** |
+| PUT | `/api/v1/teams/{team_id}/models/{model_id}` | Change quotas and enabled state | **Superuser only** |
+| DELETE | `/api/v1/teams/{team_id}/models/{model_id}` | Revoke one model authorization | **Superuser only** |
+| POST | `/api/v1/teams/{team_id}/models/batch` | Authorize several models at once | **Superuser only** |
+| DELETE | `/api/v1/teams/{team_id}/models/batch` | Revoke several authorizations at once | **Superuser only** |
+| GET | `/api/v1/teams/{team_id}/available-models` | List **authorized and enabled** models for callers to pick from | Superuser or team member |
+| GET | `/api/v1/teams/{team_id}/models/quota` | Read per-model quotas and usage | Superuser or team member |
+
+For non-superusers the three read endpoints require team membership but no specific permission code. Lists are returned by descending `priority`, so higher-priority authorizations come first.
+
+Field definitions, quota math, and batch request bodies are documented in the [Team Models API](./team-models).
 
 ## Error Codes
 
-| Code | Message | Description |
+| HTTP | Code | Scenario |
 | --- | --- | --- |
-| `4004` | Team not found | Team does not exist |
-| `3000` | Permission denied | Insufficient permissions |
-| `3002` | Not team member | User is not a team member |
-| `1001` | Validation failed | Invalid request data |
-| `5102` | Name already exists | Team name is taken |
-| `5103` | Already team member | User is already a member |
+| `400` | `1001` | Request validation failed (neither `user_id` nor `identifier` provided) |
+| `403` | `3000` | Missing permission code, a `viewer` attempting a write, or the target user lacking `team:manage` |
+| `403` | `3002` | Not a team member |
+| `403` | `3003` | Team `owner` or `admin` role required |
+| `403` | `3004` | Team `owner` role required (changing roles, transferring ownership) |
+| `404` | `3002` | Not a team member on `POST /teams/{team_id}/leave` |
+| `404` | `4001` | Target user not found |
+| `404` | `4004` | Team not found |
+| `404` | `4005` | Team membership not found (including a transfer target who is not a member) |
+| `400` | `5102` | Team name already exists |
+| `400` | `5103` | User is already a team member |
+| `400` | `5205` | The default team cannot be deleted |
+| `400` | `5206` | Cannot add a member directly as owner |
+| `400` | `5207` | Cannot change the owner's role |
+| `400` | `5208` | Cannot promote directly to owner (including transferring to the current owner) |
+| `400` | `5209` | Cannot remove the owner |
+| `400` | `5210` | The owner must transfer ownership before leaving |
 
-<Callout type="info">
-  No per-endpoint rate limits are implemented. There is no rate-limit middleware on these endpoints.
+## Not Available Today
+
+<Callout type="warn">
+  These are current-version boundaries; design clients around them:
+
+  - **No standalone member list endpoint**: `GET /teams/{team_id}/members` does not exist; members come only from the `GET /teams/{team_id}` response.
+  - **No team statistics endpoint**: per-team usage comes from the model quota endpoint or admin statistics.
+  - **No platform-side create/delete team**: only `/api/v1/admin/*` can do it.
+  - **`is_default` is read-only** and cannot be changed through the API.
 </Callout>
 
 ## Code Examples
@@ -442,105 +417,98 @@ curl -X DELETE "https://your-domain.com/api/v1/teams/team-123/members/user-999" 
 ### Python
 
 ```python
+import os
 import requests
 
-def list_my_teams(token):
-    """List teams the current user belongs to."""
-    url = "https://your-domain.com/api/v1/teams/my"
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
+BASE = "https://your-domain.com/api/v1"
+TOKEN = os.environ["USER_TOKEN"]
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
-    response = requests.get(url, headers=headers)
+
+def list_my_teams() -> list[dict]:
+    """List the teams you belong to, with your role in each."""
+    result = requests.get(f"{BASE}/teams/my", headers=HEADERS).json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
+
+
+def add_member(team_id: str, identifier: str, role: str = "member") -> dict:
+    """Add a member by exact email match."""
+    response = requests.post(
+        f"{BASE}/teams/{team_id}/members",
+        headers=HEADERS,
+        json={"identifier": identifier, "role": role},
+    )
     result = response.json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
 
-    if result['code'] == 0:
-        return result['data']
-    else:
-        raise Exception(f"Error: {result['msg']}")
 
-def add_team_member(token, team_id, user_id, role="member"):
-    """Add a member to a team."""
-    url = f"https://your-domain.com/api/v1/teams/{team_id}/members"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "user_id": user_id,
-        "role": role
-    }
-
-    response = requests.post(url, headers=headers, json=data)
+def transfer_ownership(team_id: str, new_owner_id: str) -> dict:
+    """Transfer ownership (new_owner_id is a query parameter)."""
+    response = requests.post(
+        f"{BASE}/teams/{team_id}/transfer-ownership",
+        headers=HEADERS,
+        params={"new_owner_id": new_owner_id},
+    )
     result = response.json()
+    if result["code"] != 0:
+        raise RuntimeError(f"{result['code']} {result['msg']}")
+    return result["data"]
 
-    if result['code'] == 0:
-        return result['data']
-    else:
-        raise Exception(f"Error: {result['msg']}")
 
 # Usage
-teams = list_my_teams("YOUR_TOKEN")
-for team in teams:
-    print(f"Team: {team['name']} (role: {team['role']})")
-
-member = add_team_member("YOUR_TOKEN", "team-123", "user-999", "member")
-print(f"Added member: {member['user_id']}")
+for team in list_my_teams():
+    print(f"{team['name']} — my role: {team['role']}")
 ```
 
 ### JavaScript
 
 ```javascript
+const BASE = 'https://your-domain.com/api/v1';
+
 async function listMyTeams(token) {
-  const response = await fetch(
-    'https://your-domain.com/api/v1/teams/my',
-    {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    }
-  );
-
+  const response = await fetch(`${BASE}/teams/my`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   const result = await response.json();
-
-  if (result.code === 0) {
-    return result.data;
-  } else {
-    throw new Error(result.msg);
-  }
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
 }
 
-async function addTeamMember(token, teamId, userId, role = 'member') {
-  const response = await fetch(
-    `https://your-domain.com/api/v1/teams/${teamId}/members`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        role: role,
-      }),
-    }
-  );
-
+async function addMember(token, teamId, identifier, role = 'member') {
+  const response = await fetch(`${BASE}/teams/${teamId}/members`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ identifier, role }),
+  });
   const result = await response.json();
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
+}
 
-  if (result.code === 0) {
-    return result.data;
-  } else {
-    throw new Error(result.msg);
-  }
+async function leaveTeam(token, teamId) {
+  const response = await fetch(`${BASE}/teams/${teamId}/leave`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const result = await response.json();
+  if (result.code !== 0) throw new Error(`${result.code} ${result.msg}`);
+  return result.data;
 }
 
 // Usage
-const teams = await listMyTeams('YOUR_TOKEN');
-teams.forEach(team => {
-  console.log(`Team: ${team.name} (role: ${team.role})`);
-});
-
-const member = await addTeamMember('YOUR_TOKEN', 'team-123', 'user-999', 'member');
-console.log('Added member:', member.user_id);
+const teams = await listMyTeams(process.env.USER_TOKEN);
+teams.forEach((team) => console.log(`${team.name} — my role: ${team.role}`));
 ```
+
+## Related Documentation
+
+- [Team Models API](./team-models) — authorization fields, quotas, and batch operations
+- [Users API](./users) — creating users and assigning roles as an administrator
+- [API Errors and Retries](./errors) — unified handling for `3002`-`3004` and `5206`-`5210`

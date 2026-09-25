@@ -1,19 +1,19 @@
 ---
-title: Agent Embed & Run View
-description: Share published agents via dedicated run pages or embed them into external websites
+title: Agent Run View and Web Embedding
+description: Open an Agent in the Chat / Run pages, or embed it into third-party sites with the official embed.js SDK
 icon: Share2
 ---
 
-Once an agent is configured and published, Clouisle provides two distinct delivery channels:
+Once an Agent is configured and published, Clouisle offers two delivery channels:
 
-1. **Independent Run Page (`/run/{agent_id}`)**: A distraction-free, full-screen conversational interface designed for team members and authenticated users.
-2. **Embeddable Chat Widget (`/embed/agent/{agent_id}/...`)**: A secure integration for embedding agents into SaaS apps, documentation portals, or corporate landing pages using a scoped API key (`clou_...`).
+1. **In-app run pages**: full conversational UIs for authenticated users. Agents use **Chat** (`/chat/{agent_id}`); workflows use **Run** (`/run/{workflow_id}?type=workflow`).
+2. **Web embedding**: embed a published Agent or workflow into an external website using a team API key (`clou_...`), in bubble, fullscreen, or mobile form.
 
 ---
 
-## 1. Independent Run Page (`/run/{agent_id}`)
+## 1. In-App Run Pages
 
-The Run view provides a clean, standalone interface tailored for dedicated task execution without the clutter of the studio sidebar or settings drawers:
+The run pages drop the Studio's editor sidebar and drawers and focus on the task at hand:
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -36,79 +36,161 @@ The Run view provides a clean, standalone interface tailored for dedicated task 
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Accessing the Run Page
-- From the **Apps** page (`/app/apps`), hover over any published agent card and click **Run**.
-- Or navigate directly to `https://<your-domain>/run/{agent_id}`.
+### Opening a run page
+
+1. Go to the **Apps** page (`/app/apps`).
+2. Hover an app card and open its **...** menu:
+   - For an **Agent**, select **Chat** to open `/chat/{agent_id}` in a new tab.
+   - For a **workflow**, select **Run** to open `/run/{workflow_id}?type=workflow` in a new tab.
+3. You can also navigate directly to `/run/{id}`: this unified run route serves an Agent by default and switches to a workflow with `?type=workflow`.
 
 ### Features
-- **Distraction-free Canvas**: Optimized for deep interaction, document analysis, and iterative multi-turn conversations.
-- **Dynamic Variable Prompting**: If the agent contains required variables (e.g. `client_id`, `locale`), the run page presents a clean input banner before starting.
-- **Full Capabilities**: Complete support for attachments, image lightbox, document previews, `ask_user` interaction forms, and multi-version message branching.
+
+- **Distraction-free canvas**: optimized for deep interaction, document analysis, and iterative multi-turn conversations.
+- **Dynamic variable prompting**: if the Agent defines required variables (e.g. `client_id`, `locale`), the run page shows a structured input banner before the session starts.
+- **Full capabilities**: attachments, image lightbox, document previews, `ask_user` forms, and multi-version message branching.
 
 ---
 
-## 2. Embeddable Chat Widget
+## 2. Web Embedding: Enable and Configure
 
-Clouisle allows you to embed published agents into third-party web pages via either a **Floating Chat Bubble** or an **Inline Iframe**.
+Embedding renders the same app/workflow run page inside an iframe, so the target **must be published first**.
 
-### Enabling Embedding
+### Enabling embedding
 
-1. Open your agent in the **Agent Studio** (`/app/apps/{agent_id}`).
-2. Ensure the agent is **Published**.
+1. Open your Agent in the **Agent Studio** (`/app/apps/{agent_id}`).
+2. Confirm the Agent is **Published** — when it is not, the drawer shows a yellow warning and saving stays disabled.
 3. Click the **Embed** button on the top toolbar to open the embed configuration drawer.
 4. Toggle **Enable Embedding** on.
-5. Select or generate a team API key (`clou_...`) with agent chat permissions.
+5. Paste a team API key (`clou_...`) into the snippet field; it is inserted into the generated code below.
 
-### Configuration Options
+### Drawer options
 
-| Option | Description | Example |
-|---|---|---|
-| **Allowed Domains** | Restrict widget loading to specific browser origins (`Origin` / `Referer` check) | `https://example.com, https://app.example.com` |
-| **Widget Mode** | Choose between a floating launcher bubble or an inline embed | `Floating Bubble` or `Inline Iframe` |
-| **Theme & Accent Color** | Customize the widget primary color to match your brand | `#2563eb` or auto light/dark matching |
-| **Chat Bubble Position** | Screen placement for the floating trigger button | `Bottom Right` or `Bottom Left` |
-| **Default Open** | Automatically expand the chat window upon page load | `true` / `false` |
+| Option | Description | Default |
+| --- | --- | --- |
+| **Enable embedding** | Allow this app to be embedded in external sites via iframe | Off |
+| **Allowed domains** | Restrict which origins may load the widget; empty allows every domain. Wildcard subdomains supported; separate multiple values with commas or newlines | Empty (allow all) |
+| **Show header** | Show the app icon and name at the top of the embed | On |
+| **Show history** | Show a history sidebar in the embed (stored in the browser) | On |
+| **Allow new** | Allow visitors to start a new chat/run | On |
+| **Theme** | Widget theme: `auto` / `light` / `dark` | `auto` |
+| **Primary color** | Brand accent color, `#RGB` or `#RRGGBB` | Empty (bubble uses `#6366f1`) |
+| **Bubble position** | Floating bubble placement: `bottom-right` / `bottom-left` | `bottom-right` |
+| **Bubble greeting** | Message shown beside the bubble before it is first opened | Empty |
+
+<Callout type="warn" title="Allowed domains">
+  Empty means every origin is allowed. Once populated, the backend validates the request's `Origin` header (falling back to `Referer`) and rejects other origins with `403 embed_domain_not_allowed`. `https://example.com`, `*.example.com` (matches subdomains), and values with a port are accepted; malformed values fail validation on save. Requests without either header are allowed (handy for local testing).
+</Callout>
+
+The configuration is stored on the Agent/workflow as `embed_config` (fields: `enabled`, `show_header`, `show_history`, `allow_new`, `allowed_domains`, `theme.mode`, `theme.primary_color`, `bubble.position`, `bubble.icon`, `bubble.greeting`). `bubble.icon` has no editor control today, so setting it has no visible effect.
 
 ---
 
-## 3. Integration Code Examples
+## 3. Integration Code
 
-### Option A: Floating Web Component (Script Tag)
+The three tabs at the bottom of the drawer (**Bubble / Fullscreen / Mobile**) decide which snippet is generated; all three target the same iframe page, `/embed/agent/{agent_id}` or `/embed/workflow/{workflow_id}`.
 
-Paste this snippet immediately before the closing `</body>` tag on your website:
+### Option A: Bubble mode (recommended)
+
+Bubble mode loads the official SDK `/embed.js` and calls `Clouisle.init(...)`:
 
 ```html
-<!-- Clouisle Agent Chat Widget -->
-<script
-  src="https://<your-domain>/embed/clouisle-chat.js"
-  data-agent-id="550e8400-e29b-41d4-a716-446655440000"
-  data-api-key="clou_a1b2c3d4e5f6..."
-  data-theme="auto"
-  data-position="bottom-right"
-  async
-></script>
+<script src="https://<your-domain>/embed.js"></script>
+<script>
+  Clouisle.init({
+    type: 'agent',
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    token: 'clou_a1b2c3d4e5f6...',
+    mode: 'bubble',
+    theme: 'auto',
+    primaryColor: '#2563eb',
+    position: 'bottom-right',
+    greeting: 'Hi! How can I help you?',
+  });
+</script>
 ```
 
-### Option B: Inline Iframe Embedding
+`Clouisle.init` options (`id` and `token` are required — the SDK logs an error and renders nothing if either is missing):
 
-To embed the agent conversation directly inside a container on your page:
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `type` | `'agent' \| 'workflow'` | `'agent'` | Target type; determines the iframe path |
+| `id` | `string` | — | Agent / workflow UUID, **required** |
+| `token` | `string` | — | Team API key (`clou_...`), **required** |
+| `mode` | `'bubble' \| 'fullscreen' \| 'mobile'` | `'bubble'` | Presentation mode |
+| `theme` | `'light' \| 'dark' \| 'auto'` | `'auto'` | Embed page theme; `auto` follows the system |
+| `primaryColor` | `string` | Empty | Bubble button color (bubble mode only); foreground is picked for contrast |
+| `position` | `'bottom-right' \| 'bottom-left'` | `'bottom-right'` | Screen edge for the bubble and chat window |
+| `greeting` | `string` | Empty | Tooltip beside the bubble; clicking it opens the chat |
+| `container` | `string` (CSS selector) | `body` | Fullscreen mode only; a missing container logs an error and aborts |
+
+The bubble instance exposes `Clouisle.open()`, `Clouisle.close()`, and `Clouisle.destroy()`. Calling `init` again first destroys the previous instance. The SDK also listens for the iframe's `clouisle:close` message to collapse the bubble.
+
+### Option B: Fullscreen / mobile mode (plain iframe)
+
+Fullscreen and mobile do not need JS — the drawer emits an `iframe` pointing at `/embed/...`:
 
 ```html
+<!-- Fullscreen: fills a container on the page -->
 <iframe
-  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&theme=light"
-  width="100%"
-  height="700px"
-  frameborder="0"
-  allow="microphone; camera; clipboard-write"
-  style="border-radius: 12px; border: 1px solid #e5e7eb;"
+  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&mode=fullscreen"
+  style="width: 100%; height: 100%; border: none;"
+  allow="clipboard-write"
 ></iframe>
 ```
 
+```html
+<!-- Mobile: covers the viewport -->
+<iframe
+  src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&mode=mobile"
+  style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; border: none; z-index: 9999;"
+  allow="clipboard-write"
+></iframe>
+```
+
+Fullscreen can also be initialized through the SDK with a container: `Clouisle.init({ type: 'agent', id: '...', token: '...', mode: 'fullscreen', container: '#chat' })`.
+
+### iframe query parameters
+
+The SDK and the drawer build URLs against `/embed/{type}/{id}` with these parameters:
+
+| Parameter | Description |
+| --- | --- |
+| `token` | Team API key; alternatively send an `Authorization: Bearer <key>` header |
+| `mode` | `fullscreen` (default when absent) or `bubble`; `mobile` and `fullscreen` both render edge-to-edge in the container |
+| `theme` | `light` / `dark`; absent or `auto` follows the system |
+| `color` | Primary color (the SDK includes it, but the embed page does not read it, so it does not affect the iframe's internal palette) |
+
+<Callout type="info">
+  Embed history is stored in the visitor's browser. With `show_history` off the embed hides the history sidebar; with `allow_new` off visitors cannot start a new conversation.
+</Callout>
+
 ---
 
-## 4. Security & Access Control
+## 4. Security and Access Control
 
-- **API Key Authentication**: Embedded widgets authenticate using a team API key (`clou_...`) passed in the `token` query parameter or `Authorization: Bearer <key>` header.
-- **Domain Verification**: When configured, `allowed_domains` restricts where browser clients can load the widget by verifying `Origin` and `Referer` headers.
-- **Rate Limiting**: Embedded chats inherit platform rate limits to protect backend LLM quotas and infrastructure.
-- **Isolated Scope**: Embedded sessions cannot access internal team models, settings, or administrative management endpoints.
+- **API keys only**: `/api/v1/embed/**` accepts only `clou_...` API keys (via the `token` query parameter or `Authorization: Bearer`), never user JWTs.
+- **Keys belong to a user**: every API key is bound to the user who created it (`APIKey.user`), and the embedded session runs as that user.
+- **`scopes` are not enforced**: the `scopes` field is stored and returned, but the authorization code never reads it, so it cannot narrow access.
+- **Narrow access via bindings**: an API key is bound to accessible objects through the `agents` / `workflows` many-to-many relations. A key with bindings can reach **only** those objects; a key with **no** bindings can reach everything (backward compatibility) — so always bind an embed key to its target Agent/workflow.
+- **Three server-side checks**: the target must match the key's binding (otherwise `403 api_key_no_agent_access`), must be published (otherwise `404 agent_not_found`), and must have embedding enabled (otherwise `403 embed_not_enabled`), on top of the domain check.
+- **Rate limiting**: the key's `rate_limit` (default `1000`/minute; `0` means unlimited) is **not currently enforced** in the request path; embedded chats are bounded by provider rate limits and team model quotas.
+- **Isolated scope**: embedded sessions cannot reach team model management, site settings, or admin-only endpoints.
+
+## API Endpoints
+
+The embed endpoints live under `/api/v1/embed` and accept API-key authentication only:
+
+```http
+# Agent
+GET  /api/v1/embed/agents/{agent_id}/info
+POST /api/v1/embed/agents/{agent_id}/chat/stream
+POST /api/v1/embed/agents/{agent_id}/chat/runs
+GET  /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream
+GET  /api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages
+POST /api/v1/embed/agents/{agent_id}/upload/file
+
+# Workflow
+GET  /api/v1/embed/workflows/{workflow_id}/info
+POST /api/v1/embed/workflows/{workflow_id}/run
+```

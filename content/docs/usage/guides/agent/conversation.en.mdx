@@ -185,11 +185,15 @@ Navigate branches using the arrow buttons.
 
 ## Manage Conversations
 
-The conversation drawer lets you select, rename, and delete your own conversations. Titles are up to `200` characters.
+The conversation sidebar lets you create, select, rename, and delete **your own** conversations. Titles are up to `200` characters and are the only editable conversation setting.
+
+### Creating
+
+Click the **New chat (SquarePen)** button at the top of the sidebar to start a new conversation; the conversation itself is created when you send the first message.
 
 ### Renaming
 
-Open a conversation's **...** menu in the agent chat and choose rename when the rename action is available. The title is the only editable conversation setting.
+Open a conversation's **...** menu in the sidebar and choose **Rename**.
 
 ### Deleting
 
@@ -197,11 +201,20 @@ Open the conversation's **...** menu, choose **Delete**, and confirm. Deletion r
 
 ### Searching
 
-Enter a term in the agent chat page's conversation controls to filter that agent's recent conversations. Search matches conversation title or ID; message content is not searched.
+<Callout type="warn">
+  The agent chat page (`/chat/{agent_id}`) has **no** conversation search box — the sidebar only offers new, select, rename, and delete. To find a conversation by keyword, use the **Logs** page below or the admin **Activity Log** page.
+</Callout>
+
+Both conversation searches match a keyword against the **conversation title or ID** (`title` / `id` substring match); they never search message bodies:
+
+| Location | Path | Scope |
+| --- | --- | --- |
+| Agent **Logs** page | `/app/apps/{agent_id}/logs` | **Your own** conversations for that agent; also filter by creation time and sort by updated time / creation time / message count. Requires `conversation:read` |
+| Admin **Activity Log** page | `/activities` (**Conversations** tab) | **Every user's** conversations on the platform, filterable by team, agent, and user. Requires `admin:conversation:read` (the route guard also requires `workflow:read`) |
 
 ### Logs Page
 
-The app's **Logs** page shows conversations by time and search term, and displays variables, model, Token, response time, reasoning, and knowledge sources.
+The agent **Logs** page (Agent sidebar > **Logs**) lists conversations by time and search term; selecting one shows variables, model, Token usage, response time, reasoning, and knowledge sources.
 
 <Callout type="warn">
   The current implementation has no archiving, multi-user collaboration comments, or PDF export flow. Do not treat deletion as archiving; deletion cannot be undone.

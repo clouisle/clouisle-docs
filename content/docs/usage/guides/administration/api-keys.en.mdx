@@ -1,77 +1,90 @@
 ---
 title: API Keys
-description: Create, rotate, and delete API keys; configure scopes, rate limits, and agent bindings
+description: Create, bind, and revoke API keys and learn what scopes and rate limits actually enforce
 icon: KeyRound
 ---
 
-API keys allow programmatic access to the Clouisle API without a user login session. Each key authenticates as its owner user, and the owner's role permissions apply to all requests.
+API keys call the Clouisle API from contexts without a user session. Every key authenticates as its **owning user**, so the owner's role permissions and team memberships apply to every request; the key can additionally narrow access to specific Agents or workflows.
+
+<Callout type="info">
+  Prerequisites: your role needs `apikey:read` / `apikey:create` / `apikey:update` / `apikey:delete` (Super Admin has all of them by default). A key can only be bound to Agents and workflows you can already access — otherwise creation/update is rejected.
+</Callout>
 
 ## Accessing API Keys
 
-1. Click your **profile icon** in the top-right corner
-2. Select **"API Keys"** from the user menu
-3. Or navigate directly to `/app/api-keys`
+1. Click your **profile icon** in the top-right corner.
+2. Select **API Keys** in the user menu.
+3. Or navigate directly to `/app/api-keys`.
 
-The list shows each key's name, `key_prefix` (first 12 characters), status (active / inactive / expired), expiration date, last-used time, and its agent/workflow bindings. Admins can filter by status, search by name or prefix, and see all keys; regular users only see their own keys.
+Each row shows the name, a status badge (**Active** / **Inactive** / **Expired**), the `key_prefix` (first 12 characters), rate limit, expiration, last-used time, and creation time. The page only offers a **search box**, which filters client-side by name or prefix (the backend also supports filtering by status and by user, but this page exposes no controls for them).
+
+Visibility is decided by the backend: **only Super Admins** see and manage everyone's keys. Every other user — even with `apikey:read` — sees only their own keys, and editing or deleting someone else's key returns a `3000` permission error.
 
 ## Creating a Key
 
 <Steps>
   <Step>### Open the creation form</Step>
-  Go to **API Keys** (`/app/api-keys`) and click the **"+ Create Key"** button.
+  Go to **API Keys** (`/app/api-keys`) and click **Create Key**.
   <Step>### Fill in the configuration</Step>
-  | Field | Description |
-  | --- | --- |
-  | **Name** | Descriptive name (required, max 100 chars) |
-  | **Expiration** | Optional expiry date |
-  | **Rate Limit** | Optional per-minute request limit (0 = unlimited; default `1000`) |
-  | **Agents** | Optional list of agents this key can access |
-  | **Workflows** | Optional list of workflows this key can access |
+
+  | Field | Required | Description |
+  | --- | --- | --- |
+  | **Name** | Yes | Descriptive name, `1`–`100` characters |
+  | **Rate Limit** | No | Requests per minute; `0` means unlimited. The form **starts at `0`** — see [Rate Limits](#rate-limits) |
+  | **Expiration** | No | Date picker; leave empty for a key that never expires |
+  | **Allowed Agents** | No | Checkbox list that loads **published Agents only**, up to `100`; empty = all Agents allowed |
+  | **Allowed Workflows** | No | Checkbox list that loads **published workflows only**, up to `100`; empty = all workflows allowed |
   <Step>### Save and copy the key</Step>
-  Click **"Create Key"** and **copy the key immediately** (shown only once; the stored hash cannot be reversed).
+  Click **Create** (**Save** when editing). The **API Key Created** dialog then shows the full key — the only time it is ever displayed. Use the copy button and store it in a password manager or environment variable.
 </Steps>
 
 <Callout type="error">
-**Critical**: The full API key is only shown once at creation. If you lose it, you must create a new key.
+**The full key is shown exactly once.** Lists and detail endpoints return only `key_prefix` (the first 12 characters) and the stored value is a bcrypt hash, so it cannot be recovered. A lost key can only be replaced by a new one.
 </Callout>
 
-**Server defaults**: If not specified, `scopes` defaults to `["chat"]` and `rate_limit` to `1000`.
+`scopes` is **not settable in the UI** (the form never submits it), so keys created from the interface always carry the server default `["chat"]`; see [Scopes](#scopes).
 
-## Key Format
+## Key Format and Storage
 
 ```
 clou_<64 hexadecimal characters>
 ```
 
-The key is generated as 64 random hex characters (32 bytes) prefixed with `clou_`. Only the first 12 characters (`key_prefix`) are stored in plaintext and shown in listings; the full key is hashed.
+The server generates 32 random bytes with `secrets.token_hex(32)` (64 hex characters) and prefixes them with `clou_`. Only two things are persisted:
+
+| Field | Content | Length |
+| --- | --- | --- |
+| `key_prefix` | First 12 characters of the full key (plaintext, used for lookup and display) | 12 |
+| `key_hash` | bcrypt hash of the full key | ≤ 255 |
+
+Authentication takes the first 12 characters as an index lookup and then verifies the hash against each candidate, so a prefix collision costs a few extra hash computations rather than causing wrong results.
 
 ## Editing a Key
 
-Via `PUT /api/v1/api-keys/{id}`, you can edit:
+`PUT /api/v1/api-keys/{id}` can change the **name**, **scopes**, **rate limit**, **expiration**, **active state** (`is_active`, the switch that only appears while editing), and the **Agent / workflow bindings**. Omitting a binding field (`null`) leaves the current binding untouched; sending an empty array `[]` clears it and opens the key back up to "everything accessible".
 
-- Name
-- Scopes (replaced freely; there is no add-only rule)
-- Rate limit
-- Expiration date
-- Active state (`is_active`)
-- Agent / workflow bindings
+Editing and deleting both require the owner; **the key itself cannot be edited** — there is no rotation endpoint. Rotate by creating a new key, migrating callers, then deactivating the old one.
 
-**Cannot edit**: The key itself (there is no rotation endpoint).
+<Callout type="warn">
+  The date picker submits the expiration as **`00:00:00Z` on the chosen day**. Choosing `2026-01-01` means the key stops working at midnight UTC on 2026-01-01, not at the end of that day.
+</Callout>
 
 ## Deactivating / Reactivating a Key
 
-Deactivation (revoke) disables the key immediately without deleting it:
+Deactivation makes the key fail authentication immediately while keeping the record and its audit history:
 
-- `POST /api/v1/api-keys/{id}/deactivate`
-- `POST /api/v1/api-keys/{id}/activate` (re-enable)
+- Deactivate: `POST /api/v1/api-keys/{id}/deactivate`
+- Reactivate: `POST /api/v1/api-keys/{id}/activate`
+
+Repeating an operation errors out: deactivating an already inactive key returns `api_key_already_inactive`, activating an active key returns `api_key_already_active` (both `1002` bad-request errors).
 
 ## Deleting a Key
 
-`DELETE /api/v1/api-keys/{id}` permanently removes the key. There is no rule requiring the key to be revoked first.
+`DELETE /api/v1/api-keys/{id}` permanently removes the record. You do not need to deactivate first, and deletion cannot be undone. An audit log entry is written before the delete, so the actor, timestamp, and deleted `key_prefix` remain discoverable.
 
 ## Using API Keys
 
-Include the API key in the `Authorization` header:
+Put the full key in the `Authorization` header — the same format as JWT:
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/agents" \
@@ -89,114 +102,117 @@ response = requests.get(
 )
 ```
 
-**Access rules**:
+### Authentication and Preconditions
 
-- The key must be active and unexpired
-- If the key is bound to agents, only those agents are accessible; with no agent bindings, all agents are accessible
-- If the key is bound to workflows, only those workflows can be run; with no workflow bindings, all workflows are accessible
-- The owner user's role permissions apply to all requests
+The backend routes by prefix: values starting with `clou_` take the API key path, everything else is parsed as a JWT. A key must satisfy all of the following:
+
+1. **The prefix must resolve to a record** whose hash verifies, otherwise `2001` (`invalid_api_key`).
+2. **The record must be active** — the lookup filters on `is_active=True`, so a deactivated key is indistinguishable from a missing one.
+3. **It must not be expired** — a null `expires_at` means "never"; an expired key returns `2002` (`api_key_expired`).
+4. **The owner must still be valid** — a deactivated owner or one pending approval returns `2004` (`inactive_user` / `pending_approval_user`).
+5. **The binding must allow this call** — a key bound to Agents may only call those Agents; a key bound to workflows may only trigger those workflows. Empty bindings mean no restriction. A blocked call returns `3000` with `api_key_no_agent_access` / `api_key_no_workflow_access`.
+
+Every successful authentication refreshes `last_used_at`, which is what you check to tell whether a key is still being used.
+
+<Callout type="info">
+  Bindings are enforced at the **call entry points**: Agent conversations (the `/api/v1/chat` routes), iframe embedding (the Agent and workflow run routes under `/api/v1/embed`), and the workflow webhook trigger (`POST /api/v1/workflows/webhook/{webhook_token}`, which accepts only `clou_` keys and requires a published workflow with the webhook trigger enabled).
+</Callout>
 
 ## Scopes
 
-Every API key carries a `scopes` field — a JSON array of strings (for example `["chat"]`). Scopes are **stored metadata only**: the backend records the value you provide, but authentication does **not** read or enforce scopes. There is no fixed scope enumeration, no validation of scope names, and no per-request scope check.
+`scopes` is a JSON array of strings that is **stored but never evaluated**: the backend records and echoes whatever you send, and the authentication path never reads it.
 
-**Default value**: If you do not provide `scopes`, the key is created with the default:
-
-```json
-["chat"]
-```
-
-**Providing scopes**: When creating or updating a key, `scopes` accepts any JSON array of strings. Examples that will be stored as given:
-
-```json
-["agent:read", "agent:chat", "kb:read"]
-```
-
-```json
-["read", "write"]
-```
-
-```json
-[]
-```
+- There is no field for it in the UI, so keys created there are fixed at the default `["chat"]`.
+- Through the API, `scopes` accepts any array of strings (e.g. `["agent:read","kb:read"]`) — there is **no enumeration check and no wildcard semantics**, and no dedicated scope-management endpoint.
+- Updates replace the whole array (`PUT` semantics); there is no "add-only" rule.
+- The data model's comment says an empty array means full access, but because nothing consumes the field that statement currently has **no observable effect**.
 
 <Callout type="warn">
-**Note**: These values are stored and returned by the API but are not enforced by the backend. Do not rely on scopes for access control.
+  Do not use `scopes` for access control. What actually decides authorization is the owning user's role permissions, team memberships, and the key's Agent / workflow bindings.
 </Callout>
-
-**Update semantics**: Scopes can be replaced freely when updating a key (`PUT /api/v1/api-keys/{id}`) — there is no "only add, never remove" rule, and no separate scope-management endpoint.
-
-**What does NOT exist**:
-
-- No `model:read` / `model:use` or `tool:read` / `tool:use` scopes
-- No wildcard `*` scope handling
-- No scope validation, enumeration, or documentation of accepted scope names
-- No scope-required error payload with `required_scope` / `provided_scopes`
 
 ## Rate Limits
 
-`rate_limit` is stored per key (requests per minute; 0 = unlimited; default `1000`) and can be set by any user with `apikey:create`. It is **not enforced** by the backend, and no `X-RateLimit-*` response headers are emitted.
+`rate_limit` is a per-key "requests per minute" value; `0` means unlimited and the model and request schema default to `1000`.
+
+**Nothing in this version reads or enforces it**: no middleware, dependency, or authentication step performs rate limiting, and responses carry no `X-RateLimit-*` headers. The `1000/min` or **Unlimited** shown in the interface is purely informational.
+
+There is also an easy-to-miss default mismatch: the request schema defaults to `1000`, but the **creation form starts at `0`** (unlimited). Since the form always submits the field, keys created from the UI are effectively unlimited rather than `1000`.
+
+<Callout type="warn">
+  For real call constraints, use bindings (narrow the callable Agents / workflows), expiration dates, and role permissions — or enforce limits at your own gateway. The [API Keys reference](/en/reference/api-keys) documents the field defaults, but that does not mean they are enforced.
+</Callout>
+
+## Expiration Reminders
+
+The backend runs `tasks.check_api_key_expiration` daily at 09:00 (on the `default` queue) and sends in-app notifications to key owners:
+
+- **Expiring soon** (`apikey.expiring`): active, not-yet-expired keys with fewer than `7` days left — sent only when the remaining days are exactly **7, 3, or 1**, so it does not repeat daily.
+- **Expired** (`apikey.expired`): active keys that expired **within the last 24 hours**.
+
+The notification does not change key state — an expired key still carries the "active" flag and is only stopped by `expires_at` during authentication. Deactivating a key before it expires stops these notifications.
 
 ## Stats
 
-`GET /api/v1/api-keys/stats` returns key statistics (total, active, inactive, expired) for the current user (or all users for admins).
+`GET /api/v1/api-keys/stats` returns key statistics for the current user (`total`, `active`, `inactive`, `expired`); a Super Admin gets site-wide numbers. The definitions match the list filters: `active` requires the key to be enabled and unexpired, while `expired` only looks at whether `expires_at` is in the past (regardless of the active flag). The `/app/api-keys` page does not currently render these numbers.
 
 ## Error Codes
 
-When a request fails due to authentication or authorization, the response body uses these codes:
-
-| Code | Meaning |
-| --- | --- |
-| `2001` | Invalid token / invalid API key |
-| `2002` | Token expired (including expired API key) |
-| `3000` | Permission denied |
-
-<Callout type="note">
-A `3000` response means the authenticated user (or the key's agent/workflow association) lacks permission — it does not reflect the `scopes` field.
-</Callout>
+| Code | Meaning | Typical msg_key |
+| --- | --- | --- |
+| `2001` | Invalid key (hash mismatch) | `invalid_api_key` |
+| `2002` | Key expired | `api_key_expired` |
+| `2004` | Owner deactivated / pending approval | `inactive_user` / `pending_approval_user` |
+| `3000` | Insufficient permission (owner lacks rights, or binding exceeded) | `permission_denied` / `api_key_no_agent_access` / `api_key_no_workflow_access` |
+| `4000` | Key record not found | `api_key_not_found` |
+| `1002` | Duplicate activate/deactivate | `api_key_already_active` / `api_key_already_inactive` |
 
 ## Best Practices
 
-**✅ Do**:
+**✅ Do**
 
-- Use descriptive names
-- Set expiration dates
-- Bind keys to the specific agents/workflows they need
-- Store keys in environment variables or a secret manager
-- Deactivate unused keys
+- Create one key per purpose (production, CI, each partner) so it can be revoked alone.
+- Set an expiration and replace long-lived keys with time-boxed ones.
+- Bind keys to the Agents / workflows they actually call.
+- Keep them in a secret manager or environment variables, never in a repository.
+- Periodically review `last_used_at` and clean up keys that are no longer used.
 
-**❌ Don't**:
+**❌ Don't**
 
-- Commit keys to version control
-- Share keys publicly
-- Keep unused keys active
+- Use one person's key to carry several people's traffic (authorization follows that person).
+- Ship keys in frontend code, browser extensions, or public docs.
+- Treat `scopes` or `rate_limit` as a security boundary.
 
 ## Troubleshooting
 
-### API Key Not Working
+### Key Does Not Work (401)
 
-**Problem**: Requests fail with authentication error
+1. Confirm the key is **Active**: deactivated keys are filtered out during authentication and behave exactly like a nonexistent key, returning `2001`.
+2. Check whether `expires_at` has passed (`2002`).
+3. Check the header format: `Bearer clou_...` with no line breaks or extra spaces.
+4. Compare the `key_prefix` (first 12 characters) in the list against the key you are using to rule out a wrong-environment key.
+5. If the full key is lost, create a new one — it cannot be recovered.
 
-**Solutions**:
+### Key Is Valid but the Request Is Denied (403)
 
-1. Verify the key is active (`is_active`) and not expired
-2. Check the `Authorization` header format: `Bearer clou_...`
-3. Check for typos — only the first 12 characters are shown after creation
-4. Verify the key is allowed to access the target agent/workflow
-5. Create a new key if the full key was lost
+1. The key may be bound to specific Agents / workflows: confirm the target is in the binding list, or clear the bindings and retry.
+2. The owner's role permissions may be insufficient: verify the same operation works while signed in as the owner.
+3. The owner account may be deactivated or pending approval (this shows up as `2004`).
 
-### Key Compromised
+### Other Users' Keys Are Not Visible
 
-**Problem**: Suspect key has been exposed
+Only Super Admins see every key. That is decided by the backend (`is_superuser`) and is unrelated to the `apikey:read` permission.
 
-**Solutions**:
+### Suspected Key Leak
 
-1. **Deactivate the key immediately**
-2. Create a new key and update your applications
-3. Review audit logs
+1. **Deactivate** the key from the list first (faster than deleting and it keeps the audit trail).
+2. Create a replacement, update the callers, and delete the old key once no traffic remains.
+3. Cross-check creation, updates, and deletions in the [audit log](./audit-logs.mdx).
 
 ## Related Documentation
 
-- [API Reference](/en/reference/api-endpoints) - API endpoint reference
-- [Agent Management](../agent/create-agent) - Manage agents
-- [Workflows](../workflow/orchestrate) - Manage workflows
+- [API Keys API](/en/api/api-keys) — endpoints, request bodies, and response fields
+- [API Keys reference](/en/reference/api-keys) — field and default quick reference
+- [Agent Management](../agent/create-agent.mdx) — an Agent's publish state determines whether it can be bound
+- [Workflow Orchestration](../workflow/orchestrate.mdx) — publishing workflows and the webhook trigger
+- [Audit Logs](./audit-logs.mdx) — audit records for key operations

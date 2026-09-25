@@ -4,7 +4,11 @@ description: Look up resource permission codes, team roles, and scope check rule
 icon: ShieldCheck
 ---
 
-Permissions are checked uniformly by the backend. Hidden frontend menus are a UX layer only; the API still returns permission errors.
+Permissions are enforced by the backend. Hiding a menu entry in the frontend is only a UX convenience; the API still returns permission errors.
+
+<Callout type="info" title="Four-layer permission model">
+Clouisle authorization is a four-layer composite: **identity bypass** (`is_superuser`) → **global capability** (`User → Role → Permission`) → **team threshold** (`TeamMember.role`) → **object layer** (resource `visibility` and creator rules). A request fails if any layer rejects it.
+</Callout>
 
 ## Permission Catalog
 
@@ -12,33 +16,33 @@ Permissions are checked uniformly by the backend. Hidden frontend menus are a UX
 
 | Permission | Description |
 | --- | --- |
-| `*` | Wildcard permission code; the runtime bypass is actually `is_superuser` |
-| `admin:dashboard:access` | Dashboard access; the key permission distinguishing "admin" from "regular user" |
+| `*` | Wildcard permission code that satisfies any permission-code check; it is itself just an ordinary code held by the Super Admin role, while the runtime "unconditional bypass" comes from `is_superuser` |
+| `admin:dashboard:access` | Dashboard access, the key permission distinguishing "admin" from "regular user" |
 
-### Administration Permissions (require `admin:dashboard:access`, granted by global roles)
+### Dashboard Management Permissions (require `admin:dashboard:access`, granted by global roles)
 
 | Permission | Description |
 | --- | --- |
 | `admin:user:read/create/update/delete` | User management |
 | `admin:role:read/create/update/delete` | Role management |
-| `admin:permission:read` | View permission list |
+| `admin:permission:read/create/update/delete` | View and maintain permissions |
 | `admin:model:read/create/update/delete` | Model management |
 | `admin:memory:read` | View memory records |
+| `admin:memory:update/delete` | Edit or delete dashboard memory records (the Admin preset holds only `admin:memory:read`) |
 | `admin:conversation:read/delete` | Dashboard conversation management |
 | `admin:notification:create/delete` | Dashboard notification management |
 | `admin:team:read/create/update/delete` | System-wide team management |
-| `admin:app:read/create/update/delete/publish/duplicate` | Cross-team Agent and workflow (App) management |
-| `admin:capability:read/create/update/delete/execute` | Cross-team tool and Skill (Capability) management |
-| `admin:knowledge-base:read/test/create/update/delete` | Knowledge base management from the admin |
+| `admin:app:read/create/update/delete/publish/duplicate` | Agent and workflow (App) management across teams |
+| `admin:capability:read/create/update/delete/execute` | Tool and skill (Capability) management across teams |
+| `admin:knowledge-base:read/test/create/update/delete` | Knowledge base management from admin |
 | `admin:settings:read` | View site settings |
 | `admin:settings:update` | Modify site settings |
 | `admin:sso:read` | View SSO providers and configuration |
 | `admin:sso:update` | Manage SSO providers and user SSO connections |
-| `admin:memory:update/delete` | Edit or delete dashboard memory records |
 | `audit:read` | View audit logs |
-| `audit:export` | Export audit logs |
+| `audit:export` | Export audit logs (archiving audit logs also uses this permission, independent of `admin:settings:update`) |
 
-### Resource Permissions (subject to team data isolation; grantable via team/resource scoped roles)
+### Resource Permissions (subject to team data isolation, granted by global roles)
 
 | Permission | Description |
 | --- | --- |
@@ -54,31 +58,42 @@ Permissions are checked uniformly by the backend. Hidden frontend menus are a UX
 
 ## Built-in Role Matrix
 
-The backend initializes 5 global built-in roles at startup with the following default permissions:
+The backend idempotently initializes 5 global built-in roles at startup, with the following default permissions:
 
-| Role Name | Role Type | Core Permission Characteristics | Typical Persona |
+| Role | Type | Key Permissions | Typical Audience |
 | --- | --- | --- | --- |
-| **Super Admin** | Global built-in | Holds wildcard permission code `*`; completely bypasses permission checks and can perform system configuration, role management, and audit exports | Operations lead, system owner |
-| **Admin** | Global built-in | Includes `admin:dashboard:access` and all administrative and operational permissions for resources, but excludes create/update/delete of system roles/permissions themselves and modification of global site settings | Workspace administrator, technical lead |
-| **Team Admin** | Global built-in | Team-level administrator role; has all Member permissions plus updating and managing the team itself (`team:update`, `team:manage`) | Team lead, project lead |
-| **Member** | Global built-in | No `admin:dashboard:access`; has full collaborative create/edit/run permissions for Agents, workflows, knowledge bases, tools, and Skills within the team | Developer, workflow builder |
-| **Viewer** | Global built-in | Read-only role; can view and chat/run published Agents and workflows within the team, and read/execute tools and Skills | Business auditor, observer |
+| **Super Admin** | Global built-in | Holds the wildcard code `*` and bypasses permission and team-membership checks via `is_superuser`, so it can perform system configuration, role management, audit export, and anything else | Operations lead, system owner |
+| **Admin** | Global built-in | Includes `admin:dashboard:access` and almost all management permissions; **excludes** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:sso:update`, and `admin:memory:update/delete` | Workspace administrator, tech lead |
+| **Team Admin** | Global built-in | All Member permissions plus `team:update` and `team:manage`; granted to team `owner`/`admin` members by a startup migration | Team lead, project lead |
+| **Member** | Global built-in | No `admin:dashboard:access`; full collaboration permissions to create/edit/run Agents, workflows, knowledge bases, tools, and skills within a team | Developer, solution builder |
+| **Viewer** | Global built-in | Read-only role: view/chat/run published Agents and workflows and read/execute tools and skills within a team (no `apikey:*`) | Auditor, observer |
 
-### Team Membership Role Mapping
+## Team Member Roles and Team Scope
 
-Team member roles (`owner`, `admin`, `member`, `viewer`) use a scope-mapping mechanism:
-- `owner` and `admin` map to the `Team Admin` or `Admin` permission set at team scope
-- `member` maps to the `Member` role at team scope
-- `viewer` maps to the `Viewer` role at team scope
-- Team-level roles do not implicitly grant global dashboard access (`admin:dashboard:access`)
+Team member roles (`owner`, `admin`, `member`, `viewer`) are only **organizational level labels** inside a team and do not by themselves constitute role authorization. The authorization chain is entirely global-permission based:
+
+1. `PermissionChecker` checks whether the user's global roles contain the target permission code (`*` counts as everything; `is_superuser` bypasses outright).
+2. When a resource carries a `team_id`, `TeamMember` membership is checked; management actions require `TeamMember.role in (owner, admin)`, and a team `viewer` is limited to the read/use allowlist.
+
+<Callout type="warn" title="Team-scoped RBAC is retired">
+The historical design's `ScopedRoleAssignment` (team-scoped roles) and `check_scoped_permission` are **retired**: the `ScopedRoleAssignment` model is still defined and exported in code, but nothing creates or reads it. The startup migration `migrate_team_admin_roles()` explicitly grants the global **Team Admin** role to members whose `TeamMember.role in (owner, admin)` and deletes leftover team-scoped assignments. Team management capability therefore comes from the global `Team Admin` role, not from a team member scope.
+</Callout>
+
+Team management boundaries (`team_access.py`):
+
+- `TEAM_MANAGEMENT_PERMISSIONS` = `team:update`, `team:manage`, `team:delete`, `tool:delete`: these actions require both the global permission code and an `owner`/`admin` role in the target team.
+- `VIEWER_ALLOWED_PERMISSIONS`: a team `viewer` may only perform `team:read`, `agent:read`/`agent:chat`, `workflow:read`/`workflow:run`/`workflow:execute`, `kb:read`/`kb:test`, `tool:read`/`tool:execute`, `skill:read`/`skill:execute`, and `conversation:read`; all other writes are denied.
+- A team `viewer` is not the same as the global **Viewer** role: team `viewer` only means the lowest management level inside that team and does not automatically grant the global `Viewer` permission codes.
+- Adding a member, changing a member role, removing a member, leaving a team, and transferring ownership only maintain `TeamMember.role`; they never grant or revoke any global role. `owner` is never assigned automatically as a default team role.
+
 ## Sidebar Menu Mapping
 
-| Menu item | Required permission | Super Admin | Admin | Member | Viewer |
+| Menu Item | Required Permission | Super Admin | Admin | Member | Viewer |
 | --- | --- | :-: | :-: | :-: | :-: |
 | Dashboard | `admin:dashboard:access` | ✓ | ✓ | | |
-| Teams | `team:read` | ✓ | ✓ | ✓ | ✓ |
+| Teams | `admin:team:read` | ✓ | ✓ | | |
 | Knowledge Bases | `admin:knowledge-base:read` | ✓ | ✓ | | |
-| Activities | `conversation:read` | ✓ | ✓ | ✓ | ✓ |
+| Activities | `admin:conversation:read` + `workflow:read` (both required) | ✓ | ✓ | | |
 | Users | `admin:user:read` | ✓ | ✓ | | |
 | Roles | `admin:role:read` | ✓ | ✓ | | |
 | Permissions | `admin:permission:read` | ✓ | ✓ | | |
@@ -92,17 +107,27 @@ Team member roles (`owner`, `admin`, `member`, `viewer`) use a scope-mapping mec
 | Audit Logs | `audit:read` | ✓ | ✓ | | |
 | Site Settings | `admin:settings:read` | ✓ | ✓ | | |
 
-The "Management" menu group (Users, Roles, Permissions, Models, Audit Logs, etc.) is visible only when the user has `admin:dashboard:access`.
+The sidebar renders five groups: **General** (Dashboard, Teams, Knowledge Bases, Activities), **System** (Users, Roles, Permissions), **Resources** (Models, Apps, Capabilities, API Keys, Memories), **Monitoring** (Observability, Notifications, Audit Logs), and **Settings** (Site Settings, Help Center).
+
+- **System**, **Resources**, and **Monitoring** are gated as a whole on `admin:dashboard:access`: without it the entire group is hidden.
+- **General** and **Settings** are not hidden as a group by `admin:dashboard:access`, but each item still requires its own permission (for example, a user with only `admin:team:read` sees Teams and Activities but not Dashboard). The Help Center external link requires no permission.
+- Route permission mapping lives in `frontend/lib/route-permissions.ts`: `/apps` and `/capabilities` use prefix matching; there is no `/tools` route (tool/skill management lives under `/capabilities`); `/site-settings/sso` uses `admin:sso:read`; the Storage page's "archive audit logs" action uses `audit:export` on its own.
 
 ## Check Order
 
-Super administrators pass directly. Administration permissions use global roles; regular resource permissions additionally check the team/resource scope role. Requests fail when the resource does not belong to the current team, the user is not a member, the user status is invalid, or the API Key does not list the target resource.
+A superuser (`is_superuser`) passes `PermissionChecker` outright without checking role permissions and typically also skips team-membership checks. An ordinary user goes through, in order:
 
-## Role Limits
+1. **Global permission**: whether `User → Role → Permission` contains the target permission code (`*` counts as everything).
+2. **Team threshold**: when the resource belongs to a team, the user must be a member; management actions additionally require `owner`/`admin`, and a team `viewer` is bound by the read/use allowlist.
+3. **Object visibility**: `private` resources must additionally pass the creator rule.
 
-System roles and system permissions cannot be deleted; the default team, owners, and super administrators have additional protection. Operations such as transferring ownership, removing an owner, or modifying system permissions are explicitly rejected.
+A request fails when the resource does not belong to the current team, the user is not a member, the user is inactive, or the API key does not list the target resource.
+
+## Role Restrictions
+
+System roles (`is_system_role`) and system permissions (`is_system`) cannot be deleted; the default team, owners, and superusers have additional protections. Transferring ownership, removing an owner, and modifying system permissions are explicitly rejected (error codes `5200`–`5214`).
 
 <figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/permission-guarded-navigation.png" alt="Permission-filtered admin navigation" />
-  <figcaption>Permission-filtered admin navigation</figcaption>
+  <img src="https://rustfs-endpoint.yhnotes.com/content/permission-guarded-navigation.png" alt="Permission-guarded admin navigation" />
+  <figcaption>Permission-guarded admin navigation</figcaption>
 </figure>

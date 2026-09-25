@@ -27,6 +27,9 @@ The Agent must be published. The API Key needs the matching permission, and if b
 | GET | `/api/v1/agents/{agent_id}/public` | Get public Agent basic info, authentication optional |
 | POST | `/api/v1/agents/{agent_id}/chat` | Non-streaming chat |
 | POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE streaming chat |
+| POST | `/api/v1/agents/{agent_id}/chat/runs` | Queue a durable run, returns `202 Accepted` immediately |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` | Subscribe to a run's event stream (resumable) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | Cooperatively stop a run |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/regenerate` | Regenerate |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | Edit a user message and create a branch |
 | GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | Query message versions |
@@ -197,16 +200,88 @@ Fetch protected generated-image and generated-video URLs with the active JWT or 
 
 ## Durable Runs and Control
 
-Chat execution is backed by a durable `AgentRun` so a browser disconnect never stops the model loop. The streaming endpoints stream the same SSE events as before; additionally, run-scoped events carry an envelope with `run_id`, `sequence`, `timestamp`, `round_id`, `message_id` and `type` so reconnects resume without duplicates (`after_sequence`).
+Chat execution is backed by a durable `AgentRun` so a browser disconnect never stops the model loop. `/chat` and `/chat/stream` wait for the round's result; `/chat/runs` instead persists the request and enqueues it immediately for a worker, so a dropped connection or page refresh never loses the turn.
 
-Additional run events: `run_start` (run identity/status), `run_status` (queued/running/waiting/stopping transitions; `waiting` includes `pending_tool_call_id`, `pending_tool_name`, and `pending_tool_input` when the model calls `ask_user`), `input_accepted` (a queued steering/follow-up was committed), and `run_end` (exactly one terminal event: `completed | stopped | failed | interrupted`).
+Run-scoped events carry an extra envelope on top of the regular SSE events — `run_id`, `sequence`, `timestamp`, `round_id`, `message_id`, and `type` — so clients can resume with `after_sequence` and render nothing twice.
+
+Additional run events:
+
+| Event | Description |
+| --- | --- |
+| `run_start` | Run identity and initial status |
+| `run_status` | Lifecycle transitions (`queued` → `running` → …); the run enters `waiting` when the model calls `ask_user`, carrying `pending_tool_call_id`, `pending_tool_name`, and `pending_tool_input` |
+| `input_accepted` | A queued steering/follow-up input was committed |
+| `run_end` | Exactly one terminal event per run, with status `completed`, `stopped`, `failed`, or `interrupted` |
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| POST | `/api/v1/agents/{agent_id}/chat/runs` | Persist and enqueue a run (`202 Accepted`) |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` | SSE-subscribe to the run's event stream (resumable) |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | Run status (owner-scoped) |
-| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | Replay buffered events after N |
-| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up (`delivery: steer / follow_up / auto`) |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | Replay buffered events (non-streaming; handy after packet loss) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up/stop (`delivery: steer / follow_up / auto`) |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | Submit structured answers for a waiting `ask_user` call |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | Cooperatively stop a run |
+
+### Start a Run
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs
+```
+
+The request body is identical to `POST /api/v1/agents/{agent_id}/chat` (the same `ChatRequest`); the difference is that it returns **`202 Accepted`** immediately instead of waiting for the assistant reply. The response data is a `RunStartOut`:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "8f3b1c9d-2b10-4a1b-9c3d-7f3a1c9d2b10",
+    "conversation_id": "conv-123",
+    "user_message_id": "msg-456",
+    "status": "queued",
+    "stream_url": "/agents/agent-123/chat/runs/8f3b1c9d-2b10-4a1b-9c3d-7f3a1c9d2b10/stream"
+  },
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `run_id` | string | Durable run UUID |
+| `conversation_id` | string | Conversation UUID (created when the request omitted `conversation_id`) |
+| `user_message_id` | string | The persisted user message UUID |
+| `status` | string | Run status at enqueue time (see the status values below) |
+| `stream_url` | string | Relative path of the run's SSE stream, **without** the `/api/v1` prefix |
+
+<Callout type="warn">
+  `stream_url` is relative and only contains `/agents/...` (`/embed/agents/...` for embed). You must prepend `/api/v1` yourself when building the subscription URL.
+</Callout>
+
+### Stream a Run
+
+```
+GET /api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N
+```
+
+Returns `text/event-stream`: it first replays every buffered event whose `sequence` is greater than `after_sequence` (default `0`), then follows live events until the run's terminal event. Accepts a JWT bearer token or an API key.
+
+Reconnection semantics: track the highest `sequence` you have processed and, after a disconnect, request again with that value as `after_sequence` to continue with no duplicates and no gaps. Negative `after_sequence` values are clamped to `0`. For a non-streaming catch-up, read the same buffered events from `GET .../events?after_sequence=N`.
+
+Run status values (`RunOut.status` / `RunStartOut.status`): `queued`, `running`, `stopping`, `completing`, `waiting`, `completed`, `stopped`, `failed`, `interrupted`. Of these, `completed`, `stopped`, `failed`, and `interrupted` are terminal.
+
+### Stop a Run
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/stop
+```
+
+No request body. Cooperatively stops a `queued`, `running`, or `waiting` run and returns the updated `RunOut`; the event stream then receives a terminal `run_end` with `status: "stopped"`. Stopping a `waiting` run (blocked on an `ask_user` answer) works the same way.
+
+`RunOut` fields: `id`, `agent_id`, `conversation_id`, `mode`, `status`, `source_message_id`, `canonical_message_id`, `active_round_id`, `error_code`, `error_message`, `started_at`, `finished_at`, plus the pending `ask_user` interaction (`pending_tool_call_id`, `pending_tool_name`, `pending_tool_input`).
+
+<Callout type="warn">
+  Access boundaries: every run route is owner-scoped (agent-scoped for an API key). An unknown run — or one that does not belong to the `{agent_id}` in the path — returns `404` (code `4000`, `run_not_found`); a run whose conversation belongs to another user returns `403` (code `1004`, `access_denied`); superusers bypass the ownership check.
+</Callout>
 
 Submit answers for a waiting `ask_user` call:
 
@@ -359,8 +434,8 @@ GET /api/v1/conversations
 | `team_id` | string | No | - | Filter by team |
 | `agent_id` | string | No | - | Filter by agent ID |
 | `user_id` | string | No | - | Filter by user (admin/dashboard access only) |
-| `search` | string | No | - | Search by title |
-| `untitled_only` | boolean | No | false | Show only untitled conversations |
+| `search` | string | No | - | Match the **conversation title** (does not search message content) |
+| `untitled_only` | boolean | No | false | Show only untitled conversations (takes precedence; `search` is ignored when both are supplied) |
 
 **Success (200 OK):**
 
@@ -480,7 +555,7 @@ PATCH /api/v1/agents/conversations/{conversation_id}
 
 ### Delete Conversation
 
-Delete a conversation permanently.
+Permanently delete a conversation (messages cascade). `DELETE /api/v1/conversations` is mounted on the platform conversation router and requires `conversation:delete`; superusers/admins can delete any conversation in an accessible team, while an ordinary member can only delete their own (someone else's conversation returns `404`).
 
 ```
 DELETE /api/v1/conversations/{conversation_id}
@@ -491,10 +566,39 @@ DELETE /api/v1/conversations/{conversation_id}
 ```json
 {
   "code": 0,
-  "data": null,
+  "data": {
+    "id": "conv-123"
+  },
   "msg": "Conversation deleted successfully"
 }
 ```
+
+### Batch Delete Conversations
+
+```
+DELETE /api/v1/conversations?ids=conv-123&ids=conv-456
+```
+
+`ids` is a required repeated query parameter (`list[UUID]`) that deletes several conversations at once; the permission rules match single deletion, and any inaccessible target rejects the whole batch. When none of the targets exist the call returns `404` (`6210`).
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/conversations?ids=conv-123&ids=conv-456" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Delete a Single Message
+
+The platform conversation router has **no** per-message delete endpoint; to delete one message use the user-scoped endpoint under the agents router:
+
+```
+DELETE /api/v1/agents/conversations/{conversation_id}/messages/{message_id}
+```
+
+It requires `conversation:delete`, and the message must belong to the caller's conversation (see [Agent Conversations in the Agent API](./agents#delete-a-single-message)).
+
+<Callout type="warn">
+  Route capability differences: the platform `/api/v1/conversations` router only exposes `GET` list, `GET` detail, `DELETE` single, and `DELETE` batch. **Renaming (PATCH) and deleting a single message exist only under the agents router** (`/api/v1/agents/conversations/...`). The platform list's `search` also matches the conversation title only and never message content.
+</Callout>
 
 > For user-scoped conversation endpoints (e.g. `GET /api/v1/agents/conversations/my`), see [Conversations API](./conversations).
 
@@ -505,6 +609,8 @@ DELETE /api/v1/conversations/{conversation_id}
 | `6200` | Agent not found | Agent does not exist |
 | `6210` | Conversation not found | Conversation does not exist |
 | `6211` | Message not found | Message does not exist |
+| `4000` | Run not found | Durable run does not exist or does not belong to the agent in the path |
+| `1004` | Access denied | The run's conversation belongs to another user |
 | `3000` | Permission denied | Insufficient permissions |
 | `1001` | Validation failed | Invalid request data |
 

@@ -16,6 +16,14 @@ Building indexes on heavily populated `messages` or `workflow_runs` tables typic
 
 Connect to PostgreSQL as the database owner or superuser and **run each statement individually**:
 
+```bash
+# Compose
+docker compose exec db psql -U postgres -d clouisle
+
+# Kubernetes
+kubectl -n clouisle exec -it statefulset/postgres -- psql -U postgres -d clouisle
+```
+
 ```sql
 -- 1. Conversation aggregates and distinct active user counts
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_agent_created_user

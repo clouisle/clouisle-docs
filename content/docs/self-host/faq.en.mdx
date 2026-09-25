@@ -12,11 +12,20 @@ The current Compose, Kubernetes, and routing configuration uses `api`. Change `b
 
 ### Why does the frontend open but requests fail?
 
-Check whether the reverse proxy forwards `/api/*` to `api:8000`, and confirm that `NEXT_PUBLIC_API_URL` is a base path reachable from the browser.
+Check two separate paths:
+
+- **Browser requests**: confirm the reverse proxy or Ingress forwards `/api` to `api:8000`, and that `NEXT_PUBLIC_API_URL` (frontend image default `/api/v1`) is a path the browser can reach. Browser calls use a relative path, so the backend `API_V1_STR` is not involved — but the two path prefixes must still agree.
+- **Server-side rendering (SSR) requests**: the Next.js server joins `BACKEND_INTERNAL_URL` with the API base path. Its code default is `http://localhost:8000`; Compose injects `http://api:8000`.
+
+The single-file K8s manifest and the default Helm `frontend` pod set **no environment variables at all**, so SSR falls back to `http://localhost:8000`, which is unreachable from inside the pod. Browser traffic still works because the Ingress routes `/api` directly. If your pages fetch data during SSR, add `BACKEND_INTERNAL_URL=http://api:8000` to the `frontend` workload explicitly.
 
 ### Why can Beat only run a single replica?
 
 Beat is the scheduler. Multiple replicas would deliver scheduled tasks repeatedly, causing duplicate processing or duplicate notifications.
+
+### After changing the worker command, why do AgentRuns stay in progress forever?
+
+The `worker` must consume all four queues `default,agent,knowledge,workflow`. Durable AgentRuns are routed to the `agent` queue, so if `-Q` omits `agent` nothing consumes them: the conversation keeps showing as running and no error is raised. Restore the four-queue `-Q`, or start a separate worker with `-Q agent`. The `sandbox` queue is consumed only by `sandbox-worker` and is not part of this list.
 
 ## Storage and scaling
 
@@ -32,7 +41,7 @@ The database only contains metadata. Original files live in upload storage and v
 
 ### How do I scale one class of task independently?
 
-The supplied worker consumes `default`, `agent`, `knowledge`, and `workflow` together, so scaling it increases throughput for all four. To grow AgentRun execution alone, run an extra worker subscribed to a single queue (for example `-Q agent`); the `sandbox` queue is consumed by the dedicated `sandbox-worker`. See [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
+The supplied worker consumes `default`, `agent`, `knowledge`, and `workflow` together, so scaling it increases throughput for all four. To grow AgentRun execution alone, run an extra worker subscribed to a single queue (for example `-Q agent`); the `sandbox` queue is consumed by the dedicated `sandbox-worker`. See [Deployment architecture → Celery queue layout](./architecture.mdx#celery-queue-layout).
 
 ### Why can't I search a document after a successful upload?
 
@@ -41,6 +50,16 @@ Upload and processing are two phases. Wait for the document to enter `completed`
 ### Why does hybrid retrieval return a validation error?
 
 Hybrid retrieval's `dense_weight` and `lexical_weight` cannot both be `0`. The full-text channel also requires PostgreSQL's `pg_search`.
+
+## Sandbox and code execution
+
+### Does the supplied deployment need host kernel changes?
+
+No. Compose, Helm, and the single-file manifest all run `sandbox-worker` as root (`user: "0"` / `runAsUser: 0`) with `CAP_SYS_ADMIN`, so user-namespace creation goes through the privileged path and no node-level opt-in is needed. Only a custom deployment that insists on running this worker as non-root has to enable unprivileged user namespaces **on every node** (`kernel.apparmor_restrict_unprivileged_userns=0` on Ubuntu 23.10+, `kernel.unprivileged_userns_clone=1` on Debian). See [Troubleshooting → Sandbox tasks fail with a bwrap user-namespace error](./operations/troubleshooting.mdx#bwrap-user-namespace-error).
+
+### Is `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` on or off?
+
+The code default is `false`, so unsupported development hosts can still start. The supplied `sandbox-worker` image sets it to `true` in its `ENV`, and `deploy/.env.example`, the K8s ConfigMap, and the Helm values set it to `true` as well. Official deployments are therefore isolated; if you build your own image or manifest, do not drop this variable, or sandbox code will execute without filesystem isolation.
 
 ## Security
 

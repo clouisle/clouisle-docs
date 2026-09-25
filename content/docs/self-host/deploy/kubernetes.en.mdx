@@ -14,6 +14,38 @@ The single-file manifest creates three PVCs by default: `postgres-data` (`10Gi`,
 
 Default replicas: api `2`, worker `2`, sandbox-worker `1`, beat `1` (`Recreate` strategy), frontend `2`. The manifest has no HPA; replicas are static and adjusted with `kubectl scale`.
 
+## ConfigMap and Secret
+
+The single-file manifest lays resources out in this order: `Namespace` → `ConfigMap` → `Secret` → PostgreSQL (StatefulSet + headless Service + PVC) → Redis (Deployment + Service) → Qdrant (StatefulSet + headless Service + PVC) → uploads PVC → API → Worker → Sandbox Worker → Beat → Frontend → Ingress — 13 sections.
+
+Every key in `clouisle-config` must match the manifest (pods inject the whole ConfigMap with `envFrom.configMapRef`):
+
+| Key | Value | Purpose |
+| --- | --- | --- |
+| `PROJECT_NAME` / `TIMEZONE` | `Clouisle` / `Asia/Shanghai` | Application name and timezone |
+| `API_BASE_URL` / `API_INTERNAL_BASE_URL` | `http://api:8000` | Internal address for server-side code and workers |
+| `PUBLIC_API_URL` | `""` | Set when you deploy behind a public domain |
+| `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | `http://api:8000` | Sandbox artifact uploads |
+| `SANDBOX_WORKER_CONCURRENCY` | `"1"` | Sandbox worker concurrency (consumed by `${SANDBOX_WORKER_CONCURRENCY:-1}` in the command) |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `"true"` | Turn on bwrap filesystem isolation |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `"/usr/bin/bwrap"` | Absolute bubblewrap path inside the image |
+| `FRONTEND_URL` | `http://frontend:3000` | SSO redirect base |
+| `POSTGRES_SERVER` / `POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_DB` | `postgres` / `5432` / `postgres` / `clouisle` | Database (password lives in the Secret) |
+| `REDIS_HOST` / `REDIS_PORT` | `redis` / `6379` | Redis |
+| `VECTOR_BACKEND` / `QDRANT_URL` / `QDRANT_COLLECTION_PREFIX` / `QDRANT_DISTANCE` | `qdrant` / `http://qdrant:6333` / `kb_dim` / `Cosine` | Vector store |
+| `RETRIEVAL_HYBRID_KILL_SWITCH` / `RETRIEVAL_SHADOW_ENABLED` | `"false"` / `"false"` | Retrieval switches |
+| `BACKEND_CORS_ORIGINS` | `'["http://localhost:3000"]'` | Replace with your real frontend origin |
+
+`clouisle-secret` holds 6 keys that **must be replaced**: `SECRET_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, `INTERNAL_API_TOKEN`, `SANDBOX_ARTIFACT_UPLOAD_API_KEY`. The template values are Base64 placeholders; when editing by hand, generate them with `echo -n 'value' | base64`.
+
+`API`, `Worker`, `Sandbox Worker`, and `Beat` all carry a `wait-for-postgres` initContainer that blocks on `pg_isready`. The API readiness/liveness probes are `GET /api/v1/health:8000` (`initialDelaySeconds` 10/20) and the frontend probes are `GET /:3000`. Worker and sandbox-worker read the internal token through `INTERNAL_API_TOKEN_FILE=/var/run/secrets/clouisle/internal-api-token` (mounted from the Secret) and set `UPLOAD_STORAGE_MODE=remote`.
+
+<Callout type="warn">
+  The `frontend` Deployment in the single-file manifest (and the Helm defaults) sets **no environment variables at all**. Browser traffic still works because the Ingress routes the `/api` prefix, but Next.js server-side fetching falls back to the code default `BACKEND_INTERNAL_URL=http://localhost:8000`, which is unreachable inside the pod. Add `BACKEND_INTERNAL_URL=http://api:8000` to the `frontend` workload if you rely on SSR fetching.
+</Callout>
+
+The Ingress uses the `nginx` class with the annotations `proxy-body-size: 100m`, `proxy-read-timeout: 1800`, `proxy-send-timeout: 1800`, `proxy-http-version: 1.1`, and `use-forwarded-headers: true`; path `/api` → `api:8000` and `/` → `frontend:3000`. The default host is `clouisle.example.com` and must be replaced with your real domain.
+
 ## Helm (recommended)
 
 ```bash

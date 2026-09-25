@@ -1,10 +1,10 @@
 ---
-title: Agent Config Reference
+title: Agent Configuration Reference
 description: Look up Agent fields, defaults, value ranges, and capability toggles
 icon: Bot
 ---
 
-The Agent create and update endpoints correspond to the base settings and orchestration cards in the editor. `name` is required and `1-100` characters; `description` is at most `500` characters.
+The Agent create and update endpoints correspond to the editor's basic settings and orchestration cards. The name is required and must be `1-100` characters; the description is at most `500` characters.
 
 ## Basics & Runtime
 
@@ -12,42 +12,79 @@ The Agent create and update endpoints correspond to the base settings and orches
 | --- | --- | --- | --- |
 | `name` | string | Required | Agent name, `1-100` characters |
 | `description` | string or null | null | At most `500` characters |
-| `model_id` | UUID | null | Chat model authorized for the current team |
-| `system_prompt` | string or null | null | Supports `{{variable_name}}` |
-| `max_iterations` | integer | `5` | Tool call rounds, `1-200` |
-| `visibility` | `private` or `team` | `team` (create endpoint) | Access scope |
-| `status` | `draft` or `published` | `draft` | Publish endpoint toggles status |
+| `icon` | string or null | null | Emoji or URL, at most `500` characters |
+| `avatar_url` | string or null | null | Avatar URL, at most `500` characters |
+| `model_id` | UUID | null | Team-authorized chat model (`team_models.id`); when null the user selects one |
+| `system_prompt` | string or null | null | Supports `{{variables}}` |
+| `max_iterations` | integer | `5` | Tool-call rounds, `1-200` |
+| `visibility` | `private` or `team` | `private` | Access scope; `private` is visible only to the creator |
+| `status` | `draft` or `published` | `draft` | Toggled by the publish endpoint |
+| `hide_tool_calls` | boolean | `false` | Hide tool-call details in the chat UI |
+| `hide_message_actions` | boolean | `false` | Hide message stats such as token usage/speed |
+| `hide_reasoning` | boolean | `false` | Hide the reasoning/chain-of-thought |
+| `opening_message` | string or null | null | Conversation opening message |
+| `suggested_questions` | string[] | `[]` | Suggested questions |
+| `powered_by_text` | string or null | null | Chat page footer attribution, at most `200` characters |
+
+<Callout type="info" title="visibility defaults to private">
+Both the create schema and the data model default `visibility` to `private` (visible only to the creator), not `team`. To let teammates access it, set it to `team` explicitly.
+</Callout>
 
 ## RAG & Tools
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `rag_mode` | `off`, `auto` or `agentic` | `agentic` | Off, auto retrieval, or Agent-decided retrieval |
-| `knowledge_base_configs` | array | `[]` | Each entry contains knowledge base, retrieval mode, Top K, and threshold |
-| `tools_config` | array | `[]` | Built-in, custom, MCP, or Skill |
-| `variables` | array | `[]` | User input fields |
-| `enable_user_input_request` | boolean | `false` | Allow requesting structured input during conversations |
+| `rag_mode` | `off`, `auto`, or `agentic` | `agentic` | Disabled, automatic retrieval, or agent-decided retrieval |
+| `knowledge_base_configs` | array | `[]` | Each entry has `knowledge_base_id`, `retrieval_top_k` (default `5`, `1-100`), `score_threshold` (default `0.3`, `0-1`), and `search_mode` (`vector`/`fulltext`/`hybrid`, default `hybrid`) |
+| `tools_config` | array | `[]` | Tool type: `builtin`, `custom`, `mcp`, or `skill` |
+| `variables` | array | `[]` | User input fields; `name` is `1-50` characters and `type` is `text`, `paragraph`, `select`, `number`, or `checkbox` |
+| `enable_user_input_request` | boolean | `false` | Let the model call the `ask_user` tool to request structured input |
 
-## Memory, Compression & Attachments
+## Memory & Context Compression
 
-| Field | Type | Default | Limit/Description |
+| Field | Type | Default | Limits/Notes |
 | --- | --- | --- | --- |
 | `enable_memory` | boolean | `false` | Enable cross-conversation memory |
-| `max_memories_per_retrieval` | integer | `10` | `1-50` |
-| `auto_extract` | boolean | `true` | Automatically extract important information |
-| `context_compression_config.enabled` | boolean | `true` | Compress context before requests |
-| `recent_raw_turns` | integer | `3` | `1-12` |
-| `warning_ratio` / `auto_compact_trigger_ratio` / `blocking_ratio` | number | `0.7 / 0.8 / 0.92` | `0.1-1.0`; target ratio must be lower than trigger ratio |
-| `enable_attachments` | boolean | `false` | Allow files and images |
-| `max_file_size` | bytes | `10MB` | `1KB-50MB` |
-| `max_files` | integer | `5` | `1-10` |
-| `max_content_length` | integer | `100000` | `1000-500000` characters |
+| `memory_config.max_memories_per_retrieval` | integer | `10` | `1-50` |
+| `memory_config.auto_extract` | boolean | `true` | Automatically extract and save memories from conversations |
+| `memory_config.importance_threshold` | `low`, `medium`, `high` | `medium` | Minimum importance for auto-extracted memories |
+| `context_compression_config.enabled` | boolean | `true` | Request-time context compression before model calls |
+| `context_compression_config.summary_max_tokens` | integer | `1000` | Target token budget for the generated summary, `128-8000` |
+| `context_compression_config.emit_sse_events` | boolean | `true` | Notify the frontend via SSE events when summarization is applied |
+
+## Attachments
+
+| Field | Type | Default | Limits/Notes |
+| --- | --- | --- | --- |
+| `enable_attachments` | boolean | `false` | Allow file and image uploads |
+| `attachment_config.max_file_size` | bytes | `10485760` (`10MB`) | `1024` (`1KB`)–`52428800` (`50MB`) |
+| `attachment_config.max_files` | integer | `5` | Maximum files per message, `1-10` |
+| `attachment_config.max_content_length` | integer | `100000` | Maximum parsed content length in characters, `1000-500000` |
+| `attachment_config.truncate_strategy` | string | `end` | Truncation strategy: `end` (keep start), `start` (keep end), `middle` (keep start and end) |
+| `attachment_config.allowed_extensions` | string[] | Listed below | Allowed file extensions |
+
+Default allowed extensions: `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.txt`, `.md`, `.csv`, `.json`, `.html`.
 
 ## Media Generation
 
-Images default to `1024×1024` with at most `4` per request; videos default to `5` seconds with a maximum of `10` seconds and `16:9` aspect ratio, polling interval `3000ms`, synchronous wait `120s`. All media models must be authorized for the current team.
+| Field | Type | Default | Limits/Notes |
+| --- | --- | --- | --- |
+| `enable_image_generation` | boolean | `false` | Enable the image generation tool |
+| `image_generation_config.default_width` / `default_height` | integer | `1024` | `256-4096` |
+| `image_generation_config.max_images` | integer | `4` | Maximum images per tool call, `1-10` |
+| `image_generation_config.allow_reference_images` | boolean | `true` | Allow reference images / edit flows |
+| `image_generation_config.require_confirmation` | boolean | `false` | Require explicit confirmation before generating |
+| `enable_video_generation` | boolean | `false` | Enable the video generation tool |
+| `video_generation_config.default_duration` | float | `5.0` seconds | `1-30` |
+| `video_generation_config.max_duration` | float | `10.0` seconds | Maximum duration per tool call, `1-30` |
+| `video_generation_config.default_aspect_ratio` | string | `"16:9"` | Default video aspect ratio |
+| `video_generation_config.poll_interval_ms` | integer | `3000` | Provider task-status polling interval in ms, `500-30000` |
+| `video_generation_config.poll_timeout_s` | integer | `120` | Maximum synchronous wait in seconds, `5-600`; returns pending on timeout |
+| `video_generation_config.require_confirmation` | boolean | `false` | Require explicit confirmation before generating |
+
+All image/video models must be authorized for the current team, and `allowed_providers` can restrict which providers may be used.
 
 <figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-config-reference.png" alt="Agent config fields overview" />
-  <figcaption>Agent config fields overview</figcaption>
+  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-config-reference.png" alt="Agent configuration fields overview" />
+  <figcaption>Agent configuration fields overview</figcaption>
 </figure>

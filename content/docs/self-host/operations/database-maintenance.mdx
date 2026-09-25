@@ -16,6 +16,14 @@ Clouisle 后端将仪表盘用量、Agent 会话与工作流运行统计下推�
 
 在 PostgreSQL 客户端以数据库所有者或超级用户身份连接数据库，**逐条单独执行**以下语句：
 
+```bash
+# Compose
+docker compose exec db psql -U postgres -d clouisle
+
+# Kubernetes
+kubectl -n clouisle exec -it statefulset/postgres -- psql -U postgres -d clouisle
+```
+
 ```sql
 -- 1. 对话聚合与活跃用户统计
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_agent_created_user

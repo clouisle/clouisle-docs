@@ -37,7 +37,34 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 ## Cron
 
-界面可按间隔、每天、每周、每月或自定义 Cron（格式“分 时 日 月 周”）配置。**Cron 定时调度尚未实现**（后端没有对应的 Celery 调度任务，仅界面可保存配置），已发布的工作流不会按 Cron 自动执行。定时触发在 Roadmap 中。
+在**工作流设置** > **触发器**中选择**定时任务**，界面支持按间隔、每天、每周、每月或自定义 Cron 配置。执行频率会换算成一条标准 Cron 表达式（`分 时 日 月 周`，如 `0 9 * * 1-5` 表示工作日上午 9 点），间隔预设为 5/10/15/30 分钟与 1/2/3/6/12 小时。
+
+<Callout type="warn" title="仅保存配置不会自动运行">
+  后端**有**实现调度逻辑的任务：`workflow.check_scheduled`（`backend/app/services/workflow/tasks.py`）挑选已发布且 `trigger_type=cron` 的工作流，用 `croniter` 判断当前这一分钟是否命中表达式，命中就以空输入 `{}`、以工作流创建者的身份触发一次运行。
+
+  但随附部署不会调度它，原因有三层，必须全部解决：
+
+  1. **不在 `include` 列表里**：`backend/app/core/celery.py` 中 `celery_app` 的 `include` 不含 `app.services.workflow.tasks`，任务默认没有注册到 Worker。
+  2. **不在 Beat 表里**：同一文件的 `beat_schedule` 只有用量重置、密钥/密码到期检查、沙箱会话清理和 AgentRun 失联扫描，没有 `workflow.check_scheduled`。随附的 Beat 容器（Compose/Helm/K8s 的 `beat` 服务，命令为 `python main.py beat`）只执行这份表。
+  3. **键名不一致**：调度任务读 `trigger_config["cron"]`，而**工作流设置**表单写入的是 `trigger_config["cron_expression"]`。即使调度成功，界面保存的表达式也不会被匹配。
+
+  该任务也没有匹配的 `task_routes` 规则，因此会落到 `default` 队列——需要确认有 Worker 消费该队列，或在 Beat 条目里用 `options.queue` 指定队列。
+</Callout>
+
+### 启用自定义部署的 Cron
+
+1. 把 `app.services.workflow.tasks` 加进 `celery_app` 的 `include`，或在 Worker 启动时导入该模块。
+2. 在 `beat_schedule` 添加条目（建议每分钟一次）：
+
+```python title="app/core/celery.py"
+celery_app.conf.beat_schedule["workflow-check-scheduled"] = {
+    "task": "workflow.check_scheduled",
+    "schedule": crontab(minute="*"),
+}
+```
+
+3. 统一表达式键名：把界面保存的 `trigger_config.cron_expression` 改名为 `cron`，或直接用 API 把表达式写到 `cron` 键上。
+4. 确认消费 `default` 队列的 Worker 正在运行，否则任务发出后无人执行。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-trigger-settings.png" alt="工作流触发器设置" />
@@ -46,4 +73,4 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 ## 状态与取消
 
-运行状态包括 `pending`、`running`、`success`、`failed`、`cancelled` 和 `timeout`。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。查看[工作流 API](/api/workflow)获取流式运行事件。
+运行状态包括 `pending`、`running`、`waiting`、`success`、`failed`、`cancelled` 和 `timeout`；`waiting` 表示停在暂停节点等待审批或补充变量。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。查看[工作流 API](/api/workflow)获取流式运行事件。

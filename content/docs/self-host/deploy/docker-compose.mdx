@@ -47,6 +47,29 @@ curl http://localhost:8000/api/v1/health
 
 将外部反向代理配置为 `/api/*` 到 `api:8000`、`/` 到 `frontend:3000`。浏览器入口默认 `http://localhost:3000`。
 
+## 服务清单与端口
+
+`deploy/docker-compose.yml` 定义 5 个应用服务 + 3 个基础设施服务，共 8 个容器：
+
+| 服务 | 镜像 | 启动命令 | 宿主端口 |
+| --- | --- | --- | --- |
+| `db` | `clouisle-postgres-pg-search:0.24.3-pg17-alpine1` | `postgres -c shared_preload_libraries=pg_search,pg_stat_statements -c pg_stat_statements.track=all` | `5432` |
+| `redis` | `redis:7-alpine` | `redis-server --requirepass …`（设置 `REDIS_PASSWORD` 时） | `6379` |
+| `qdrant` | `qdrant/qdrant:v1.18.3` | 默认 | `6333` |
+| `api` | `clouisle-backend:latest` | `python main.py server -H 0.0.0.0 -w 4 --no-reload` | `8000` |
+| `worker` | `clouisle-backend:latest` | `python main.py worker -c 4 -Q default,agent,knowledge,workflow` | 无 |
+| `sandbox-worker` | `clouisle-sandbox-worker:latest` | `python main.py sandbox-worker -c ${SANDBOX_WORKER_CONCURRENCY:-1}` | 无 |
+| `beat` | `clouisle-backend:latest` | `python main.py beat` | 无 |
+| `frontend` | `clouisle-frontend:latest` | `node server.js`（镜像默认） | `3000` |
+
+Compose 不含 Nginx 服务。`api` 的健康检查是容器内 `GET http://localhost:8000/api/v1/health`；`worker` 与 `sandbox-worker` 依赖 `api` **健康**后才启动，`beat` 与 `frontend` 只依赖 `api` 已启动（`service_started`）。`db`、`redis`、`qdrant` 通过各自健康检查（`pg_isready`、`redis-cli ping`、`/healthz`），应用服务都等它们健康后才启动。
+
+`api` 独占 `uploads_data` 卷（挂载 `/app/uploads`）；`worker` 与 `sandbox-worker` 不挂该卷，改用 `UPLOAD_STORAGE_MODE=remote` + `API_INTERNAL_BASE_URL=http://api:8000` 经内部网关读写文件。`sandbox-worker` 额外以 `user: "0"`、`cap_add: [SYS_ADMIN]`、`seccomp=unconfined` 运行，bwrap 才能创建用户/挂载命名空间。
+
+<Callout type="warn">
+  生产环境必须为 `POSTGRES_PASSWORD` 与 `INTERNAL_API_TOKEN` 提供强随机值：Compose 使用 `${VAR:?required}` 语法，未设置时 `docker compose up` 直接失败。`INTERNAL_API_TOKEN` 必须被 `api`、`worker`、`sandbox-worker` 共享。
+</Callout>
+
 ## 初始化
 
 Tortoise ORM 在 API 启动时自动建表与迁移（无 Alembic）。首个注册用户自动成为超级管理员。

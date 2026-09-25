@@ -1,0 +1,276 @@
+---
+title: Two-Factor Authentication (TOTP) API
+description: Set up, enable, disable, and manage backup codes for TOTP 2FA on your own account
+icon: LockKeyhole
+---
+
+The TOTP API binds time-based one-time password (TOTP) two-factor authentication to the **signed-in account**: generate the secret and QR code, verify and enable, disable, regenerate backup codes, and read status. Every operation acts on the caller's own account. Base path: `/api/v1/totp`.
+
+<Callout type="info" title="Prerequisites and authentication">
+  All endpoints require an authenticated JWT user session (`Authorization: Bearer <token>`); **API-key authentication is not accepted**, and no permission code is needed — you can only manage your own 2FA configuration.
+
+  The login-time two-factor challenge is a separate endpoint, `POST /api/v1/login/verify-totp` (`application/x-www-form-urlencoded` with `temp_token` + `code`); see the [Authentication API](./auth). **There is no `/api/v1/totp/verify` endpoint.**
+</Callout>
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/v1/totp/setup` | Generate the secret, QR code, and backup codes (not yet enabled) |
+| POST | `/api/v1/totp/enable` | Verify a code and permanently enable 2FA |
+| POST | `/api/v1/totp/disable` | Disable 2FA and clear the secret and backup codes |
+| POST | `/api/v1/totp/regenerate-backup-codes` | Regenerate backup codes after verifying a code |
+| GET | `/api/v1/totp/status` | Read enabled state, enable time, and remaining backup codes |
+| POST | `/api/v1/login/verify-totp` | (Login flow) exchange `temp_token` + `code` for a full token |
+
+## Typical flow
+
+1. `POST /totp/setup`: get the secret and QR code and scan them with an authenticator app; `totp_enabled` is still `false`.
+2. `POST /totp/enable`: submit the current 6-digit code from the app to enable 2FA.
+3. Later logins: `POST /api/v1/login` returns `requires_totp` plus a `temp_token`; call `POST /api/v1/login/verify-totp` to obtain the full token.
+
+---
+
+## 1. Generate binding information
+
+```
+POST /api/v1/totp/setup
+```
+
+Generates the secret, QR code, and backup codes for this binding. It does **not** enable 2FA — you must call `enable` and verify a code first.
+
+No request body.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "secret": "JBSWY3DPEHPK3PXP",
+    "qr_code": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg...",
+    "backup_codes": [
+      "1234-5678",
+      "8765-4321",
+      "2468-1357"
+    ]
+  },
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `secret` | string | Base32 secret for manual entry into an authenticator |
+| `qr_code` | string | QR code as a `data:image/png;base64,...` URL |
+| `backup_codes` | array of string | **10** one-time backup codes in `XXXX-XXXX` format |
+
+<Callout type="warn">
+  `backup_codes` are returned in plain text exactly once — in the setup and regenerate responses; the server stores only hashes. Prompt the user to save them immediately.
+
+  Calling `setup` again (while still disabled) overwrites the previous pending secret and backup codes; when 2FA is already enabled it returns `400` + `5314` (`totp_already_enabled`).
+</Callout>
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `5314` | `totp_already_enabled`: 2FA is already enabled, binding information cannot be regenerated |
+
+---
+
+## 2. Enable TOTP
+
+```
+POST /api/v1/totp/enable
+```
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `code` | string | Yes | The authenticator app's current code |
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Two-factor authentication enabled successfully"
+}
+```
+
+On success `totp_enabled_at` is recorded.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `5314` | `totp_already_enabled`: already enabled |
+| `400` | `5315` | `totp_setup_expired`: `setup` was not called first (no pending secret) |
+| `400` | `5311` | `totp_invalid`: wrong code |
+
+---
+
+## 3. Disable TOTP
+
+```
+POST /api/v1/totp/disable
+```
+
+Requires the account password plus a valid TOTP code **or** a backup code.
+
+### Request body
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `password` | string | Yes | - | Current account password |
+| `code` | string | Yes | - | TOTP code or backup code |
+| `is_backup_code` | boolean | No | `false` | When `true`, `code` is verified as a backup code |
+
+Disabling clears `totp_enabled`, `totp_secret`, `totp_enabled_at`, and the backup-code hashes.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "Two-factor authentication disabled successfully"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `5313` | `totp_not_enabled`: 2FA is not currently enabled |
+| `400` | `2003` | `current_password_incorrect`: wrong password |
+| `400` | `5311` | `totp_invalid`: wrong code / backup code |
+
+---
+
+## 4. Regenerate backup codes
+
+```
+POST /api/v1/totp/regenerate-backup-codes
+```
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `code` | string | Yes | A currently valid TOTP code (backup codes are not accepted here) |
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "codes": [
+      "1234-5678",
+      "8765-4321",
+      "2468-1357"
+    ]
+  },
+  "msg": "Backup codes regenerated successfully"
+}
+```
+
+All previous backup codes are **invalidated immediately**, and 10 new `XXXX-XXXX` codes are generated.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `5313` | `totp_not_enabled` |
+| `400` | `5311` | `totp_invalid` |
+
+---
+
+## 5. Get status
+
+```
+GET /api/v1/totp/status
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "enabled": true,
+    "enabled_at": "2026-09-26T10:15:00+00:00",
+    "remaining_backup_codes": 10
+  },
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `enabled` | boolean | Whether 2FA is enabled |
+| `enabled_at` | string (ISO 8601) \| null | Enable time; `null` if never enabled |
+| `remaining_backup_codes` | integer | Unused backup codes; `0` when disabled or none were generated |
+
+---
+
+## 6. Login-time verification (`/api/v1/login/verify-totp`)
+
+When 2FA is required the login endpoint does **not** return a full token; it returns:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "requires_totp": true,
+    "temp_token": "<short-lived JWT for the next step>"
+  },
+  "msg": "..."
+}
+```
+
+Then exchange the `temp_token` and a code for the full token:
+
+```
+POST /api/v1/login/verify-totp
+Content-Type: application/x-www-form-urlencoded
+
+temp_token=<temp_token>&code=123456&is_backup_code=false
+```
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `temp_token` | string | Yes | - | The temporary token returned by login |
+| `code` | string | Yes | - | TOTP code or backup code |
+| `is_backup_code` | boolean | No | `false` | When `true`, `code` is verified as a backup code (single use) |
+
+Success returns the full `Token` object; failures return `400` + `5312` (`totp_rate_limited`, temporary lock after too many failures), `5311` (`totp_invalid`), `5313` (`totp_not_enabled`), or `2002` (`totp_setup_expired`, expired temporary token). Full fields and examples are in the [Authentication API](./auth).
+
+<Callout type="info">
+  When the `require_totp` site setting is `true`, a user without 2FA receives `requires_totp_setup` plus a `temp_token` at login and must complete setup and enable before proceeding.
+</Callout>
+
+---
+
+## Error handling
+
+| HTTP | Code | Trigger |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | Missing, invalid, or expired token |
+| `400` | `5311` | Wrong verification code |
+| `400` | `5312` | Too many failed attempts, temporarily rate limited (login verification endpoint) |
+| `400` | `5313` | 2FA is not enabled |
+| `400` | `5314` | 2FA already enabled (repeated setup / enable) |
+| `400` | `5315` | `setup` was not called, no pending secret |
+| `400` | `2003` | Wrong password on disable |
+| `422` | `1001` | Request validation failed (missing required fields, …) |
+
+## Related
+
+- [Authentication API](./auth) — login, the `requires_totp` / `temp_token` flow, and `verify-totp`
+- [Users API](./users) — account security operations
+- [Error Handling](./errors) — recover by HTTP status and business error code

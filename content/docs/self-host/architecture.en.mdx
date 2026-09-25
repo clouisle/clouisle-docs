@@ -13,7 +13,7 @@ Clouisle runs 5 application services using 3 images. `clouisle-backend` provides
 | `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
 | `api` | clouisle-backend | FastAPI API | `8000` |
 | `worker` | clouisle-backend | Celery `default`, `agent`, `knowledge`, `workflow` queues | None |
-| `sandbox-worker` | sandbox-worker | Celery `sandbox` queue and artifact uploads | None |
+| `sandbox-worker` | clouisle-sandbox-worker | Celery `sandbox` queue and artifact uploads | None |
 | `beat` | clouisle-backend | Celery Beat scheduler, must run with a single replica | None |
 | `db` | PostgreSQL 17 + pg_search | Business, full-text retrieval, and audit data | `5432` |
 | `redis` | Redis 7 | Queues, cache, sessions | `6379` |
@@ -45,6 +45,13 @@ Scaling rules:
 
 An external reverse proxy or Ingress routes requests: `/api/*` to `api:8000`, everything else under `/` to `frontend:3000`. The frontend image does not include Nginx; `deploy/nginx/default.conf` is only an optional external example.
 
+Keep the two hops separate:
+
+- **Browser → API**: the browser calls `NEXT_PUBLIC_API_URL` (frontend image build-time default `/api/v1`, i.e. a relative path), and the reverse proxy or Ingress forwards the `/api` prefix to `api:8000`. In Compose the frontend service additionally rewrites `/api/*` to `BACKEND_INTERNAL_URL` through Next.js rewrites.
+- **Next.js server → API**: `BACKEND_INTERNAL_URL` joined with the base path. The code default is `http://localhost:8000`; Compose injects `http://api:8000`; the single-file K8s manifest and the default Helm `frontend` workload carry no environment variables.
+
+The backend mounts every router under `API_V1_STR`, default `/api/v1`: `GET {API_V1_STR}/health` and `{API_V1_STR}/openapi.json` move with it. If you change that value, update the proxy/Ingress path and the frontend build-time `NEXT_PUBLIC_API_URL` to the same `/api/v1` prefix, or both browser and server-side calls will hit a path that does not exist.
+
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/self-host-architecture.svg" alt="Clouisle deployment architecture" />
   <figcaption>Clouisle deployment architecture</figcaption>
@@ -56,4 +63,15 @@ Default Compose volumes: `postgres_data`, `redis_data`, `qdrant_data`, and `uplo
 
 ## Internal addresses
 
-Use service names inside containers, not `localhost`: `POSTGRES_SERVER=db`, `REDIS_HOST=redis`, `QDRANT_URL=http://qdrant:6333`, `API_BASE_URL=http://api:8000`. The Sandbox Worker artifact upload address should stay `http://api:8000`.
+Use service names inside containers, never `localhost`:
+
+| Variable | Compose / K8s value | Purpose |
+| --- | --- | --- |
+| `POSTGRES_SERVER` | `db` / `postgres` | Database |
+| `REDIS_HOST` | `redis` | Cache and Celery broker/backend |
+| `QDRANT_URL` | `http://qdrant:6333` | Vector store |
+| `API_BASE_URL` | `http://api:8000` | Internal API address for server-side use |
+| `API_INTERNAL_BASE_URL` | `http://api:8000` | Where workers reach the upload gateway (`UPLOAD_STORAGE_MODE=remote`) |
+| `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | `http://api:8000` | Sandbox worker artifact uploads |
+
+In Kubernetes, `FRONTEND_URL` is `http://frontend:3000` (SSO redirect base) and `clouisle-secret` provides `INTERNAL_API_TOKEN`, which pods read through `INTERNAL_API_TOKEN_FILE=/var/run/secrets/clouisle/internal-api-token`. Worker and sandbox-worker mount no uploads volume; they go through this internal gateway instead.

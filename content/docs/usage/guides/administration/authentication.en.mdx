@@ -1,34 +1,46 @@
 ---
 title: Login & Account Security
-description: Complete sign-up, email verification, password recovery, TOTP, and SSO login
+description: Complete sign-up, email verification, password recovery, TOTP, and SSO login and configure login protection
 icon: LockKeyhole
 ---
 
-Clouisle's authentication flow may include password, email verification, administrator approval, CAPTCHA, password changes, TOTP, and SSO. Site settings determine which steps are enabled.
+Clouisle's authentication flow is driven by site settings: password, email verification, administrator approval, CAPTCHA, forced password change, TOTP, and SSO can all apply at once. This page walks through each step in order of use, with its defaults, failure results, and recovery paths. The full list of site switches is in the [Site Settings reference](/en/reference/site-settings).
 
 ## Sign-up & Email Verification
-
-Clouisle supports self-registration when enabled by administrators.
 
 ### Self-Registration
 
 1. Navigate to the login page at `https://your-domain.com` and click **Sign up**.
 2. Fill in the registration form:
-   - **Username**: Unique identifier, max 50 characters
-   - **Email**: Valid email address
-   - **Password**: At least 8 characters (see [Password Requirements](#password-requirements))
-   - **Confirm Password**: Re-enter password
-3. If human verification is shown, click **Click to verify you are human** to complete it.
-4. Click **Register** to submit.
-5. If email verification is enabled, check your email for the verification code or link.
-6. Verify your email to activate your account, then log in.
+
+   | Field | Constraint |
+   | --- | --- |
+   | **Username** | Required, globally unique, max `50` characters |
+   | **Email** | Required, globally unique, must be a valid address |
+   | **Password** | Validated against the site password policy (at least `8` characters by default — see [Password Requirements](#password-requirements)) |
+   | **Confirm Password** | Must match the password |
+
+3. If human verification is enabled, click **Click to verify you are human**.
+4. If terms acceptance is required, tick the user agreement and privacy policy.
+5. Click **Register** to submit.
+
+What happens next depends on site settings:
+
+| Site setting | Default | Behavior after submit |
+| --- | --- | --- |
+| `allow_registration` | `true` | When off, registration returns `5000` (`registration_disabled`) |
+| `require_approval` | `true` | When on, the account is **pending approval** (`approval_status=pending`, `is_active=false`); administrators get a global notification and the user cannot log in until approved |
+| `email_verification` | `true` | When on, the email must be verified before login |
+| `enable_captcha` | `false` | When on, the sign-up form shows the click-style CAPTCHA |
+| `require_terms_acceptance_on_register` | `false` | When on, terms acceptance is mandatory |
+| `force_password_change_first_login` | `false` | When on, new users must change their password at first login |
 
 <Callout type="info">
-  The first registered user is automatically promoted to Super Admin. If administrator approval is required (`require_approval`), the account enters a pending-approval state and cannot log in until approved. Administrators receive a global notification.
+  The **first** user registered on a site bypasses every restriction: it is activated immediately, marked email-verified, and granted the **Super Admin** role. Register that first administrator before opening registration up.
 </Callout>
 
 <Callout type="note">
-  There is no invitation-based registration flow. Users are created via self-registration, by administrators (user management), or automatically through SSO (when `sso_auto_create_users` is enabled).
+  There is no invitation-based registration flow. Accounts come from self-registration, administrator creation ([User Management](./user-management.mdx)), or SSO auto-creation ([SSO](./sso.mdx)).
 </Callout>
 
 <figure>
@@ -36,310 +48,358 @@ Clouisle supports self-registration when enabled by administrators.
   <figcaption>Sign-up and email verification</figcaption>
 </figure>
 
+### Email Verification
+
+- Verification email is sent over SMTP; with **no SMTP configured (`smtp_enabled=false`) sending fails** with `5007` (`smtp_not_configured`).
+- The email contains a 6-digit code and a link, **valid for 10 minutes** (`600` seconds in Redis).
+- Resending has a **60-second cooldown** (per email address + purpose); hitting it returns `5008` with `remaining_seconds`.
+- A wrong code returns `5005`; an expired link/code returns `5006`.
+- Logging in with an unverified email returns `5004`; the login page then switches straight to the verification step and resends a code automatically.
+
 ## Login Methods
 
 ### Password Login
 
-1. Navigate to the login page and enter your **username** or **email**.
+1. Navigate to the login page and enter your **username or email** (a value containing `@` is matched as a case-insensitive email; otherwise it is matched as an exact username).
 2. Enter your **password**.
-3. If human verification is shown, click **Click to verify you are human** to complete it.
+3. If human verification is enabled, click **Click to verify you are human**.
 4. Click **Log In**.
+
+The request passes through these gates in order; any failure stops the rest of the flow:
+
+1. **SSO-only mode**: when `sso_enabled=true` and `sso_allow_password_login=false`, password login returns `6306` (`password_login_disabled`).
+2. **CAPTCHA** (when enabled).
+3. **Account existence**: an unknown account and a wrong password both return `2003` (`incorrect_email_or_password`) so account existence is not leaked.
+4. **Lock state**: while locked, the response is `5300` (`account_locked`) with `remaining_seconds`.
+5. **Local password presence**: accounts created through SSO with no local password cannot use password login and also get `2003`.
+6. **Password check**: a mismatch returns `2003` with `remaining_attempts`; reaching the threshold turns into a lockout (see [Account Lockout](#account-lockout)).
+7. **Account status**: a deactivated account returns `2004` (`inactive_user`); a pending-approval account returns `2004` (`pending_approval_user`).
+8. **TOTP**: with TOTP enrolled, the response is `requires_totp=true` plus a 5-minute temporary token, moving the user to the second verification step.
+9. **Administrator-enforced TOTP**: when `require_totp=true` and the user has not enrolled, the response is `requires_totp_setup=true` plus a 30-minute temporary token, and the frontend routes to `/totp-setup`.
+10. **Email verification** (when enabled; Super Admins are exempt from this check).
+11. **Password expiration / forced change**: when a change is required the response still carries a token but sets `force_password_change=true` and `reason` (`expired` for an expired password, `force` for an administrator request); the frontend routes to `/change-password?reason=...`.
+
+After a successful login the failure counter and lock state are cleared and `last_login` is refreshed.
 
 ### SSO Single Sign-On
 
 If your organization has configured SSO, you can log in with corporate credentials.
 
-1. Navigate to the login page and click the SSO provider button (e.g., "Continue with Google", "Continue with GitHub").
-2. Authenticate with your SSO provider.
+1. Navigate to the login page and click the SSO provider button (the label comes from the provider's `button_text`, e.g. "Sign in with Google").
+2. Authenticate with the identity provider.
 3. You are redirected back to Clouisle and logged in automatically.
 
 **First-time SSO login:**
 
-- If your email matches an existing account, the SSO connection is linked to it (email matching is enabled by default)
-- If no account exists, a new account is created automatically (if `sso_auto_create_users` is enabled)
+- With email matching on (`sso_match_by_email`, enabled by default) and an existing account for that email, the SSO connection is linked to that account.
+- Otherwise, when auto-creation is allowed, a new account is created. New accounts have **no local password**, count as email-verified, and enter pending-approval state according to configuration.
 
-**Supported SSO providers:**
+OAuth2/OIDC, SAML 2.0, and CAS are supported. See [SSO Configuration](./sso.mdx) for setup and troubleshooting.
 
-- OAuth2/OIDC (Google, GitHub, GitLab, etc.)
-- SAML 2.0 (Azure AD, Okta, OneLogin)
-- CAS (University systems)
-
-See [SSO Configuration](./sso.mdx) for details.
+<Callout type="warn">
+  Turning off `sso_allow_password_login` switches the site to SSO-only. Before doing so, make sure at least one Super Admin has an SSO connection bound — otherwise nobody may be able to reach the admin console.
+</Callout>
 
 ### First-Time Login
 
 After your first successful login:
 
-1. **Welcome Screen**: A welcome message is displayed
-2. **Profile Setup**: Complete your profile information (optional)
-3. **Team Assignment**: You may be assigned to the default team (if configured) or added to a team by an administrator
-4. **Dashboard Access**:
-   - Regular users see the platform interface
-   - Administrators see the admin dashboard
+1. **Welcome Screen**: a welcome message is displayed.
+2. **Profile Setup**: complete your profile information (optional).
+3. **Team Assignment**: you may be added to the default team (`default_team_id`, with role `default_team_role`, `member` by default).
+4. **Dashboard Access**: regular users see the platform interface; administrators also see administration entries.
 
 ## Login Protection
 
 ### Human Verification
 
-Login and self-registration may require a click-through CAPTCHA. The CAPTCHA proof is valid for `300` seconds (5 minutes) by default; re-fetch it after a failure or expiration.
+Controlled by `enable_captcha` (off by default) and applied to the **login and sign-up** forms. It verifies a genuine click plus pointer trajectory rather than typing text.
+
+- The challenge and proof live in Redis for **300 seconds** (5 minutes) and are **single-use**.
+- A failed check returns `5303` (`captcha_invalid`); a missing proof returns `5302` (`captcha_required`). After a failure the frontend fetches a fresh challenge automatically.
+- The login page only loads a CAPTCHA once both username and password are filled, so not seeing one on page load is normal.
 
 ### Account Lockout
 
-Repeated failures trigger account lockout and rate locking:
+The failure counter lives on the user record (`failed_login_attempts` + `locked_until`) and is **per account**, with no sliding window:
 
-- Default 5 failed attempts before lockout
-- Lockout lasts 15 minutes (configurable)
-- Contact your administrator if locked out repeatedly
+- `max_login_attempts` defaults to `5`: the lock triggers as soon as the count reaches 5.
+- `lockout_duration_minutes` defaults to `15`: during the lock, even a correct password is rejected (`5300`).
+- Below the threshold, the error response carries `remaining_attempts` so the UI can show how many tries are left.
+- The counter **does not decay over time**: it resets either on a successful login or on the first login attempt after the lock expires.
+- Triggering a lock sends the user a high-priority `security.account_locked` notification including the lock duration in minutes.
+
+<Callout type="warn">
+  The per-IP failure counter (Redis key `login:attempts:ip:<ip>`, TTL `3600` seconds) has helper functions but **no callers anywhere**, so this version does not rate-limit by IP. Locking only happens at the account level.
+</Callout>
 
 ### Login Anomaly Detection
 
-The system tracks your usual login locations and devices, and sends security notifications when logging in from a new location. Check your notifications if you see anomaly alerts.
+The system records the IPs and User-Agents each account has recently logged in from (up to `10` each, kept for 30 days):
+
+- Once history exists, logging in from a **new IP or new device** raises a high-priority `security.login_anomaly` notification containing the IP, time, and User-Agent.
+- The very first login (no history yet) never alerts, so brand-new accounts do not produce false positives.
+- If Redis is unavailable the check is skipped and login proceeds normally.
 
 ## Password Management
 
 ### Password Requirements
 
-| Requirement | Default |
-| --- | --- |
-| **Minimum Length** | 8 characters (configurable) |
-| **Uppercase** | At least one uppercase letter (A-Z) |
-| **Number** | At least one digit (0-9) |
-| **Special Character** | Not required by default |
-| **No Recent Reuse** | Cannot reuse the last 5 passwords (configurable) |
+| Requirement | Default | Setting key |
+| --- | --- | --- |
+| **Minimum length** | `8` characters | `min_password_length` (the settings UI accepts `6`–`32`) |
+| **Uppercase** | At least 1 (A-Z) | `require_uppercase` |
+| **Number** | At least 1 (0-9) | `require_number` |
+| **Special character** | Not required | `require_special_char` |
+| **Lowercase** | No such switch | — |
+| **No reuse** | Cannot match the last `5` passwords | `password_history_count` |
+| **Minimum age** | `0` days (changeable immediately) | `password_min_age_days` |
 
 <Callout type="note">
-  There is no dictionary / weak-password check.
+  There is no dictionary/weak-password check and no password strength meter — validation results come back as field errors. One bcrypt constraint also applies: **anything beyond 72 bytes is ignored**, so trailing characters of very long passwords do not participate in verification.
 </Callout>
 
-**Example of a valid password:**
+**Example of a valid password** (satisfies the default policy):
+
 ```
 MySecure#Pass2026!
 ```
 
-**Examples of weak passwords:**
+**Examples of invalid passwords**:
+
 ```
-❌ 12345678       (no letters/uppercase)
-❌ abcdefgh       (no numbers)
-❌ Pass123        (too short)
+❌ 12345678       (no uppercase)
+❌ abcdefgh       (no digit)
+❌ Pass123        (only 7 characters, below the default 8)
 ```
 
 ### Changing Your Password
 
-1. Open **Profile Settings** (profile menu) → **Account** tab
-2. Find the **Change Password** section
-3. Fill in the form:
-   - **Current Password**: Your existing password
-   - **New Password**: Your new password
-   - **Confirm New Password**: Re-enter new password
-4. Click **Change Password**
-5. You'll see a success message
+1. Open **Profile Settings** (avatar menu) → **Account** tab.
+2. Find the **Change Password** section and fill in **Current Password**, **New Password**, and **Confirm New Password**.
+3. Click **Update password**.
 
-As you type, the UI shows a strength indicator (weak / fair / good / strong).
+Backend behavior (`POST /api/v1/users/me/change-password`):
 
-**Tips for strong passwords:**
-- Use a mix of character types
-- Make it at least 12 characters long
-- Avoid personal information (name, birthday)
-- Consider using a password manager
+- A wrong current password returns `2003` (`current_password_incorrect`).
+- Violating the minimum age (`password_min_age_days`) returns `5306` with the remaining days.
+- Policy violations or a reused password return `1001` with per-item reasons under `errors.new_password` (such as `password_recently_used`).
+- Success refreshes `password_changed_at`, recalculates the expiration from the policy, clears the forced-change flag, and sends a high-priority `security.password_changed` notification.
+
+**Tips for strong passwords**: mix character types, make it at least 12 characters, avoid personal information, and use a password manager.
 
 ### Resetting a Forgotten Password
 
-1. Go to the login page and click the **Forgot Password?** link
-2. Enter your **email address**
-3. Click **Send Reset Link**
-4. Check your email inbox
-
-The email contains:
-- Subject: "Password Reset Request - Clouisle"
-- Reset link with a verification code (valid for **10 minutes**)
-- Instructions
-
-5. Click the reset link / enter the code from the email
-6. Enter your **new password** and confirm it
-7. Click **Reset Password**
-8. You'll see a success message; log in with your new password
-
-<Callout type="warn">
-  Reset links/codes expire after 10 minutes. Resend is rate-limited to 60 seconds.
+<Callout type="info">
+  Prerequisite: SMTP must be configured (`smtp_enabled=true`). Without it, **Forgot Password?** returns `5007` (`smtp_not_configured`) directly.
 </Callout>
+
+1. Go to the login page and click **Forgot Password?**.
+2. Enter your **email address** and click **Send Reset Email**. To prevent enumeration this returns success whether or not the address exists.
+3. Check your inbox and use either path:
+   - click the **reset link** in the email (opens `/reset-password?token=...`), or
+   - expand **or enter the code manually** on the page and type the 6-digit code from the email.
+4. Enter your **new password**, confirm it, and click **Reset Password**.
+5. Log in with the new password.
+
+- Codes/links are **valid for 10 minutes**; resending has a **60-second** cooldown (`5008`).
+- A wrong code returns `5005`; an invalid or expired link returns `5006`.
+- The reset does not ask for the current password (the code itself is the authorization), but it still enforces the password policy and history. On success the account's failure counter and lock state are cleared.
 
 ### Password Expiration
 
-If your administrator enables password expiration:
+If an administrator enables the expiration policy (off by default):
 
-- Password expires after a configured number of days (e.g., 90)
-- You'll receive reminders before expiration (default: warning starts 7 days before)
-- After expiration, you must change your password to log in
+| Setting key | Default | Meaning |
+| --- | --- | --- |
+| `password_expiration_enabled` | `false` | Master switch |
+| `password_expiration_days` | `90` | Password lifetime in days |
+| `password_expiration_warning_days` | `7` | Warning window before expiration |
+| `password_history_count` | `5` | Number of past passwords retained |
+| `password_min_age_days` | `0` | Minimum interval between changes |
 
-**Changing an expired password:**
+**Who is exempt**: SSO accounts (`auth_source != "local"`), users individually flagged as exempt (`password_expiration_exempt`), and Super Admins — none of them participate in expiration or forced changes.
 
-1. Try to log in
-2. You'll see a "Password expired" / "Change password required" message
-3. Enter your current password to authenticate first, then enter a new password
-4. Log in with the new password
+**Timeline:**
+
+- A daily 08:00 check sends a `password.expiring` reminder when exactly **7 / 3 / 1** days remain, and a `password.expired` notification plus the forced-change flag once expired (at most one reminder per user per day).
+- If the password is already expired at login, the response carries `force_password_change=true` with `reason=expired` and the frontend routes to `/change-password?reason=expired`.
+- The **Account** tab in profile settings shows **password expiration**. An expired password shows a red alert; fewer than 7 days left shows a yellow warning (that threshold is hardcoded to 7 days in the frontend).
 
 ## TOTP Two-Factor Authentication
 
-If your organization enables 2FA, you must enter a TOTP code when logging in.
-
 ### Setting Up TOTP
 
-1. Open **Profile Settings** → **Account** tab and click **Enable Two-Factor Authentication** (or follow the administrator-enforced wizard)
-2. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.), or enter the secret manually
-3. Enter the 6-digit verification code to confirm
-4. Download or copy the one-time backup codes; each backup code can only be used once
-5. Click **Enable**
+1. Open **Profile Settings** → **Account** tab and click **Enable Two-Factor Authentication**.
+2. The wizard explains what 2FA adds, then shows a QR code (issuer `Clouisle`) to scan with an authenticator app (Google Authenticator, Authy, Microsoft Authenticator, 1Password, …) or a secret to **enter manually**.
+3. Enter the current 6-digit code to confirm (the verification window is ±1 period, i.e. ±30 seconds).
+4. Save the one-time backup codes: the wizard generates **10** of them in `XXXX-XXXX` format, downloadable (`clouisle-backup-codes.txt`) or copyable.
+5. Click **Finish**.
+
+The API calls `POST /api/v1/totp/setup` first to generate the secret, QR code, and backup codes — TOTP is **not yet enabled** at that point — and `POST /api/v1/totp/enable` verifies a code before enabling it. Calling setup/enable when already enabled returns `5314` (`totp_already_enabled`); enabling without a pending secret returns `5315` (`totp_setup_expired`).
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/totp-setup-wizard.png" alt="TOTP setup wizard" />
   <figcaption>TOTP setup wizard</figcaption>
 </figure>
 
+<Callout type="warn">
+  TOTP secrets are stored encrypted with a key derived from `SECRET_KEY`. **Changing `SECRET_KEY` makes every enrolled TOTP secret undecryptable**, so users can only be unbound by an administrator and re-enrol.
+</Callout>
+
 ### Logging In with TOTP
 
-1. Enter your username and password
-2. Enter the 6-digit code from your authenticator app
-3. Click **Verify**
+1. Enter your username and password; the backend answers `requires_totp=true` with a 5-minute temporary token.
+2. Enter the 6-digit code from your authenticator (or click **Use a backup code** and type a backup code instead).
+3. Click **Verify**. On success the temporary token is exchanged for a full session token.
+
+A failed verification returns `5311` (`totp_invalid`); rate limiting returns `5312` (`totp_rate_limited`) with `seconds`, which the frontend shows as the remaining wait. **Rate limit**: starting from the first failure, **5** failures within a 300-second window lock verification for **900 seconds** (15 minutes); a successful verification resets the counter.
 
 ### Backup Codes
 
-- Save backup codes in a safe place
-- Use a backup code if you lose access to your authenticator
-- Each code can only be used once
+- 10 are generated per batch in `XXXX-XXXX` format, **each usable once**, and only hashes are stored server-side.
+- The Account tab shows the remaining backup code count (the UI string is `{count} backup codes remaining`).
+- Click **Regenerate backup codes** and enter the current 6-digit code to invalidate the old batch and issue a new one (old codes stop working immediately).
+
+### Disabling TOTP and Admin Actions
+
+- **Self-service disable**: click **Disable Two-Factor Authentication** and provide **both** the account password and a current code (or a backup code) in the confirmation dialog — both must verify. A wrong password returns `2003`, a wrong code `5311`.
+- **Admin unbind**: `POST /api/v1/admin/totp/users/{user_id}/disable` turns TOTP off for a user directly, for when the authenticator and backup codes are both lost (requires `admin:dashboard:access`).
+- **Force TOTP site-wide**: with `require_totp=true`, users who have not enrolled are routed to `/totp-setup` at login and cannot get in without enrolling.
 
 ## Session Management
 
 ### Session Duration
 
-- Sessions last until the configured **session timeout** (`session_timeout_days`, in days, default 30)
-- There is no "Remember Me" option and no inactivity-based logout
+- Sessions are **stateless JWTs** valid for `session_timeout_days` (default `30` days), with no idle timeout and no "Remember Me" option.
+- The token lives in browser `localStorage` under `access_token` and is sent as `Authorization: Bearer <token>`.
 
 ### Single Session Mode
 
-If enabled by your administrator, only one active session is allowed per user — logging in elsewhere invalidates the previous session.
+With `single_session` enabled, each new login writes the previous token to a Redis blacklist and overwrites the session record.
+
+<Callout type="warn" title="Known limitation">
+  Authentication only checks the Redis blacklist, and the blacklist entry written at login has a **TTL of just 5 seconds**; the `get_user_session` helper that would read the session record has no callers. In practice, therefore, single-session mode only rejects the old token for about 5 seconds — after that the old token keeps working until it expires. Do not rely on it as a session-kick security control.
+</Callout>
 
 ### Logging Out
 
-1. Click your profile icon in the top-right corner
-2. Select **Logout**
-3. You are redirected to the login page
+1. Click your profile icon in the top-right corner.
+2. Select **Log out**.
+3. You are redirected to the login page.
 
-Logging out only invalidates the current session/token.
+On the backend the current token is written to the Redis blacklist (TTL 5 seconds) and the session record is cleared. Because JWTs are stateless, **a copy of the same token is accepted again after those 5 seconds** until it expires on its own. What actually blocks access is changing the password (together with single-session), deactivating the account, or shortening `session_timeout_days`.
 
 ## Account Security
 
 ### Security Notifications
 
-You'll receive notifications for:
+These events produce `security.*` / `password.*` in-app notifications:
 
-- Password changed successfully
-- Failed login attempts / account locked
-- Login from a new location/device
-- Password expiration reminders
+| Event type | Trigger | Level |
+| --- | --- | --- |
+| `security.password_changed` | Password changed successfully | High |
+| `security.account_locked` | Failure threshold reached and the account was locked | High |
+| `security.login_anomaly` | Login from a new IP / device | High |
+| `password.force_change` | Administrator requires a change at next login | High |
+| `user.password_reset` | Administrator set a new password for the user | Medium |
+| `password.expiring` / `password.expired` | 7/3/1 days before expiry / already expired | Medium |
 
-**Check notifications regularly** to detect unauthorized access.
+**Reviewing the [notification center](./notifications.mdx) regularly** is the most direct way to spot unauthorized access.
 
 ### If Your Account Is Compromised
 
 If you suspect unauthorized access:
 
-1. **Change your password immediately**
-2. **Enable 2FA** (if not already enabled)
-3. **Review login notifications** for suspicious activity
-4. **Contact your administrator** to report the incident
+1. **Change your password now.** Note that this does **not** revoke already-issued JWTs (see [Logging Out](#logging-out)) and does not affect existing API keys.
+2. **Enable TOTP** or regenerate backup codes.
+3. **Check your login notifications** for unfamiliar IPs/devices and deactivate suspicious keys in [API Keys](./api-keys.mdx).
+4. **Ask an administrator to deactivate the account** — `is_active=false` rejects every request of that account at the authentication stage and is the only immediate stop. Rotating `SECRET_KEY` also invalidates all JWTs, but it makes every enrolled TOTP secret undecryptable, so use it with care.
 
-### Admin Password Reset
+### An Administrator Setting a New Password
 
-An administrator can reset your password from user management:
+Administrators can set a new password for a user directly in [User Management](./user-management.mdx) (`PUT /api/v1/admin/users/{id}` with `password`):
 
-1. Administrator resets your password
-2. You receive an email with a temporary password
-3. Log in with the temporary password
-4. Change your password
+1. The administrator sets the new password (validated against the password policy, but **without** the history check).
+2. The user receives a `user.password_reset` notification — **no email with a temporary password is sent**, so the administrator must pass the new password on through a secure channel.
+3. The user should change it themselves after logging in.
+
+Related admin actions: **force password change** (`POST /api/v1/admin/users/{id}/force-password-change`, requiring a change at next login), **reset expiration clock** (resets `password_changed_at`), and **exempt from expiration** (`password_expiration_exempt`).
 
 ## Troubleshooting
 
 ### Cannot Access Login Page
 
-1. Check your internet connection
-2. Verify the URL is correct
-3. Try a different browser
-4. Clear browser cache and cookies
-5. Contact your IT administrator
+1. Check your network connection and the URL.
+2. Try another browser and clear cache and cookies.
+3. Confirm `site_url` / the frontend address is correct (SSO callbacks depend on it too).
+4. Contact your administrator.
 
-### Forgot Password
+### Login Says the Username or Password Is Wrong
 
-1. Click **Forgot Password?** on the login page
-2. Enter your email address
-3. Check your email for the reset link
-4. Click the link and enter a new password
-5. Log in with your new password
+An unknown account, a wrong password, and an SSO account attempting password login all return the same `2003` — that is anti-enumeration by design, not a malfunction.
 
-See [Password Management](#password-management) for details.
+1. Confirm you are using a **username** (exact) or **email** (case-insensitive).
+2. If the account was created through SSO and never had a local password, use SSO login instead.
+3. If the message includes `remaining_attempts`, mind the remaining tries.
+4. Use [Forgot Password](#resetting-a-forgotten-password) to reset.
 
-### Account Locked
+### Account Already Locked
 
-1. Wait for automatic unlock (default 15 minutes)
-2. Contact administrator for immediate unlock
-3. Use password reset if you forgot your password
+1. Wait for the lock to expire (15 minutes by default) and log in again; the failure counter resets at that point.
+2. Administrator activate/edit actions do **not** clear `locked_until` — there is no "unlock now" button. For urgent access, run the **forgot password** reset: a successful reset clears both the failure counter and the lock.
+3. If locking recurs, check for an old script retrying a stale password.
 
-### Email Verification Not Received
+### Verification / Reset Email Not Received
 
-1. Check spam/junk folder
-2. Wait a few minutes (email may be delayed)
-3. Click **Resend Verification Email**
-4. Verify the email address is correct
-5. Contact administrator if still not received
+1. Confirm `smtp_enabled=true` and correct SMTP settings — without them the endpoints return `5007`.
+2. Check the spam folder and wait a few minutes.
+3. Mind the 60-second resend cooldown (`5008` reports the remaining seconds).
+4. Confirm the address matches the one on the account.
+
+### Email Still Unverified Because No Code Arrived
+
+Returning `5004` at login moves you straight into the verification step and resends a code automatically; the **Resend** button is limited by the 60-second cooldown.
+
+Because the admin console has no "mark email verified" action, ask an administrator to verify the SMTP configuration first (sending returns `5007` when it is missing). If the mail path is still unavailable, temporarily turn off `email_verification` so the user can log in, and re-enable it once delivery works.
+
+### TOTP Will Not Verify
+
+1. Check that device time is synced automatically (±30-second window).
+2. When rate-limited, wait as prompted — up to 15 minutes.
+3. Log in with a one-time **backup code**.
+4. If backup codes are exhausted, ask an administrator to unbind TOTP so you can re-enrol.
+
+### You Are Being Asked to Change Your Password
+
+That means `force_password_change` is set (the password expired, or an administrator required it). Enter your current and new password on the `/change-password` page; the flag clears automatically on success.
 
 ### SSO Login Fails
 
-1. Verify you're using the correct SSO provider
-2. Check if your SSO account is active
-3. Clear browser cookies and try again
-4. Contact your SSO administrator
-5. Try password login if available
-
-See [SSO Configuration](./sso.mdx) for SSO-specific troubleshooting.
-
-### Account Pending Approval
-
-- Your account requires administrator approval
-- Wait for an administrator to activate your account
-- You'll receive an email when approved
-- Contact administrator if waiting too long
-
-### Session Expired
-
-1. Log in again
-2. Contact administrator to adjust the session timeout
-3. Check if you're logged in on another device (single session mode)
+1. Confirm you are using the right provider and that the account is active (deactivated or pending-approval accounts land on `/sso-callback` with the matching message).
+2. Check the provider configuration and callback address (see [SSO Configuration](./sso.mdx)).
+3. Clear browser cookies and retry, or fall back to password login if the site allows it.
 
 ## Best Practices
 
-### Security Recommendations
+**✅ Do**
 
-**✅ Do:**
-- Use a strong, unique password
-- Enable two-factor authentication
-- Log out when using shared computers
-- Keep your email address up to date
-- Review login notifications regularly
-- Use SSO if available (more secure)
+- Use a strong, unique password and enable TOTP.
+- Use a password manager instead of reusing passwords elsewhere.
+- Keep your email address valid — it is the only password-recovery channel.
+- Act on security notifications instead of clearing the list.
+- Prefer SSO login to reduce password exposure.
 
-**❌ Don't:**
-- Share your password with others
-- Use the same password as other services
-- Stay logged in on public computers
-- Ignore login anomaly notifications
+**❌ Don't**
 
-### Account Management
+- Share accounts or passwords.
+- Stay signed in on public devices (logging out only affects the local token, and see the [logging-out](#logging-out) limitation).
+- Disable TOTP on shared devices.
+- Ignore `security.login_anomaly` alerts.
 
-**Regular Tasks:**
-- Update your password when required
-- Review login notifications for suspicious activity
-- Keep profile information current
+## Related Documentation
 
-## Related Pages
-
-- [SSO Configuration](./sso.mdx) — Single Sign-On details
-- [Site Security Reference](/reference/site-settings) — Site security configuration
+- [Profile Settings](./profile.mdx) — where you actually change the password, manage TOTP, and unlink accounts
+- [SSO Configuration](./sso.mdx) — provider setup and user lifecycle
+- [User Management](./user-management.mdx) — approval, deactivation, forced changes, and expiration management
+- [Site Settings reference](/en/reference/site-settings) — defaults for every `security` / `sso` key used above

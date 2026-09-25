@@ -8,14 +8,22 @@ Clouisle 的持久化数据分布在 PostgreSQL、Qdrant、Redis 和上传存储
 
 ## 存储后端
 
-站点设置支持**本地文件系统**和**对象存储**。本地模式适合单 API 副本；API 扩展到多个副本时，需要 `ReadWriteMany` 共享卷。对象存储适合多副本和跨节点部署，但必须配置端点、桶、区域、访问密钥、Secret Key、安全和路径风格。
+站点设置（**站点设置** > **存储**）支持**本地文件系统**和**对象存储**两种上传后端，由 `upload_storage_backend` 切换（默认 `local`）。本地模式适合单 API 副本；API 扩展到多个副本时，需要 `ReadWriteMany` 共享卷。对象存储适合多副本和跨节点部署。
+
+对象存储需要配置以下站点设置（均为数据库字段，不是环境变量）：`object_storage_endpoint`、`object_storage_bucket`、`object_storage_region`、`object_storage_access_key`、`object_storage_secret_key`；`object_storage_force_path_style` 默认 `true`（S3 兼容服务通常需要路径风格），`object_storage_secure` 默认 `true`（端点未写 scheme 时按 HTTPS 访问）。
+
+同分类下还有两项容量相关设置：`kb_document_max_upload_size_mb`（知识库单文件上限，默认 `50`，范围 `1`–`1024`）与 `audit_log_retention_days`（审计日志保留天数，默认 `365`，范围 `30`–`3650`，归档目录 `audit_log_archive_path` 默认 `/var/log/clouisle/audit_archives`）。
 
 ## Compose 卷
 
-- `postgres_data`：业务、审计、配置和元数据。
-- `qdrant_data`：向量集合。
-- `redis_data`：Redis 持久化数据和任务/会话状态。
-- `uploads_data`：用户上传和沙箱产物。
+| 卷 | 服务 | 内容 |
+| --- | --- | --- |
+| `postgres_data` | `db`（`/var/lib/postgresql/data`） | 业务、审计、配置和元数据 |
+| `qdrant_data` | `qdrant`（`/qdrant/storage`） | 向量集合 |
+| `redis_data` | `redis`（`/data`） | Redis 持久化数据和任务/会话状态 |
+| `uploads_data` | `api`（`/app/uploads`） | 用户上传和沙箱产物 |
+
+Kubernetes 对应三个 PVC：`postgres-data`（`10Gi`，`RWO`）、`qdrant-data`（`10Gi`，`RWO`）、`uploads-data`（`10Gi`，`RWX`，只被 `api` 挂载）。单文件 manifest 的 Redis 用 `emptyDir`，不持久化；Helm 默认给 Redis 一个 `5Gi` PVC。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/storage-settings-and-volumes.svg" alt="存储设置与部署卷" />

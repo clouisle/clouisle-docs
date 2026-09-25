@@ -1,253 +1,288 @@
 ---
 title: 用户管理
-description: 管理用户账户、密码策略、激活状态与 TOTP
+description: 管理用户账户、激活状态、密码策略与 TOTP
 icon: Users
 ---
 
-用户管理在**管理后台** > **用户**中操作，需要 `admin:user:*` 权限。管理员可创建用户、管理账户、控制访问、分配角色、执行策略和发送邮件。
+用户管理在管理台 **Users**（`/users`）页面，按动作区分权限：查看 `admin:user:read`、创建 `admin:user:create`、修改/激活/停用/密码策略 `admin:user:update`、删除 `admin:user:delete`。内置 Admin 角色持有这四项全部权限。
 
-## 访问用户管理
+本页列出每个动作的真实端点、校验规则与失败后的表现。用户**角色**如何影响权限见[角色与权限](./roles-permissions.mdx)。
 
-从管理后台进入：
+## 列表与筛选
 
-1. 以管理员身份登录
-2. 进入**管理后台**
-3. 在侧边栏点击**用户**
-4. 查看用户管理界面
+`GET /api/v1/admin/users`（`admin:user:read`）返回分页用户列表，参数：
 
-或直接导航到 `/users`。用户列表支持搜索、按状态筛选，并展示系统角色与团队角色。
+| 参数 | 说明 |
+| --- | --- |
+| `page` / `page_size` | 分页，默认 `page=1`、`page_size=20` |
+| `search` | 按用户名或邮箱模糊匹配（不区分大小写） |
+| `status` | 可多选：`active`、`inactive`、`pending` |
+| `role` | 按全局角色名过滤 |
+| `exclude_user_id` | 排除指定用户 ID（用于选择器等场景） |
+
+状态定义：`active` = `is_active=true`；`inactive` = `is_active=false` 且 `approval_status=approved`；`pending` = 待审批（`approval_status=pending`，`is_active=false`）。
+
+顶部统计来自 `GET /api/v1/admin/users/stats`（`admin:user:read`），返回 `total` / `active` / `inactive` / `pending`。列表默认不显示登录次数、失败登录次数、最后改密时间——这些字段接口不返回。
 
 ## 创建用户
 
-### 手动创建
+`POST /api/v1/admin/users`（`admin:user:create`）：
 
-1. 点击**创建用户**按钮
-2. 填写用户信息：
-   - **用户名**：唯一用户名
-   - **邮箱**：用户邮箱地址
-   - **密码**：初始密码
-   - **激活**：账户是否激活（`is_active`）
-3. 点击**创建用户**
-4. 用户创建完成
+1. 点击 **Create User**。
+2. 填写 **Username**（全局唯一）、**Email**（全局唯一，需为合法邮箱）、**Password**、**Active** 开关（`is_active`）。
+3. 保存。
 
-> **Note:** 全局角色和团队角色在创建后通过编辑或团队管理流程分配，创建用户表单不分配角色或团队。
+后端行为与校验：
 
-### 批量导入
+| 情况 | 结果 |
+| --- | --- |
+| 用户名已存在 | `user_with_username_exists` |
+| 邮箱已存在 | `user_with_email_exists` |
+| 未提供 `locale` | 回退到站点设置 `default_language`（默认 `en`） |
+| — | 新用户 `approval_status` 强制写入 `approved` |
 
-> **Note:** 未实现 / Roadmap。无 CSV 用户导入功能。用户逐个创建（`POST /api/v1/admin/users`），或在启用 `sso_auto_create_users` 时通过 SSO 自动创建。
+<Callout type="warn">
+  创建表单**不接受 `roles`**：新用户没有任何全局角色，创建后必须单独指派，否则只能看到公开资源、无法在团队内操作。
+</Callout>
 
-### SSO 自动创建
+### 批量导入 / SSO 自动创建
 
-通过 SSO 自动创建用户：
+> **未实现 / Roadmap。** 没有 CSV/JSON/Excel 用户导入，只能逐个创建（`POST /api/v1/admin/users`），或在 SSO 首次登录时自动创建。
 
-1. 配置 SSO 提供商
-2. 在 SSO 设置中启用 `sso_auto_create_users`
-3. 用户通过 SSO 登录
-4. 账户自动创建
-5. 分配到默认角色和默认团队（如已配置）
-
-SSO 自动创建设置（站点设置 → 安全/SSO）：
+SSO 自动创建由站点设置控制（**Site Settings** → **SSO/Security**）：
 
 | 设置 | 说明 |
 | --- | --- |
-| 启用自动创建 | `sso_auto_create_users` |
-| 默认角色 | `default_role_id` — 默认 Viewer |
-| 默认团队 | `default_team_id` + `default_team_role` |
-| 按邮箱匹配 | `sso_match_by_email` |
-| 需要审批 | `sso_require_approval` |
+| `sso_auto_create_users` | 开启后 SSO 首次登录自动建号 |
+| `default_role_id` | 新用户默认全局角色，首次初始化指向 **Viewer** |
+| `default_team_id` + `default_team_role` | 默认团队与成员角色，`default_team_role` 只接受 `viewer`/`member`/`admin`，缺省 `member`；`owner` 永不自动分配 |
+| `sso_match_by_email` | 按邮箱匹配已有账户 |
+| `sso_require_approval` | 新账户需审批（`approval_status=pending`） |
 
-> **Note:** 未实现 / Roadmap：SSO 创建的邮箱域限制不可用。
+> **未实现 / Roadmap**：SSO 自动创建没有邮箱域白名单限制。
 
 ## 查看用户详情
 
-点击用户可打开详情面板，查看完整用户信息，包括：`last_login`、`force_password_change`、`password_expiration_exempt`、用户的 `roles` 和 SSO 连接信息。不暴露登录次数、失败登录次数或最后密码修改时间。
+点击用户打开详情/编辑面板（`GET /api/v1/admin/users/{user_id}`，`admin:user:read`）。可见字段：
 
-> **Note:** 未实现 / Roadmap：用户管理内无单用户活动视图。可通过**审计日志**按用户筛选查看用户操作。
+- 身份：`username`、`email`、`is_active`、`approval_status`、`is_superuser`、`auth_source`（`local` / `sso`）、`email_verified`
+- 偏好：`locale`、`avatar_url`
+- 时间：`created_at`、`last_login`
+- 密码状态：`force_password_change`、`password_expiration_exempt`（列表里显示为密码状态徽标）
+- 授权：`roles`（全局角色数组）
+- SSO：`sso_connections`（提供商、外部账号、首次/最后登录），有 `admin:sso:update` 时可断开连接
+
+> **未实现 / Roadmap**：用户管理内没有单用户活动视图、登录历史、活跃会话列表或会话撤销。账户锁定由全局登录策略 `max_login_attempts` / `lockout_duration_minutes` 强制执行；用户行为需到 **Audit Logs** 按用户筛选查看。
 
 ## 编辑用户
 
-### 更新用户信息
+`PUT /api/v1/admin/users/{user_id}`（`admin:user:update`）。可提交字段：
 
-1. 打开用户详情
-2. 点击**编辑**按钮
-3. 更新字段：邮箱、用户名、全局角色、激活状态
-4. 点击**保存更改**
-
-### 密码策略操作
-
-无"重置密码为临时密码"流程。管理员按用户管理密码策略：
-
-| 操作 | 端点 |
+| 字段 | 说明 |
 | --- | --- |
-| 强制修改密码 | `POST /api/v1/admin/users/{user_id}/force-password-change` |
-| 重置密码过期计时 | `POST /api/v1/admin/users/{user_id}/reset-password-expiration` |
-| 免除密码过期 | `POST /api/v1/admin/users/{user_id}/exempt-password-expiration` |
-| 批量强制修改密码 | `POST /api/v1/admin/users/bulk-force-password-change` |
-| 密码过期概览 | `GET /api/v1/admin/users/password-expiration-stats` |
-| 即将过期用户 | `GET /api/v1/admin/users/expiring-passwords` |
+| `email` | 改为新邮箱 |
+| `is_active` | 激活/停用开关 |
+| `roles` | 全局角色名数组，**整体替换** |
+| `password` | 可选。提交即改密（需通过密码强度校验，失败返回 `password_validation_failed`，`data.errors.password` 带具体原因） |
+| `avatar_url` / `locale` | 头像与语言偏好 |
 
-> **Note:** 未实现 / Roadmap：从管理面板生成临时密码或发送重置邮件不可用。
+<Callout type="error">
+  **`username` 不可修改**：`UserUpdate` schema 不含该字段，前端编辑表单也不提供用户名输入框。写错用户名只能删除重建。
+</Callout>
 
-### 管理团队归属
+### 角色改动的保护规则
 
-在用户详情中查看用户的团队和角色。添加/移除用户和更改团队角色从**团队**页面（添加成员、更改角色、移除成员、转让所有权）完成，不从用户详情视图操作。
+`roles` 是整体替换（先清空再写入，未列出的角色会丢失；匹配不到的角色名被忽略）。若目标用户仍是某些团队的 `owner`/`admin`，而新角色集不再包含 `team:manage`（或 `*`），请求返回 403 `operation_not_permitted`（`permission: team:manage`）。**先降级团队角色，再摘全局角色**，否则顺序反了会被挡住。
 
-## 状态管理
+提交密码时后端会向该用户发送 `user.password_reset` 通知。
 
-### 激活用户
+## 账户状态
 
-1. 找到未激活用户
-2. 点击 **...** 菜单
-3. 选择**激活**
-4. 确认激活
-5. 用户可重新登录
+| 操作 | 端点 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| 激活 | `POST /api/v1/admin/users/{user_id}/activate` | `admin:user:update` | `is_active=true` 且 `approval_status=approved`；已是激活状态返回 `user_already_active` |
+| 停用 | `POST /api/v1/admin/users/{user_id}/deactivate` | `admin:user:update` | `is_active=false`、`approval_status=approved`；超管被拒（`cannot_deactivate_superuser`）；已停用返回 `user_already_inactive` |
 
-激活后：用户可登录、资源访问恢复、团队归属激活、API 密钥启用。
+停用的实际效果：
 
-### 停用用户
+- 无法登录：JWT 与 API Key 两条认证路径都会因为 `is_active=false` 拒绝（401 `inactive_user`，待审批用户是 `pending_approval_user`）。
+- 使用他名下 API Key 的集成**立即失败**——Key 本身不会被改写，但认证时因用户已停用而拒绝。
+- 资源、团队归属、会话全部保留；重新激活即可恢复。
 
-1. 打开用户详情
-2. 点击**停用**按钮
-3. 提供原因（可选）
-4. 确认停用
-5. 用户被停用
+激活/停用都会给用户发送 `user.activated` / `user.deactivated` 通知，并写审计日志（`activate_user` / `deactivate_user`）。
 
-停用后：用户不能登录、API 密钥禁用、资源保留、团队归属保留、可重新激活。
+## 删除用户
 
-### 删除用户
+`DELETE /api/v1/admin/users/{user_id}`（`admin:user:delete`）。唯一硬性拦截：`is_superuser=true` 的账户返回 `cannot_delete_superuser`。前端删除对话框要求输入用户名确认，并列出影响范围。
 
-1. 打开用户详情
-2. 点击**删除**按钮
-3. 查看删除内容
-4. 输入用户名确认
-5. 点击**永久删除**
+删除影响（按模型外键规则，已核对 `models/*.py`）：
 
-删除后：用户账户和个人资料、个人对话、API 密钥、个人资源（如无团队）被删除。团队资源（转让给团队）、审计日志（合规）、团队归属（移除）保留。
-
-## 批量操作
-
-可用批量操作：
-
-| 操作 | 端点 |
+| 会被删除（CASCADE） | 会被置空/保留（SET_NULL） |
 | --- | --- |
-| 批量强制修改密码 | `POST /api/v1/admin/users/bulk-force-password-change` |
-| 发送邮件 | `POST /api/v1/admin/users/send-email` |
+| 账户本身、密码历史、通知与已读记录 | 他创建的 Agent / 知识库 / 文档 / 工具 / Skill（`created_by` 置空并保留） |
+| 个人对话及其消息、Agent 运行记录 | 他拥有的团队（`Team.owner` 置空，团队本身保留） |
+| 他名下的 API Key、个人记忆 | 审计日志（合规用途，不随账户删除） |
+| 全部团队成员关系、作用域角色记录 | 团队内的共享资源与其他成员 |
 
-> **Note:** 未实现 / Roadmap：批量启用/停用、批量加入/移出团队、批量导出、批量删除不可用。无用户导出（CSV/JSON/Excel）和用户导入功能。
+<Callout type="error" title="删除团队 owner 会让团队失去 owner">
+  `TeamMember` 随用户级联删除，因此**删除某个团队的 owner 会同时删掉他的 owner 成员关系**，团队 `owner` 字段被置空，该团队此后没有 owner——只有超管能改成员角色或补授所有权。要移除团队 owner，请先在团队里转让所有权，再删除账户。
+</Callout>
 
-## 用户权限
+## 密码与密码过期
 
-### 系统角色
+**没有**「重置为临时密码」或「从管理台发送重置邮件」的流程。管理员用下面这组按用户操作配合全局密码策略：
 
-| 角色 | 权限 |
-| --- | --- |
-| Super Admin | 所有权限（`*`） |
-| Admin | 仪表板访问、系统读取可见性、团队范围资源管理 |
-| Member | 日常资源创建和编辑，无仪表板访问 |
-| Viewer | 默认只读角色，含聊天/运行/执行权限 |
+| 操作 | 端点 | 权限 | 行为 |
+| --- | --- | --- | --- |
+| 强制下次登录改密 | `POST /api/v1/admin/users/{user_id}/force-password-change` | `admin:user:update` | `force_password_change=true`，并发送高优先级通知 |
+| 重置过期计时 | `POST /api/v1/admin/users/{user_id}/reset-password-expiration` | `admin:user:update` | `password_changed_at=now`，按策略重算 `password_expires_at`，清空到期提醒时间 |
+| 设置/取消免过期 | `POST /api/v1/admin/users/{user_id}/exempt-password-expiration`，请求体 `{"exempt": true/false}` | `admin:user:update` | 写入 `password_expiration_exempt`；`exempt=true` 时同时清除 `force_password_change` |
+| 批量强制改密 | `POST /api/v1/admin/users/bulk-force-password-change`，请求体 `{"user_ids": [...]}` | `admin:user:update` | 逐个置位并通知；返回 `{"count": n}`；空数组 `no_users_selected`，全部不存在 `no_users_found` |
+| 密码过期概览 | `GET /api/v1/admin/users/password-expiration-stats` | `admin:user:read` | 返回 `total_users`/`expired_count`/`expiring_soon_count`/`force_change_count`/`exempt_count`；若站点设置 `password_expiration_enabled=false`，全部返回 0 |
+| 过期/即将过期清单 | `GET /api/v1/admin/users/expiring-passwords` | `admin:user:read` | 分页（`page`、`page_size` 最大 100），`filter` 取 `all`/`expired`/`expiring`/`force_change`；「即将过期」窗口由 `password_expiration_warning_days`（默认 7 天）决定 |
 
-更改用户角色：打开用户详情 → 编辑 → 更改全局角色 → 保存。
+前端只在**详情页/行内菜单**展示这些操作，且仅当 `auth_source=local`（SSO 用户没有本地密码）；全局策略配置在 **Site Settings** → **Security**。
 
-### 团队角色
+## TOTP（双因素）
 
-用户在不同团队可拥有不同角色：
+| 能力 | 端点 | 权限 | 界面 |
+| --- | --- | --- | --- |
+| TOTP 采用率统计 | `GET /api/v1/admin/totp/stats` | `admin:dashboard:access` | 管理台 Dashboard 的 TOTP 卡片（`totp_enabled` / `total_users` / `adoption_rate`） |
+| 查看某用户 TOTP 状态 | `GET /api/v1/admin/totp/users/{user_id}/status` | **超管** | 无界面，仅 API |
+| 禁用某用户 TOTP | `POST /api/v1/admin/totp/users/{user_id}/disable` | **超管** | 无界面，仅 API |
 
-- Owner：完全团队控制
-- Admin：管理团队成员和资源
-- Member：创建和使用资源
-- Viewer：只读访问
-
-## 安全功能
-
-### 账户安全
-
-每用户安全设置：
-
-1. **密码策略**：全局强制执行（站点设置 → 安全）
-2. **2FA（TOTP）**：查看状态和按用户禁用（管理员端点）
-3. **密码过期**：按用户强制修改、重置过期或免除
-
-管理员 TOTP 端点：
+用户自助的开启/关闭/备份码在个人设置里完成（见[登录与账户](./authentication.mdx)）。
 
 ```bash
+# 需要超管 Token
 curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
+
 curl -X POST "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/disable" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-> **Note:** 未实现 / Roadmap：用户管理内无单用户会话管理（活动会话列表、撤销会话）和登录历史视图。账户锁定由全局登录策略（`max_login_attempts`、`lockout_duration_minutes`）强制执行。
+<Callout type="warn">
+  用户管理界面**没有**按用户开关 TOTP 的入口，也没有「强制某人启用 2FA」的开关；现有能力是统计数据 + 超管 API 兜底禁用（例如用户丢失验证器时）。
+</Callout>
 
-### 审计日志
+## 批量操作
 
-1. 所有用户操作被记录
-2. 通过审计日志按用户筛选查看
-3. 导出日志用于合规（CSV/JSON）
+用户列表勾选多人后弹出底部工具条。注意其中多项是**前端循环调用单用户接口**实现的，没有对应批量端点：
+
+| 操作 | 实现 | 要求 |
+| --- | --- | --- |
+| 发通知 | `POST /api/v1/admin/notifications`（逐个用户） | `admin:notification:create` |
+| 激活 | 循环 `POST .../{user_id}/activate` | `admin:user:update` |
+| 停用 | 循环 `POST .../{user_id}/deactivate` | `admin:user:update` |
+| 删除 | 循环 `DELETE .../{user_id}` | `admin:user:delete` |
+| 强制改密 | `POST /api/v1/admin/users/bulk-force-password-change`（真批量） | `admin:user:update` |
+| 授予 / 取消密码免过期 | 循环 `POST .../{user_id}/exempt-password-expiration` | `admin:user:update` |
+
+因为没有真正的批量端点，单条失败不会回滚其余条目；返回的 toast 计数可能与实际成功数不一致，涉及权限/状态冲突的用户请核对后再重试。
+
+> **未实现 / Roadmap**：没有批量加入/移出团队、批量导出、CSV 导入/导出。
+
+## 发送邮件
+
+`POST /api/v1/admin/users/send-email`，请求体 `{"user_ids": [...], "subject": "...", "content": "..."}`，需要 `admin:user:update`。响应为 `{"sent_count": n, "skipped_count": n, "total": n}`。
+
+限制（超过即报错，不会部分发送）：
+
+| 限制 | 值 | 错误 |
+| --- | --- | --- |
+| SMTP 未启用（`smtp_enabled=false`） | — | `smtp_not_configured` |
+| 单管理员每小时发信量 | 100 | `email_rate_limit_exceeded`（`data.limit=100`、`data.period=hour`） |
+| 单收件人每天收信量 | 5 | 该收件人被跳过并计入 `skipped_count` |
+| 本次请求人数超过管理员剩余额度 | — | `email_quota_insufficient`（`data.requested` / `data.remaining`） |
+
+## 用户角色
+
+全局角色（可多选，`roles`）决定系统级与管理台能力，团队角色决定团队内级别。内置 5 个角色与权限集见[角色与权限](./roles-permissions.mdx)：
+
+| 角色 | 大致能力 |
+| --- | --- |
+| **Super Admin** | `*`，绕过一切检查 |
+| **Admin** | 管理台读写 + 全团队资源权限 |
+| **Team Admin** | Member + 团队设置与成员管理 |
+| **Member** | 团队内创建/编辑/运行资源 |
+| **Viewer** | 只读 + 使用，默认角色 |
+
+团队角色（`owner`/`admin`/`member`/`viewer`）在**团队**页面维护，不在用户详情里改：用户详情只读展示团队归属。
 
 ## 最佳实践
 
-### 用户管理
+**✅ 推荐：**
 
-- 定期审查用户账户
-- 停用不活跃用户
-- 执行强密码策略
-- 特权账户启用 2FA
-- 监控失败登录尝试
-- 记录用户变更
+- 定期复核用户列表，及时停用离职人员（停用即可立即阻断登录与 API Key）
+- 创建后立刻指派最小必要的全局角色
+- 特权账户强制启用 2FA，并为其设置 `password_expiration_exempt` 之外的正常轮换策略
+- 用 `expiring-passwords` 清单提前处理即将过期账户，而不是等锁定后救火
+- 停用、删除、改角色等操作前后留痕（审计日志自带）
 
-### 安全
+**❌ 避免：**
 
-- 要求管理员使用 2FA
-- 监控审计日志
-- 设置密码过期
-- 失败尝试后锁定账户
-- 定期安全审计
+- 多人共用管理员账户（审计日志无法区分责任人）
+- 直接删除团队 owner 的账户（团队会变成无 owner 状态）
+- 用 `PUT /admin/users/{id}` 一次性替换角色集却漏掉某角色
+- 依赖「前端隐藏按钮」做权限控制——接口是独立校验的
 
 ## 故障排除
 
 ### 无法创建用户
 
-1. 检查邮箱是否唯一
-2. 验证用户名是否唯一
-3. 检查邮箱格式
-4. 验证密码满足要求
-5. 查看错误消息
+1. 检查用户名、邮箱是否已被占用（`user_with_username_exists` / `user_with_email_exists`）。
+2. 检查邮箱格式是否合法。
+3. 检查调用者是否持有 `admin:user:create`。
 
 ### 用户无法登录
 
-1. 检查账户是否激活
-2. 验证密码是否正确
-3. 检查账户是否锁定
-4. 查看失败登录尝试
-5. 重置密码
-6. 检查 2FA 设置
-7. 查看审计日志
+1. 确认 `is_active=true`（停用或待审批都会 401）。
+2. 确认密码正确；必要时先**强制改密**或直接改密。
+3. 确认账户未被登录策略锁定（`max_login_attempts` / `lockout_duration_minutes`）。
+4. 确认 TOTP 状态；用户丢失验证器时由超管调用禁用 TOTP 接口（无 UI）。
+5. 到 Audit Logs 按用户排查异常登录。
 
 ### 无法删除用户
 
-1. 检查用户是否是团队所有者
-2. 先转让团队所有权
-3. 检查用户是否有活跃资源
-4. 改为停用用户
+- 目标是超管 → `cannot_delete_superuser`（先摘掉超管标记或改用停用）。
+- 目标是团队 owner → 后端**不会**阻止删除，但团队会失去 owner；先在团队里转让所有权再删除。
+- 其他情况删除都会成功，务必确认上述级联清单（对话、API Key、成员关系会一并消失）。
+
+### 改角色报 403
+
+用户仍是某些团队的 `owner`/`admin`，而新角色集里没有 `team:manage`。先到团队里降级他的成员角色，再改全局角色。
 
 ## API 端点参考
 
-| 端点 | 方法 | 说明 |
-| --- | --- | --- |
-| `/api/v1/admin/users` | POST | 创建用户 |
-| `/api/v1/admin/users/{user_id}/force-password-change` | POST | 强制修改密码 |
-| `/api/v1/admin/users/{user_id}/reset-password-expiration` | POST | 重置密码过期计时 |
-| `/api/v1/admin/users/{user_id}/exempt-password-expiration` | POST | 免除密码过期 |
-| `/api/v1/admin/users/bulk-force-password-change` | POST | 批量强制修改密码 |
-| `/api/v1/admin/users/password-expiration-stats` | GET | 密码过期概览 |
-| `/api/v1/admin/users/expiring-passwords` | GET | 即将过期用户 |
-| `/api/v1/admin/users/send-email` | POST | 发送邮件 |
-| `/api/v1/admin/totp/users/{user_id}/status` | GET | 查看 TOTP 状态 |
-| `/api/v1/admin/totp/users/{user_id}/disable` | POST | 禁用 TOTP |
+| 端点 | 方法 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| `/api/v1/admin/users` | GET | `admin:user:read` | 分页列表（`page`/`page_size`/`status`/`search`/`role`） |
+| `/api/v1/admin/users/stats` | GET | `admin:user:read` | 总数/激活/停用/待审批统计 |
+| `/api/v1/admin/users` | POST | `admin:user:create` | 创建用户 |
+| `/api/v1/admin/users/{user_id}` | GET | `admin:user:read` | 用户详情 |
+| `/api/v1/admin/users/{user_id}` | PUT | `admin:user:update` | 改邮箱/激活状态/角色/密码 |
+| `/api/v1/admin/users/{user_id}` | DELETE | `admin:user:delete` | 删除用户 |
+| `/api/v1/admin/users/{user_id}/activate` | POST | `admin:user:update` | 激活 |
+| `/api/v1/admin/users/{user_id}/deactivate` | POST | `admin:user:update` | 停用 |
+| `/api/v1/admin/users/{user_id}/force-password-change` | POST | `admin:user:update` | 强制下次登录改密 |
+| `/api/v1/admin/users/{user_id}/reset-password-expiration` | POST | `admin:user:update` | 重置过期计时 |
+| `/api/v1/admin/users/{user_id}/exempt-password-expiration` | POST | `admin:user:update` | 设置/取消免过期（`{"exempt": bool}`） |
+| `/api/v1/admin/users/bulk-force-password-change` | POST | `admin:user:update` | 批量强制改密 |
+| `/api/v1/admin/users/password-expiration-stats` | GET | `admin:user:read` | 密码过期概览 |
+| `/api/v1/admin/users/expiring-passwords` | GET | `admin:user:read` | 过期/即将过期清单 |
+| `/api/v1/admin/users/send-email` | POST | `admin:user:update` | 批量发送邮件 |
+| `/api/v1/admin/totp/stats` | GET | `admin:dashboard:access` | TOTP 采用率 |
+| `/api/v1/admin/totp/users/{user_id}/status` | GET | 超管 | 查看用户 TOTP 状态 |
+| `/api/v1/admin/totp/users/{user_id}/disable` | POST | 超管 | 禁用用户 TOTP |
+
+<Callout type="info">
+  `/users/{user_id}/permissions`、`/users/{user_id}/permissions/check` 一类**用户级权限端点不存在**；权限只能通过全局角色与团队成员关系获得。
+</Callout>
 
 ---
 
 参见：
 - [登录与账户](./authentication.mdx) — 密码策略、TOTP 与账户恢复
-- [角色与权限](./roles-permissions.mdx) — 系统角色与团队角色
-- [团队与成员](./teams.mdx) — 团队内成员管理
+- [角色与权限](./roles-permissions.mdx) — 全局角色、权限代码与 403 排查
+- [团队与成员](./teams.mdx) — 团队内成员角色与所有权转让

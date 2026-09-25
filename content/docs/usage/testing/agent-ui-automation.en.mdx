@@ -16,7 +16,7 @@ This document provides evidence-based browser test journey design for the Clouis
 ```bash
 # Frontend unit/component tests
 bun run --cwd frontend test
-b run --cwd frontend test:coverage
+bun run --cwd frontend test:coverage
 bun run --cwd frontend coverage:check
 
 # Backend tests
@@ -50,8 +50,8 @@ Prepare authorized, disposable accounts and data:
 ### 2. Chat
 
 - **Purpose:** exercise agent chat, conversation lifecycle, attachments, runtime variables, and generated-link confirmation
-- **Routes:** `/chat/[id]`, `/chat/[id]?conversation=[conversationId]`, `/run/[id]?type=agent`, `/run/[id]?type=workflow`, `/run/[id]?type=workflow&debug=true`, `/embed/agent/[id]`, `/app/apps/[id]/api`, `/app/apps/[id]/monitor`
-- **Landmarks:** `New Chat`, `No conversations`, `Rename Conversation`, `Delete Conversation`, `How can I help you today?`, `Type a message...`, `Send`, `Stop`, `Attach file`, `Fill in Variables`, `Start Chat`, `Open link?`, `This link was generated in the chat. Please confirm before opening it.`
+- **Routes:** `/chat/[id]`, `/chat/[id]?conversation=[conversationId]`, `/run/[id]?type=agent`, `/run/[id]?type=workflow`, `/run/[id]?type=workflow&run=[runId]`, `/embed/agent/[id]`, `/app/apps/[id]/api`, `/app/apps/[id]/monitor`
+- **Landmarks:** `New Chat`, `No conversations yet`, `Rename Conversation`, `Delete Conversation`, `Where should we start?`, `Type a message...`, `Send`, `Stop`, `Attach file`, `Fill in Variables`, `Start Chat`, `Open link?`, `This link was generated in the chat. Please confirm before opening it.`
 - **Happy scenarios:** open a known agent; start a new chat; complete typed text/paragraph/number/checkbox/select/boolean/array/object variables; send a harmless prompt; rename a test conversation; regenerate an assistant response; edit a user message; switch between response versions
 - **Error/access scenarios:** open a chat logged out; omit the embedded-agent token; use an unknown agent/resource ID; send with required variables omitted
 
@@ -61,7 +61,7 @@ Prepare authorized, disposable accounts and data:
 - **Routes:** `/app/apps`, `/app/apps/workflow/[id]`, `/app/apps/workflow/[id]/monitor`, `/app/apps/workflow/[id]/logs`, `/app/apps/workflow/[id]/api`, `/run/[id]?type=workflow`, `/embed/workflow/[id]`
 - **Landmarks:** `Workflow Editor`, `Nodes`, `Start`, `End`, `Run`, `Publish`, `Published`, `Unpublished`, `Checklist`, `Resolve all issues before publishing`, `All checks passed`, `Test Run`, `Debug (use draft)`, `API Documentation`, `Webhook URL`, `API Key Required`, `Workflow Monitor`, `No workflow runs yet`
 - **Happy scenarios:** create a named workflow for a selected test team; add/configure a minimal valid graph; configure its LLM node (load models, search/group/select, edit prompt, switch memory modes, set advanced parameters and response schema, add output variables); configure an Agent node; configure a Sub-workflow node
-- **Error/access scenarios:** attempt to publish an incomplete graph; attempt a non-debug published run before publishing; visit with a user without app access; confirm unconfigured Answer node shows `Click to configure`
+- **Error/access scenarios:** attempt to publish an incomplete graph; attempt a non-debug published run before publishing; visit with a user without app access; confirm an unconfigured Answer node shows `Click to configure output variables` and a Condition node shows `Click to configure condition`
 
 ### 4. Knowledge bases
 
@@ -92,7 +92,7 @@ Prepare authorized, disposable accounts and data:
 - **Purpose:** verify dashboard routing, navigation, role/permission controls, and representative admin authorization boundaries
 - **Routes:** `/dashboard`, `/dashboard/observability`, `/users`, `/roles`, `/permissions`, `/models`, `/apps`, `/capabilities`, `/capabilities/code`, `/app/capabilities`, `/app/capabilities/code`, `/api-keys`, `/memories`, `/audit-logs`, `/site-settings` and its subroutes
 - **Landmarks:** sidebar items `Dashboard`, `Teams`, `Knowledge Bases`, `Activity Log`, `Users`, `Roles`, `Permissions`, `API Keys`, `Models`, `Apps`, `Capabilities`, `Notifications`, `Site Settings`, `Audit Logs`, `Observability`, `Memories`, `Log out`; dashboard time ranges `Last 7 Days`, `Last 30 Days`, `Last 90 Days`, `All Time`
-- **Happy scenarios:** with an authorized disposable admin, navigate to a representative dashboard page; verify platform memory graph loading, empty, and populated states; verify user list, search/filter, pagination, create/edit/status change/bulk delete; exercise registration/approval/email verification/account deletion/password policy/TOTP/session/CORS with disposable values
+- **Happy scenarios:** with an authorized disposable admin, navigate to a representative dashboard page; verify platform memory graph loading, empty, and populated states; verify user list, search/filter, pagination, create/edit/status change/bulk delete; exercise registration/approval/email verification/account deletion/password policy/TOTP/session/model endpoint allowlist with disposable values
 - **Error/access scenarios:** access each relevant route with a user missing its mapped permission; force memory-graph loading to fail and confirm sanitized recovery; force a list or status-update request failure and confirm retry/recovery does not show stale success
 
 ## Reusable secure Agent browser-testing prompt

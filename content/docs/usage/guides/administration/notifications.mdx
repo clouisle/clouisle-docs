@@ -1,18 +1,59 @@
 ---
 title: 通知与外部渠道
-description: 查看通知、配置发送渠道并启用自动事件通知
+description: 查看通知、配置投递渠道并选择产生自动通知的事件类型
 icon: BellRing
 ---
 
-通知中心集中显示全站、团队和个人通知，支持搜索、按未读筛选和标记已读。自动通知由系统事件触发，管理员可选择事件类型和外部渠道。
+通知中心集中显示全站、团队和个人通知，支持搜索、按未读筛选和批量标记已读。自动通知由系统事件触发：管理员决定**哪些事件类型产生通知**、**哪些外部渠道负责投递**，普通用户只能查看与标记已读。
 
 ## 查看通知
 
-前往**通知**，按范围、优先级和类型筛选。通知类型包括公告、安全、待处理、状态更新和普通通知。文档处理、工作流运行、Agent 发布、API Key 过期、配额和安全事件可触发自动通知。
+通知分三类范围，可见性由后端按团队成员关系实时计算：
+
+| 范围 | 取值 | 谁能看到 |
+| --- | --- | --- |
+| 全局 | `global` | 所有登录用户 |
+| 团队 | `team` | 目标团队的成员 |
+| 用户 | `user` | 指定的单个用户 |
+
+级别为 `low` / `medium` / `high`。**已读状态是每人一份**（`NotificationRead` 记录），你标记已读不会影响其他用户。已过期的通知（`expires_at` 早于当前时间）默认不返回，因此「通知突然消失」通常是过期而非被删除。
+
+`GET /api/v1/notifications` 支持的筛选参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `scope` | 按范围过滤（`global`、`team`、`user`） |
+| `type` | 按事件类型精确匹配，如 `kb.doc_failed` |
+| `level` | 按级别过滤（`low`、`medium`、`high`） |
+| `search` | 对标题、正文与类型做不区分大小写的子串搜索 |
+| `unread_only` | 仅返回未读 |
+| `created_from` / `created_to` | 按创建时间范围过滤 |
+| `page` / `page_size` | 分页，`page_size` 上限 `100`（默认 `20`） |
+
+<Callout type="warn">
+  没有 `PATCH /api/v1/notifications/{id}`，普通用户也没有单条删除接口。标记已读只能通过 `POST /api/v1/notifications/read`（传 `notification_ids` 或 `mark_all: true`）**批量**完成；删除仅管理员可执行。想「清掉某一条」在当前版本做不到——正确做法是筛选后批量标记已读。
+</Callout>
 
 ## 配置渠道
 
-在**站点设置** > **通知渠道**选择邮件、钉钉、企业微信、飞书、Slack 或 Webhook。填写渠道凭据后发送测试消息；不要把签名密钥放在 URL 查询参数中。Webhook 渠道配置 `webhook_secret` 后，出站请求带 `X-Webhook-Signature: sha256=<hex>` 与 `X-Webhook-Signature-256: <hex>` 两个签名头——HMAC-SHA256 对原始请求体计算；接收端应基于原始 body 做常量时间比较验证。
+在**站点设置** > **通知渠道**选择并配置渠道。每个渠道都需**同时**满足两点才会真正投递：该渠道的 `*_enabled` 为 `true`，且必填凭据已填写。所有渠道开关默认均为 `false`。
+
+| 渠道 | 关键设置 | 测试端点 |
+| --- | --- | --- |
+| 邮件 | `smtp_enabled`、`smtp_host`、`smtp_port`、`smtp_encryption`（`none`/`ssl`/`tls`）、`smtp_username`、`smtp_password`、`email_from_name`、`email_from_address` | `/test-email` |
+| 钉钉 | `dingtalk_enabled`、`dingtalk_notification_type`（`webhook` 或 `app`）、Webhook URL/Secret 或 App Key/Secret/Agent ID | `/test-dingtalk` |
+| 企业微信 | `wechat_enabled`、`wechat_notification_type`（`webhook` 或 `app`）、Webhook URL，或 Corp ID（`wechat_corp_id`）/Agent ID（`wechat_agent_id`）/App Secret（`wechat_secret`） | `/test-wechat` |
+| 飞书 | `feishu_enabled`、`feishu_notification_type`（`webhook` 或 `app`）、Webhook URL/Secret 或 App ID/Secret | `/test-feishu` |
+| Slack | `slack_enabled`、`slack_webhook_url` | `/test-slack` |
+| Webhook | `webhook_enabled`、`webhook_url`、`webhook_method`（`POST`/`GET`）、`webhook_headers`、`webhook_body_template`、`webhook_secret` | `/test-webhook` |
+
+配置完先发测试消息再保存。**不要把签名密钥放进 URL 查询参数**——查询串会出现在代理、网关与浏览器历史里。
+
+Webhook 渠道配置 `webhook_secret` 后，出站请求带 `X-Webhook-Signature: sha256=<hex>` 与 `X-Webhook-Signature-256: <hex>` 两个签名头，均为对**原始请求体**计算的 HMAC-SHA256。接收端必须基于未经解析/重排的原始 body 做常量时间比较验证，否则会漏检或误判。
+
+<Callout type="info">
+  `webhook_body_template` 支持 `{{title}}`、`{{content}}`、`{{link_url}}` 三个占位符。接收方解析失败时通知状态会落到 `failed`，但站内通知已经生成——所以外部渠道故障不会让消息丢失。
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/notification-channel-settings.png" alt="通知渠道设置" />
@@ -21,12 +62,90 @@ icon: BellRing
 
 ## 自动通知
 
-在**自动通知**页：
+**自动通知**页控制两类数据：
 
-1. 选择全局外部渠道。
-2. 按团队、用户、知识库、工作流、Agent、API Key 和安全分类启用事件（约 18 个默认事件类型）。
-3. 保存后用测试事件验证站内和外部状态。
+- `channels`：哪些外部渠道参与投递（可多选；不选则通知只留在站内）
+- `enabled_types`：哪些事件类型产生通知
 
-默认事件包括：文档处理、工作流运行、Agent 发布/下架、API Key 即将过期/已过期、登录异常、账户锁定、密码变更等。API Key 过期检查由 Celery Beat 每天 `09:00` 执行，过期前 `7`、`3`、`1` 天各提醒一次。登录异常检测记录最近 `30` 天、每用户最多 `10` 个 IP 与 `10` 台设备；从新 IP 或设备登录时触发异常通知。
+对应端点 `GET` / `PUT /api/v1/admin/site-settings/auto-notifications`，读取需要 `admin:settings:read`，修改需要 `admin:settings:update`。提交未知类型会被拒绝（`invalid_notification_type`），不会静默丢弃。
 
-外部发送状态包括待发送、发送中、已发送和发送失败；失败记录重试次数。不要只依赖外部渠道，重要安全事件仍应在通知中心和审计日志确认。
+共 **25** 个可用类型，**默认启用 19 个**：
+
+| 分组 | 类型 | 默认启用 |
+| --- | --- | --- |
+| 团队 | `team.member_added`、`team.member_removed`、`team.role_changed`、`team.ownership_transferred`、`team.model_granted`、`team.model_revoked` | 是 |
+| 用户 | `user.activated`、`user.deactivated`、`user.password_reset`、`user.pending_approval` | 是 |
+| 知识库 | `kb.doc_indexed`、`kb.doc_failed` | 是 |
+| 工作流 | `workflow.run_failed` | 是 |
+| 工作流 | `workflow.pause_pending` | 是 |
+| 工作流 | `workflow.run_success` | 否 |
+| Agent | `agent.published`、`agent.unpublished` | 否 |
+| API Key | `apikey.expiring`、`apikey.expired` | 是 |
+| 安全 | `security.login_anomaly`、`security.account_locked`、`security.password_changed` | 是 |
+| 密码过期 | `password.expiring`、`password.expired` | 否 |
+| 密码过期 | `password.force_change` | 否（无触发代码） |
+
+<Callout type="warn" title="关闭类型＝永久丢事件">
+  类型一旦不在 `enabled_types` 中，事件发生时通知**根本不会创建**（判断发生在生成之前），事后启用也补不回来。`workflow.run_success` 默认关闭是有意的——每次成功运行都通知会迅速淹没通知中心；只有确实需要逐次确认时才打开。
+</Callout>
+
+### 定时检查
+
+以下自动通知由 Celery Beat 触发，时区为服务端时区：
+
+| 任务 | 时间 | 行为 |
+| --- | --- | --- |
+| `tasks.check_api_key_expiration` | 每天 `09:00` | 找出 `7` 天内即将过期的 Key，仅在剩余 `7`、`3`、`1` 天时各提醒一次（`apikey.expiring`）；已过期的发 `apikey.expired` |
+| `tasks.check_password_expiration` | 每天 `08:00` | 密码已过期发 `password.expired`；进入警告期（`password_expiration_warning_days`，默认 `7` 天）后仅在剩余 `7`、`3`、`1` 天时提醒（`password.expiring`） |
+
+「只在 7/3/1 天提醒」是刻意的去重机制——否则每天都会重复轰炸同一个用户。
+
+### 登录异常检测
+
+登录异常通知不是规则引擎，而是「与历史登录指纹比对」：
+
+- 每个用户保留最近 **30** 天、最多 **10** 个 IP 与 **10** 个 User Agent（超出后自动淘汰最旧的）。
+- 出现**已知集合之外**的 IP 或 UA 即判定异常并发 `security.login_anomaly`。
+- **首次登录永远不会被判为异常**（没有历史可比），因此新账号的第一条登录记录是干净的。
+- 登录历史存于 Redis；Redis 不可用时检测被跳过（不会误报）。
+
+<Callout type="warn">
+  单一代理出口 IP 会掩盖真实来源，共享 NAT 出口也会让「新 IP」判断失真。安全要求高的部署应把异常登录通知与审计日志（`login_success` / `login_failed`）配合使用，而不是只依赖异常检测。
+</Callout>
+
+### 投递状态
+
+外部发送状态包括待发送（`pending`）、发送中（`sending`）、已发送（`success`）和发送失败（`failed`）。失败记录重试次数。
+
+<Callout type="warn">
+  不要只依赖外部渠道。重要安全事件请同时到通知中心与[审计日志](./audit-logs.mdx)确认：审计日志是落库的权威记录，外部渠道可能因凭据失效或网络问题静默失败。
+</Callout>
+
+## 通知 API
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/notifications` | 列出可见通知（支持 scope/type/level/search/unread/时间筛选与分页） | 登录用户 |
+| `GET` | `/api/v1/notifications/unread-count` | 未读数量 | 登录用户 |
+| `POST` | `/api/v1/notifications/read` | 批量标记已读（`notification_ids` 或 `mark_all`） | 登录用户 |
+| `GET` / `PUT` | `/api/v1/admin/site-settings/auto-notifications` | 读取/更新自动通知配置 | `admin:settings:read` / `admin:settings:update` |
+| `GET` | `/api/v1/admin/notifications` | 管理员列出全部通知（含各渠道投递状态 `deliveries`） | 登录用户 + 管理员范围校验 |
+| `POST` | `/api/v1/admin/notifications` | 管理员创建通知 | `admin:notification:create` |
+| `DELETE` | `/api/v1/admin/notifications/{id}` | 管理员删除通知 | `admin:notification:delete` |
+
+<Callout type="info">
+  管理端列表有额外的范围校验：非全局管理员（`has_global_admin_access` 为假）不能请求 `scope=global`（否则 `insufficient_privileges`，403），且**必须指定 `team_id`**（`notification_scope_requires_team`，400）并通过该团队的团队管理员校验。这样团队管理员看不到、也管不到其他团队的通知。
+</Callout>
+
+### 管理员操作要点
+
+- **用户侧**：定期查看通知中心；安全类通知立即处理，必要时改密。
+- **管理员侧**：先配好渠道并测试成功，再在自动通知里勾选；渠道未配置时勾选不会产生任何外发，只会让人误以为「通知已发」。
+- 启用类型要有取舍：`workflow.run_success` 与 `agent.*` 类事件量大，只在确实需要时开启。
+
+---
+
+参见：
+- [站点设置](./site-settings.mdx) — 通知渠道的具体字段、默认值与测试端点
+- [审计日志](./audit-logs.mdx) — 权威的操作记录
+- [角色与权限](./roles-permissions.mdx) — `admin:settings:*`、`admin:notification:*` 权限

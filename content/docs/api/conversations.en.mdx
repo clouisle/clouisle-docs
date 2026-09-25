@@ -1,27 +1,221 @@
 ---
 title: Conversations API
-description: Query, update, delete conversations and manage message versions
+description: List, rename, and delete conversations, and read conversation/message statistics
 icon: MessagesSquare
 ---
 
-User conversation endpoints are mounted under `/api/v1/agents`; administrator conversation endpoints are mounted under `/api/v1/conversations`. Administrator endpoints require the corresponding admin permissions.
+Conversations are served by two routers:
 
-## User Endpoints
+- **User conversations (agents router)**: mounted under `/api/v1/agents`, scoped to the caller's own conversations, and covering listing, renaming, deleting conversations, and deleting a single message.
+- **Platform conversations (conversations router)**: mounted under `/api/v1/conversations`, aimed at the team/admin view, and covering paginated team-wide search, detail retrieval, single and batch deletion, and conversation statistics.
+
+Both require `conversation:read` for reads and `conversation:delete` for writes.
+
+## Endpoint Overview
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/v1/agents/conversations/my` | Query the current user's conversations |
-| GET | `/api/v1/agents/{agent_id}/conversations` | Query Agent conversations |
+| GET | `/api/v1/agents/conversations/my` | List all of the caller's conversations |
+| GET | `/api/v1/agents/{agent_id}/conversations` | List the caller's conversations for one agent |
 | GET | `/api/v1/agents/conversations/{conversation_id}` | Get a conversation and its messages |
-| PATCH | `/api/v1/agents/conversations/{conversation_id}` | Update the title |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | Rename a conversation |
 | DELETE | `/api/v1/agents/conversations/{conversation_id}` | Delete a conversation |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}/messages/{message_id}` | Delete a single message |
+| GET | `/api/v1/conversations` | Paginated team-wide conversation listing |
+| GET | `/api/v1/conversations/{conversation_id}` | Get conversation detail (including messages and user info) |
+| DELETE | `/api/v1/conversations/{conversation_id}` | Delete one conversation |
+| DELETE | `/api/v1/conversations?ids=...` | Batch delete conversations |
+| GET | `/api/v1/conversations/stats` | Totals and per-agent breakdown |
+| GET | `/api/v1/conversations/stats/trends` | Daily series of conversations, messages, and tokens |
 
-Titles are `1-200` characters. Not passing a conversation ID on the first chat creates one automatically; pass the ID back afterwards to continue variables and history.
+## User Conversation Endpoints
+
+Every user endpoint is scoped to `Conversation.user`: accessing someone else's conversation is treated as not found (`404`, code `6210`). Parameters, responses, and errors per endpoint are documented in [Agent Conversations in the Agent API](./agents#agent-conversations).
+
+| Method | Path | Target |
+| --- | --- | --- |
+| GET | `/api/v1/agents/conversations/my` | All of the caller's conversations, filterable by `agent_id` |
+| GET | `/api/v1/agents/{agent_id}/conversations` | The caller's conversations for one agent; supports `search`/time range/`sort_by` plus pagination |
+| GET | `/api/v1/agents/conversations/{conversation_id}` | Conversation detail + visible messages (each with `version_count`) |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | Rename (`title` 1-200 chars; omitted means unchanged) |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}` | Delete a conversation (messages cascade; agent counters decremented) |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}/messages/{message_id}` | Delete one message (conversation counters and token usage updated in the same row-locked transaction) |
+
+## Platform Conversation Endpoints
+
+The platform router serves the team/admin view and backs the admin panel's conversation-management page.
+
+### Paginated Listing
+
+```
+GET /api/v1/conversations
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | No | - | Filter by team (verifies team membership) |
+| `agent_id` | string (UUID) | No | - | Filter by agent (an out-of-scope agent yields an empty list rather than an error) |
+| `user_id` | string (UUID) | No | - | Filter by user (only applies to callers with dashboard access) |
+| `search` | string | No | - | Match the **conversation title**; message content is never searched |
+| `untitled_only` | boolean | No | false | Return only untitled conversations; when both are supplied `untitled_only` wins (an `elif` branch) |
+| `page` | integer | No | 1 | Page number (min 1) |
+| `page_size` | integer | No | 20 | Items per page (1-100) |
+
+Results are ordered by `updated_at` descending as a `PageData[ConversationListOut]`. Besides the conversation fields, each item carries the admin-view `user_id`/`user_name` plus the denormalized `agent_name`/`agent_icon`.
+
+### Get Conversation Detail
+
+```
+GET /api/v1/conversations/{conversation_id}
+```
+
+Returns a `ConversationWithMessages`: the conversation fields plus `messages` (visible messages, each with `version_count`) and the extra `user_id`/`user_name`. Unlike the user endpoint, this route lets an admin with dashboard access read **another user's** conversation within their teams.
+
+### Delete Conversation
+
+```
+DELETE /api/v1/conversations/{conversation_id}
+```
+
+```bash
+curl -X DELETE "https://your-domain.com/api/v1/conversations/conv-123" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Batch Delete Conversations
+
+```
+DELETE /api/v1/conversations?ids=conv-123&ids=conv-456
+```
+
+`ids` is a required **repeated query parameter** (`list[UUID]`), not a JSON body. The batch does not roll back per-item: it deletes whatever exists, and only returns `404` (`6210`) when none of the targets exist. Deletion is permanent, so filter by time, team, user, and agent first to confirm the scope.
+
+### Scope
+
+Visibility is the intersection of "accessible agents" and "dashboard access":
+
+| Caller | Visible scope |
+| --- | --- |
+| Superuser | Conversations across every team |
+| Team owner/admin (with dashboard access) | Every conversation in their teams; can narrow further with `team_id` |
+| Member/viewer | Only their own conversations |
+
+For non-superusers, passing `team_id` first verifies team membership; when the caller has no accessible agents the listing returns an empty result (no error).
+
+<Callout type="warn">
+  Capability differences: the platform `/api/v1/conversations` router has **no** `PATCH` (rename) and **no** per-message delete endpoint. Both exist only under agents-router paths (`/api/v1/agents/conversations/...`). The detail endpoint also has no separate message-pagination route — messages are inlined in the detail response.
+</Callout>
+
+## Conversation Statistics
+
+Both statistics routes are built on "accessible agents" and then narrowed by `own_only` and dashboard access:
+
+- Without `team_id`, the scope covers every agent in the teams the caller belongs to (all agents for a superuser).
+- With `team_id`, the scope is limited to that team's agents and team membership is verified.
+- Callers with dashboard access (superuser, or the owner/admin of the named team) see all conversations in scope; members and viewers see only their own.
+- `own_only=true` restricts any caller to their own conversations.
+
+<Callout type="info">
+  When the caller has access to no agents, both routes return zeroed data (an empty `conversations_by_agent` for `stats`; a full range of zero-value day buckets for `trends`) rather than an error.
+</Callout>
+
+### Get Conversation Stats
+
+```
+GET /api/v1/conversations/stats
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | No | - | Limit statistics to a single team |
+| `own_only` | boolean | No | false | Only count the caller's own conversations |
+
+```json
+{
+  "code": 0,
+  "data": {
+    "total_conversations": 1284,
+    "total_messages": 18237,
+    "conversations_by_agent": [
+      {
+        "agent_id": "1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d",
+        "agent_name": "Support Assistant",
+        "agent_icon": "life-buoy",
+        "count": 742
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+`conversations_by_agent` lists at most the **10** agents with the most conversations, ordered descending. If an agent record can no longer be resolved, `agent_name` falls back to the localized "unknown" label and `agent_icon` is `null`.
+
+### Get Conversation Trends
+
+```
+GET /api/v1/conversations/stats/trends?period=30d
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | No | - | Limit trends to a single team |
+| `period` | string | No | `7d` | Time range: `7d` (7 day points) or `30d` (30 day points); **every other value is treated as `7d`** |
+| `own_only` | boolean | No | false | Only count the caller's own conversations |
+
+```json
+{
+  "code": 0,
+  "data": {
+    "period": "7d",
+    "data": [
+      {
+        "date": "09/20",
+        "conversations": 34,
+        "messages": 512,
+        "tokens": 187340,
+        "users": {}
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `period` | string | The requested period |
+| `data` | array | One entry per day, oldest first, ending with today |
+| `data[].date` | string | Day label formatted as `MM/DD` |
+| `data[].conversations` | integer | Conversations created that day |
+| `data[].messages` | integer | Messages sent that day in accessible conversations |
+| `data[].tokens` | integer | Sum of `prompt` and `completion` tokens used that day |
+| `data[].users` | object | Per-user breakdown keyed by user ID: `{"name": string, "conversations": integer, "tokens": integer}` |
+
+<Callout type="warn">
+  `users` is populated only when the request supplies `team_id` **and** the caller has dashboard access for that team; otherwise it is an empty object. In addition, the zero-value early-return path (no accessible agents) omits the `users` key entirely — check for the field before parsing rather than assuming it is present and empty.
+</Callout>
 
 ## Message Versions
 
-Messages can have multiple versions; the response contains `version_number`, `is_active`, and parent message/branch relationships. Editing or regenerating creates a branch; switching versions only changes the active version.
+Messages can have multiple versions, and responses include `version_number`, `is_active`, parent message/branch relationships, and `version_count`. Editing or regenerating creates a branch; switching versions only changes the active version and deactivates the versions after the selected one (they were based on the previous branch). See [message versions in the Agent Chat API](./chat#message-versions).
 
-## Administrator Endpoints
+## Error Codes
 
-The admin panel can paginate team/user/Agent conversations, view details, and delete single or batch items. Deletion is permanent; filter by time, team, user, and Agent first.
+| Code | Message | Description |
+| --- | --- | --- |
+| `2000` | Unauthorized | Missing or invalid bearer token |
+| `3000` | Permission denied | Missing `conversation:read` / `conversation:delete`, or `not_team_member` (the `team_id` is not the caller's team) |
+| `6210` | Conversation not found | Conversation does not exist, is not the caller's (user endpoints), or is outside the accessible teams |
+| `6211` | Message not found | Message does not exist or does not belong to that conversation (single-message delete only) |
+| `1001` | Validation failed | Invalid parameters, e.g. a missing `ids` or out-of-range pagination (`page_size` max 100) |
+
+<Callout type="warn">
+  User endpoints return `404` (`6210`) for both "someone else's conversation" and "nonexistent conversation", so the existence of a conversation is never leaked. Platform endpoints return `403` (`not_team_member`) for conversations outside the accessible teams, and `404` when an ordinary member targets another user's conversation.
+</Callout>
+
+## Related Documentation
+
+- [Agent Chat API](./chat) — Send messages, streaming responses, and durable runs
+- [Agent API](./agents) — Agent management, agent conversation endpoints, and agent statistics
+- [SSE Streaming Events](./streaming) — Run events and reconnection

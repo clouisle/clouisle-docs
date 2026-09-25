@@ -133,7 +133,7 @@ Click a log entry to view full details, including:
 Field-level `before` / `after` change data is processed by `AuditLogService.sanitize_changes` before storage:
 
 - **Sensitive fields are masked:** Keys containing `password`, `hashed_password`, `api_key`, `secret_key`, `access_token`, `refresh_token`, `private_key`, `secret`, or `token` are masked. String values longer than 8 characters show only the first 8 characters followed by `***`; other values are replaced with `***`.
-- **Email addresses are partially masked:** e.g., `a***e@example.com`.
+- **Email addresses are partially masked:** with a local part longer than 2 characters the first and last characters are kept (`a***e@example.com`); with 2 or fewer, only the first is kept (`a***@example.com`).
 - **Nested dictionaries are processed recursively.**
 - **Values are truncated** to a maximum field length (500 characters); oversized structures are replaced with a preview string.
 
@@ -143,7 +143,12 @@ Because redaction happens at write time, raw secrets never appear in audit logs.
 
 ### Export Formats
 
-Supports CSV and JSON. The export endpoint `GET /api/v1/admin/audit-logs/export?format=csv|json` accepts the same filters as the list endpoint and returns up to 10,000 matching logs.
+Supports CSV and JSON. The export endpoint `GET /api/v1/admin/audit-logs/export?format=csv|json` accepts every list filter **except `resource_id`** (`user_id`, `team_id`, `action`, `resource_type`, `status`, `start_date`, `end_date`, `search`) and returns up to 10,000 logs, newest first.
+
+<Callout type="warn" title="Export search differs from list search">
+  The list endpoint's `search` matches resource name, resource ID, and IP address; the **export endpoint's `search` matches resource name and IP address only** (no resource ID), and there is no `resource_id` parameter at all. Searching by resource ID and then exporting therefore yields more rows than the list view — for troubleshooting, export using resource name or IP as the criterion.
+</Callout>
+
 
 **CSV columns:** ID, Time, User, Action, Resource Type, Resource Name, Operation, Status, IP Address, Error Message
 
@@ -168,18 +173,34 @@ Retention is controlled by the `audit_log_retention_days` site setting, default 
 
 ### Manual Archive
 
-1. Navigate to **Audit Logs** > **Archive**
-2. Click **Archive**
-3. The archiving task runs asynchronously (requires `audit:export`); track its status via the returned task ID
+1. Navigate to **Admin** > **Site Settings** > **Storage**.
+2. In the **Audit Logs** section, click **Archive** and confirm.
+3. The task runs asynchronously (requires `audit:export`); the UI polls task status every 2 seconds and times out after 5 minutes.
+
+> **Note:** The manual archive control lives on the **Storage** settings page, not on the audit log page — the audit log page only views, filters, and exports.
+
+**Endpoints used:**
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | Trigger the archive; returns `{ "task_id", "status": "pending" }` |
+| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | Poll status: `PENDING` / `STARTED` / `SUCCESS` (with `result.archived_count`) / `FAILURE` (with `error`) |
+| `POST` | `/api/v1/admin/audit-logs/archive` | Equivalent trigger under the audit-log router: submits the same `tasks.archive_old_audit_logs` but returns only `task_id` — there is **no** companion status endpoint |
+
+All three require `audit:export`; both success and failure of the trigger are themselves written to the audit log (`trigger_audit_log_archive`).
 
 **How Archiving Works:**
 
-- The archive task `tasks.archive_old_audit_logs` selects logs older than the retention cutoff
-- Logs are exported to local JSON files grouped by month, e.g., `/var/log/clouisle/audit_archives/audit_logs_202602.json` (existing monthly files are appended to)
-- Archived logs are then deleted from the database
+- The archive task `tasks.archive_old_audit_logs` selects logs older than the retention cutoff (`now - audit_log_retention_days`)
+- Logs are exported to local JSON files grouped by month, e.g. `/var/log/clouisle/audit_archives/audit_logs_202602.json` (existing monthly files are appended to)
+- Once archived, those rows are deleted from the database
 
 <Callout type="warn">
-  **Roadmap:** No scheduled automatic archive (e.g., daily 2 AM) and no S3/Azure/Blob archive destinations. Archive output is written to the local path configured in `audit_log_archive_path`.
+  Archiving **deletes** the archived rows from the database, leaving only the local JSON files. The archive path must live on a persistent volume, otherwise a container rebuild destroys the only copy — and confirm `audit_log_retention_days` against your compliance requirement before triggering.
+</Callout>
+
+<Callout type="warn">
+  **Roadmap:** There is no scheduled automatic archive — archiving is always manual — and no S3/Azure/Blob archive destinations. Archive output is written only to the local path configured in `audit_log_archive_path`.
 </Callout>
 
 <Callout type="warn">
@@ -188,7 +209,11 @@ Retention is controlled by the `audit_log_retention_days` site setting, default 
 
 ### Archive Status Query
 
-`GET /api/v1/admin/audit-logs/stats/retention` returns: configured retention days, cutoff date, logs to archive, oldest log, and next archive time.
+`GET /api/v1/admin/audit-logs/stats/retention` returns: configured `retention_days`, `cutoff_date`, `logs_to_archive`, `oldest_log_date`, and `next_archive_date`.
+
+<Callout type="warn">
+  `next_archive_date` is a value the endpoint **computes as "tomorrow at 03:00"** — no Celery Beat schedule backs it. Archiving is always manual; do not read it as a promise that the system will archive automatically at that time (`app/core/celery.py`'s `beat_schedule` has no archive task).
+</Callout>
 
 ## Statistics Endpoints
 
@@ -199,7 +224,7 @@ Retention is controlled by the `audit_log_retention_days` site setting, default 
 </Callout>
 
 <Callout type="warn">
-  **Roadmap:** No real-time monitoring dashboard for audit logs. Site settings such as `audit_alert_enabled`, `audit_alert_webhook`, and failed-login thresholds exist as dormant configuration but are not consumed by any monitoring or notification code.
+  **Roadmap:** No real-time monitoring dashboard for audit logs. Site settings such as `audit_alert_enabled`, `audit_alert_webhook`, and failed-login thresholds exist as dormant configuration but are not consumed by any monitoring or notification code (see the "Audit Alerts" subsection of [Site Settings](./site-settings.mdx)).
 </Callout>
 
 ## API Endpoint Reference
@@ -211,7 +236,9 @@ Retention is controlled by the `audit_log_retention_days` site setting, default 
 | `GET` | `/api/v1/admin/audit-logs/export?format=csv\|json` | Export audit logs (up to 10,000) | `audit:export` |
 | `GET` | `/api/v1/admin/audit-logs/stats` | Get audit statistics aggregates | `audit:read` |
 | `GET` | `/api/v1/admin/audit-logs/stats/retention` | Get retention and archival status | `audit:read` |
-| `POST` | `/api/v1/admin/audit-logs/archive` | Trigger manual archive task | `audit:export` |
+| `POST` | `/api/v1/admin/audit-logs/archive` | Trigger manual archive task (returns `task_id` only) | `audit:export` |
+| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | Trigger manual archive task (used by the Storage settings page; returns `task_id` + `status`) | `audit:export` |
+| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | Poll archive task status and result | `audit:export` |
 
 ## Best Practices
 

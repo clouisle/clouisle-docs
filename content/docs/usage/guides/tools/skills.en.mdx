@@ -70,6 +70,10 @@ You are a professional long-form summarization expert. When the user supplies a 
 
 ## Import a Skill Package
 
+<Callout type="warn" title="Skills can only be created by importing">
+  The platform has **no "create Skill manually" entry point** and no Skill file-subresource endpoints (such as `/files`). The only way to create a Skill is to import a ZIP or a Git repository (a two-step **preview → install** flow). After installation, `PATCH /api/v1/skills/{skill_id}` can only change **metadata** (display name, description, icon, category, enabled flag, default config) — changing the `SKILL.md` body or scripts requires a re-import.
+</Callout>
+
 The platform supports **Upload Zip** and **Git Repository** imports:
 
 1. Go to **Capabilities** (`/app/capabilities`) and select the **Skills** tab.

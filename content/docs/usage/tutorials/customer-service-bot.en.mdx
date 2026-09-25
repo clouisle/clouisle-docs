@@ -23,10 +23,10 @@ The customer service Agent is in the **Published** state, with a system prompt, 
 
 <Callout type="info">First create the resource shell so later steps can configure knowledge and tools in the same Agent.</Callout>
 
-1. Open **Apps** > **Create app** > **Agent**.
-2. Set the name to `客服助手` and describe the service scope in the description.
+1. Open **Apps** > **Create App** > **Agent**.
+2. Set the name to `Customer Service Assistant` and describe the service scope in the description.
 3. Select a `chat` model authorized for the team.
-4. Save in **Agent settings**.
+4. Save in **Agent Settings**.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/tutorial-customer-service-create.png" alt="Customer service Agent creation result" />
@@ -53,7 +53,7 @@ Save and send a product question in the preview.
 
 <Callout type="info">The knowledge base anchors customer service answers to fact sources your enterprise can review.</Callout>
 
-1. On the **Knowledge base** card, select **Add**.
+1. On the **Knowledge Base** card, select **Add**.
 2. Select the target knowledge base.
 3. Use `hybrid` retrieval with Top K of `5` and a threshold of `0.3`.
 4. Save.
@@ -69,7 +69,7 @@ Save and send a product question in the preview.
 
 1. In **Tools**, select **Add**.
 2. Select the built-in `web_search`.
-3. If **Configuration required** appears, contact an administrator to configure the Tavily API Key.
+3. If **Requires configuration** appears, contact an administrator to configure the Tavily API Key.
 4. Save and test a question that needs external information.
 
 ## Step 5: Publish & Accept
@@ -77,7 +77,7 @@ Save and send a product question in the preview.
 1. Verify citations with an internal documentation question.
 2. Verify tool calls with a time-sensitive question.
 3. Verify refusal or uncertainty statements with a sensitive question not covered by the knowledge base.
-4. Select **Publish** and open the **Public page**.
+4. Select **Publish** and open the **Public Page**.
 5. In Agent **Logs**, confirm conversations, sources, tool results, and Token usage.
 
 <Callout type="success" title="Acceptance criteria">

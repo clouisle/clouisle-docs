@@ -12,11 +12,12 @@ Embedding 模型通过 `backend/app/llm/adapters/embedding/` 统一调度。调�
 
 | 适配器类 | 匹配供应商 | 工作机制 | Token 计量策略 |
 | --- | --- | --- | --- |
-| **`OpenAICompatibleEmbeddingAdapter`** | `openai`、`openai_responses`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`custom` | 直接通过 HTTP POST 请求目标 Base URL 的 `/embeddings` 端点（标准 OpenAI 协议） | 优先读取响应体中的 `usage.total_tokens`；若供应商未返回，降级使用 `tiktoken` 准确分词计数 |
-| **`FallbackEmbeddingAdapter`** | `google`、`azure_openai` 等其他供应商 | 调用 LangChain 专用封装（如 `GoogleGenerativeAIEmbeddings`、`AzureOpenAIEmbeddings`）通过 `aembed_documents` 获取向量 | 适配器返回空的 `Usage`，由外层 `team_embedding` 统一调用本地 `tiktoken` 计算实际 Token 消耗 |
+| **`OpenAICompatibleEmbeddingAdapter`** | `openai`、`openai_responses`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`custom` | 直接通过 HTTP POST 请求目标 Base URL 的 `/embeddings` 端点（标准 OpenAI 协议） | 读取响应体 `usage`（取 `prompt_tokens`，缺失时回退 `total_tokens`）；若供应商未返回，降级使用 `tiktoken` 准确分词计数 |
+| **`FallbackEmbeddingAdapter`** | `google`、`azure_openai`（其余供应商不支持 embedding，创建时即被拒绝） | 调用 LangChain 专用封装（如 `GoogleGenerativeAIEmbeddings`、`AzureOpenAIEmbeddings`）通过 `aembed_documents` 获取向量 | 适配器返回空的 `Usage`，由外层 `team_embedding` 统一调用本地 `tiktoken` 计算实际 Token 消耗 |
 
-<Callout type="warn" title="Anthropic 限制">
-Anthropic 官方不提供独立的 Text Embedding API。在 Clouisle 中为 Anthropic 供应商配置 `embedding` 类型模型会在运行时抛出 `ValueError: Unsupported provider for embedding: anthropic` 错误。
+<Callout type="warn" title="不支持的供应商">
+`model_type: embedding` 只在 `EMBEDDING_SUPPORTED_PROVIDERS`（即上表两条路径覆盖的 15 个供应商）内可用；为 `anthropic`、`typesafe`、`runway`、`pika`、`luma`、`kling`、`stability`、`midjourney` 等供应商创建 embedding 模型会在校验阶段被直接拒绝（`model_type_not_supported`）。
+Anthropic 官方不提供独立的 Text Embedding API；即便绕过校验，运行时也会抛出 `ValueError: Unsupported provider for embedding: anthropic`。
 </Callout>
 
 ### 容错与降级机制
@@ -52,7 +53,7 @@ Anthropic 官方不提供独立的 Text Embedding API。在 Clouisle 中为 Anth
 - **固化维度**：系统调用 `set_kb_embedding_dimension(kb_id, dimension)` 将该维度持久化到 `knowledge_bases` 表。
 
 ### 2. 维度与模型的不可变性约束
-- **模型不可变**：知识库一旦创建，`embedding_model_id` 即被**永久锁定**。更新知识库接口（`PATCH /knowledge-bases/{id}`）检测到变更 `embedding_model_id` 时会直接忽略或拒绝。
+- **模型不可变**：知识库一旦创建，`embedding_model_id` 即被**永久锁定**。更新知识库接口（`PATCH /knowledge-bases/{id}`）检测到变更 `embedding_model_id` 时会**拒绝**并返回校验错误（`embedding_model_locked_after_kb_creation`）。
 - **维度严格匹配**：后续导入的任何文档切片向量，均须经过 `_validate_embeddings` 校验。若向量维度与知识库已固化的 `embedding_dimension` 不一致，系统抛出 `DimensionMismatchError` 并阻断入库。
 
 ---

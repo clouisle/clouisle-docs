@@ -1,71 +1,99 @@
 ---
 title: Knowledge Base
-description: Understand document processing, chunking, and hybrid vector and full-text retrieval
+description: Understand document parsing, chunking and embedding, hybrid retrieval, and read-only cross-team sharing
 icon: Database
 ---
 
-A Knowledge Base converts documents into chunks that Agents and Workflows can retrieve. The resource belongs to a team; you select an embedding model when creating it, and optionally a rerank model.
+A knowledge base turns documents into chunks that Agents and workflows can retrieve. The resource belongs to a team, picks an embedding model at creation (plus an optional rerank model), and ingests content from several sources.
 
-### Deep-Dive Retrieval & Ingestion Pipeline
+### Deep-dive retrieval and ingestion pipeline
 
 ```text
 ┌───────────────────────────┐     ┌────────────────────────────────────────────────────────┐
-│ Uploaded Documents        │ ──► │ MarkItDown Multi-Format Parser                         │
-│ (PDF, DOCX, XLSX, HTML...)│     │ • Base64 Embedded Media Extraction -> Asset Storage    │
-└───────────────────────────┘     │ • Structure Flattening & XSS Sanitization (Bleach)     │
+│ Upload document           │ ──► │ MarkItDown multi-format parser                         │
+│ (PDF, DOCX, XLSX, HTML...)│     │ • Base64 embedded media extraction -> asset storage    │
+└───────────────────────────┘     │ • Structural flattening and XSS cleaning (Bleach)      │
                                   └────────────────────────────────────────────────────────┘
                                                               │
                                                               ▼
                                   ┌────────────────────────────────────────────────────────┐
-                                  │ Two-Stage CJK-Aware Chunking Engine                    │
-                                  │ • Hard Boundary Split on Decoded Escapes (\n\n, \n)    │
-                                  │ • Zero-Overlap Recursive Splitting + Trailing Overlap  │
+                                  │ CJK-optimized two-stage splitting engine               │
+                                  │ • Escaped-newline hard split (\n\n, \n)                │
+                                  │ • Zero-overlap recursive punctuation split +           │
+                                  │   exact character-level trailing overlap               │
                                   └────────────────────────────────────────────────────────┘
                                                               │
                                          ┌────────────────────┴────────────────────┐
                                          ▼                                         ▼
                           ┌──────────────────────────────┐          ┌──────────────────────────────┐
-                          │ PostgreSQL 17 + pg_search    │          │ Qdrant Vector Engine         │
-                          │ • BM25 Tantivy Lexical Index │          │ • Dense Embeddings ({prefix})│
+                          │ PostgreSQL 17 + pg_search    │          │ Qdrant vector engine         │
+                          │ • BM25 Tantivy lexical index │          │ • Dense vectors ({prefix}_{dim})│
                           └──────────────────────────────┘          └──────────────────────────────┘
                                          │                                         │
                                          └────────────────────┬────────────────────┘
                                                               ▼
                                   ┌────────────────────────────────────────────────────────┐
                                   │ Weighted Reciprocal Rank Fusion (RRF, k=60)            │
-                                  │ • Channel Fault-Tolerance & Shared Vector Cache        │
+                                  │ • Single-channel fallback and shared vector caching    │
                                   └────────────────────────────────────────────────────────┘
                                                               │
                                                               ▼
                                   ┌────────────────────────────────────────────────────────┐
-                                  │ Optional Neural Reranker (Cross-Encoder Scoring)       │
+                                  │ Optional Cross-Encoder neural rerank                   │
                                   └────────────────────────────────────────────────────────┘
                                                               │
                                                               ▼
                                   ┌────────────────────────────────────────────────────────┐
-                                  │ Context Assembly & Token Budget Guard                  │
-                                  │ • Adjacent Chunk Window Expansion (expand_adjacent)    │
-                                  │ • Per-Document Chunk Throttling & Token Truncation     │
+                                  │ Context assembly and token budget protection           │
+                                  │ • Per-document chunk cap and total budget control      │
                                   └────────────────────────────────────────────────────────┘
 ```
 
-1. **Document Ingestion & Media Deconstruction**:
-   - **Universal Format Support**: Uses `MarkItDown` to parse PDF, DOCX, PPTX, XLSX, HTML, CSV, TXT, MD, and JSON.
-   - **Embedded Media Extraction (`replace_embedded_media_data_uris`)**: Automatically scans for base64 inline images, extracts payloads to dedicated asset storage (`/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}`), and replaces them with clean URLs.
-   - **Flattening & Sanitization**: CSV tables become Markdown pipes; JSON trees are flattened using dot notation; all text is sanitized via `bleach` to strip unsafe markup.
-2. **CJK-Aware Chunking Implementation**:
-   - User-defined separators are decoded into real control bytes (`\n\n`, `\n`) via `_decode_separator_escapes`.
-   - Chunks are split with zero internal overlap using a punctuation hierarchy (`\n\n`, `\n`, `。`, `！`, `？`, `；`, `，`, ` `), then prepended with exact character-level trailing slices from preceding chunks for deterministic token boundaries.
-3. **Dual-Engine Hybrid Retrieval & Weighted RRF**:
-   - **Lexical**: PostgreSQL `pg_search` (BM25 Tantivy index).
-   - **Dense Vector**: Qdrant vector collections partitioned as `{prefix}_{dimension}`.
-- **Weighted RRF Formula**: Multi-channel Reciprocal Rank Fusion scoring (default `k = 60`, `dense_weight = 1.0`, `lexical_weight = 1.0`). Automatic single-channel fallback on transient engine failures.
-4. **Cross-Encoder Neural Reranking**: Candidate chunks from RRF are rescored with deep semantic cross-encoders and filtered by `rerank_score_threshold`.
-5. **Context Assembly & Window Expansion**:
-   - **Adjacent Chunk Expansion (`expand_adjacent`)**: Fetches adjacent sibling chunks (`chunk_index - 1`, `chunk_index + 1`) to reconstruct coherent paragraphs.
-   - **Token Budget Guard**: Strictly constrained by `context_token_budget` and `max_chunks_per_document`.
+1. **Document parsing and embedded media extraction**:
+   - **Multi-format support**: `MarkItDown` parses PDF, DOCX, PPTX, XLSX, HTML, CSV, TXT, MD, and JSON.
+   - **Automatic media extraction (`replace_embedded_media_data_uris`)**: base64 images embedded in a document are extracted into separate stored assets (`/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}`) and replaced with lightweight URLs so vectors and token space do not balloon.
+   - **Structural flattening and cleaning**: CSV becomes a Markdown table, JSON is flattened into dotted-path keys, and `bleach` strips dangerous tags.
+2. **CJK-aware splitting**:
+   - Custom separators pass through `_decode_separator_escapes`, which turns `\n`, `\r`, `\t`, and `\\` back into real control characters — that is why typing `\n\n` in the form splits on newlines.
+   - Chunks are split with zero internal overlap using a punctuation hierarchy (`\n\n`, `\n`, `。`, `！`, `？`, `. `, `! `, `? `, `；`, `; `, `，`, `, `, space, character), then exact character-level trailing slices of preceding chunks are prepended, guaranteeing deterministic token boundaries.
+   - Tables and code blocks are preserved structurally: small tables stay intact, while large tables split row by row with the header repeated in every sub-chunk so character slicing cannot break the meaning.
+3. **Dual-engine hybrid retrieval and weighted RRF**:
+   - **Lexical retrieval**: PostgreSQL `pg_search` (BM25 index).
+   - **Dense vectors**: the Qdrant vector database (collections partitioned by `{prefix}_{dimension}`).
+   - **Weighted RRF fusion**: computes weighted reciprocal-rank fusion scores (defaults `k = 60`, `dense_weight = 1.0`, `lexical_weight = 1.0`). When one channel fails, retrieval degrades to single-channel recall.
+4. **Neural rerank (cross-encoder)**: reranking is on by default (`rerank_enabled = true`); the top `rerank_candidate_k` (default `10`, range `1-100`) RRF candidates go to the cross-encoder for rescoring and are filtered by the optional `rerank_score_threshold` (`0-1`, no threshold by default).
+5. **Context assembly and budget protection**: bounded by `context_token_budget` (total token budget) and `max_chunks_per_document` (per-document chunk cap) so one long file cannot starve other retrieved results.
 
-### Retrieval Lab
+### Chunking and embedding
 
-**Hit testing / Retrieval Lab** runs single-configuration tests or A/B comparisons, showing each result's rank and score at the vector, full-text, fusion, and rerank stages, and can apply local presets to production Knowledge Base settings.
-Related content: [Import documents](../guides/knowledge/import-documents.mdx), [Chunking](../guides/knowledge/chunking.mdx), [Knowledge Base settings reference](/reference/knowledge-settings).
+- `chunk_size` defaults to **`1000` characters** (minimum `100`, form maximum `2000`) and `chunk_overlap` to **`100` characters** (minimum `0`); both are measured in **characters**, not tokens, and token estimates use `4` characters ≈ `1` token.
+- When `separator` is empty, the built-in priority separator list applies; a custom separator replaces the first primary separator while the remaining levels act as fallbacks.
+- A knowledge base must pick an embedding model and dimension at creation: `embedding_model_id` **cannot be changed afterwards**, and the dimension is recorded when the first document is processed. Every later document and query must match that dimension or fail with a dimension-mismatch error. Changing the signature or dimension requires an explicit reprocess/rechunk or a new knowledge base.
+
+### Retrieval and ranking
+
+| Parameter | Default | Range | Notes |
+| --- | --- | --- | --- |
+| `search_mode` | Knowledge base setting empty (effective default `hybrid`) | `vector` / `fulltext` / `hybrid` | Overridable per request; hybrid mode requires at least one positive weight |
+| `top_k` | `5` | Search request `1-20`, knowledge base setting up to `100` | Number of results returned |
+| `score_threshold` | `0.0` | `0-1` | Minimum dense similarity |
+| `dense_weight` / `lexical_weight` | `1.0` / `1.0` | `>= 0` | RRF channel weights |
+| `rrf_k` | `60` | `1-1000` | RRF rank constant |
+| `rerank_candidate_k` | `10` | `1-100` | Rerank candidate pool size |
+
+<Callout type="warn">
+**Adjacent-chunk expansion (`expand_adjacent`) is an internal retrieval option, off by default, and is not exposed by the current public search endpoint (`POST /knowledge-bases/{id}/search`)**, so never present it as an available parameter in the retrieval lab or API docs. It can be enabled inside the internal retrieval service, where it additionally fetches the `chunk_index ± 1` siblings of a hit to restore the paragraph; no built-in caller enables it today.
+</Callout>
+
+### Team visibility and cross-team sharing
+
+- A knowledge base belongs to a team: team members access it by role, and a `private` knowledge base is visible only to its creator.
+- **Cross-team sharing is read-only**: `KnowledgeBaseSharePermission` has exactly one value, `read_only`, so the team it is shared with can list and search it but **cannot** upload documents, change settings, or delete it. Write operations still require membership in the owning team (and a team admin where needed).
+- Sharing constraints: a `private` knowledge base cannot be shared (`private_kb_cannot_be_shared`), it cannot be shared with the owning team itself, and a duplicate share returns `kb_already_shared`.
+- On the list endpoint, `include_shared` defaults to `true` (knowledge bases shared with the current team are listed too) and `own_only` defaults to `false`; combining them switches from "including shared" to "this team only".
+
+### Retrieval lab
+
+The **Retrieval Lab** runs single-configuration tests or A/B comparisons, showing each result's rank and score across the vector, full-text, fusion, and rerank stages, and can apply a local preset to the production knowledge base settings. When comparing chunking strategies, confirm the split result in the preview first, then rechunk processed documents.
+
+Related content: [Import documents](../guides/knowledge/import-documents.mdx), [Chunking](../guides/knowledge/chunking.mdx), [Retrieval and quality tuning](../guides/knowledge/retrieval.mdx), [Knowledge base settings reference](/reference/knowledge-settings).

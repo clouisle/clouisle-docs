@@ -1,0 +1,527 @@
+---
+title: 技能 API
+description: 导入、查询、更新、删除与测试沙箱技能
+icon: Puzzle
+---
+
+技能（Skill）是 Agent 可以调用的**沙箱能力包**：以 ZIP 或 Git 仓库中的包为单位导入，归属某个团队（`team_id` 有值）或平台全局（`team_id` 为 `null`，即系统技能），并在代码沙箱内执行。基础路径为 `/api/v1/skills`。
+
+<Callout type="info" title="前置条件与认证">
+  所有端点都需要已认证的 JWT 用户会话（`Authorization: Bearer <token>`）；**不接受 API Key 认证**。
+
+  权限码用于“功能开关”层，团队归属另有一层校验：`GET` 列表/详情、`PATCH`、`DELETE`、`POST /test` 都要求调用者是技能所属团队的成员，其中更新、删除、测试还要求该团队的 OWNER/ADMIN；系统技能（`team_id=null`）的更新、删除、测试要求超级管理员。
+
+  技能**只能通过导入流程安装**：没有“从零创建技能”的端点，也没有 `/files` 之类的技能文件管理端点。
+</Callout>
+
+## 端点总览
+
+| 方法 | 路径 | 用途 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/skills` | 列出团队可用技能（系统 + 团队，不分页） | `skill:read` |
+| POST | `/api/v1/skills/import/preview-zip` | 上传 ZIP 并扫描技能包，创建导入会话 | `skill:create` |
+| POST | `/api/v1/skills/import/preview-git` | 克隆 Git 仓库并扫描技能包，创建导入会话 | `skill:create` |
+| POST | `/api/v1/skills/import/{session_id}/install` | 按会话中选定的包执行安装/更新 | `skill:create` |
+| GET | `/api/v1/skills/{skill_id}` | 获取技能详情（含包内容） | `skill:read` |
+| PATCH | `/api/v1/skills/{skill_id}` | 更新技能元数据与默认配置 | `skill:update` |
+| DELETE | `/api/v1/skills/{skill_id}` | 删除技能及其私有存储 | `skill:delete` |
+| POST | `/api/v1/skills/{skill_id}/test` | 用测试参数在沙箱中执行一次技能 | `skill:execute` |
+
+## 认证与权限
+
+| 权限码 | 用途 |
+| --- | --- |
+| `skill:read` | 列出技能、查看技能详情 |
+| `skill:create` | 预览导入（ZIP / Git）与安装导入 |
+| `skill:update` | 更新技能 |
+| `skill:delete` | 删除技能 |
+| `skill:execute` | 测试执行技能 |
+
+团队级访问通过 `check_team_access`（内部使用 `team:read` 权限）校验：非超级管理员必须是目标团队成员，并具备全局 `team:read` 权限；`require_admin=True` 时（更新、删除、测试）还必须是团队 OWNER/ADMIN。
+
+## 技能对象
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string (UUID) | 技能 ID |
+| `team_id` | string (UUID) \| null | 所属团队；`null` 表示系统技能 |
+| `name` | string | 稳定名称，最长 100 字符，唯一（同一团队内 `team` + `name` 唯一） |
+| `display_name` | string | 展示名称，最长 100 字符 |
+| `description` | string | 描述 |
+| `icon` | string \| null | 图标 emoji 或 URL |
+| `category` | string | 分类，见下方枚举 |
+| `version` | string | 版本，默认 `1.0.0` |
+| `source_type` | string | 安装来源：`zip`、`git`、`manual_text`、`legacy` |
+| `source_uri` | string \| null | 脱敏后的来源地址（Git/导入包） |
+| `source_ref` | string \| null | Git ref 或解析出的修订 |
+| `source_subdir` | string \| null | 扫描到的来源子目录 |
+| `package_path` | string \| null | 包在来源中的根路径 |
+| `package_hash` | string \| null | 已安装包的 Content Hash |
+| `input_schema` | object | 暴露给模型的函数参数 JSON Schema |
+| `default_config` | object | 叠加到 Agent 单工具配置上的默认值 |
+| `is_enabled` | boolean | 是否可被选用/执行，默认 `true` |
+| `is_system` | boolean | `team_id` 为 `null` 时为 `true` |
+| `import_warnings` | array of string | 导入期的非阻塞告警 |
+| `created_by_id` | string (UUID) \| null | 创建者 ID |
+| `created_by_name` | string \| null | 创建者用户名 |
+| `created_at` / `updated_at` | string (ISO 8601) | 创建与更新时间 |
+
+### 技能详情对象
+
+详情接口在上述字段之外附带包内容：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `skill_md` | string | 原始 `SKILL.md` 内容 |
+| `instructions` | string | 从 `SKILL.md` 解析出的指令 |
+| `frontmatter` | object | `SKILL.md` frontmatter |
+| `package_manifest` | object | 包清单摘要 |
+| `execution_config` | object | 校验后的执行配置 |
+| `config_schema` | object | 技能配置的 JSON Schema |
+
+### 枚举
+
+`category`：`file`、`code`、`data`、`web`、`api`、`other`（默认 `other`）。
+
+---
+
+## 列出技能
+
+```
+GET /api/v1/skills
+```
+
+返回指定团队可用的全部技能，按“系统技能 / 团队技能”分成两个数组。**不分页。**
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `team_id` | string (UUID) | **是** | - | 目标团队；调用者必须是该团队成员（超级管理员例外） |
+| `include_system` | boolean | 否 | `true` | 是否同时返回系统技能（`team_id=null`） |
+| `enabled` | boolean | 否 | - | 传入时只返回 `is_enabled` 等于该值的技能 |
+| `search` | string | 否 | - | 对 `name`、`display_name`、`description` 做不区分大小写的包含匹配 |
+| `category` | string | 否 | - | 按技能分类过滤 |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/skills?team_id=b7f2c9d4-1a3e-4f5b-8c6d-9e0a1b2c3d4e&include_system=true&enabled=true&search=analysis&category=data" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "system": [
+      {
+        "id": "5c2f9a10-8b3d-4e6f-9a71-b2c3d4e5f607",
+        "team_id": null,
+        "name": "file_read",
+        "display_name": "File Reader",
+        "description": "Reads files from the workspace",
+        "icon": "📄",
+        "category": "file",
+        "version": "1.0.0",
+        "source_type": "zip",
+        "source_uri": "system-skills.zip",
+        "source_ref": null,
+        "source_subdir": null,
+        "package_path": "/data/skills/system/file_read",
+        "package_hash": "sha256:1f0c0b7d2a9e4c8f",
+        "input_schema": {"type": "object", "properties": {"path": {"type": "string"}}},
+        "default_config": {},
+        "is_enabled": true,
+        "is_system": true,
+        "import_warnings": [],
+        "created_by_id": null,
+        "created_by_name": null,
+        "created_at": "2026-01-10T09:00:00Z",
+        "updated_at": "2026-01-10T09:00:00Z"
+      }
+    ],
+    "team": [
+      {
+        "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "team_id": "b7f2c9d4-1a3e-4f5b-8c6d-9e0a1b2c3d4e",
+        "name": "data_analysis_skill",
+        "display_name": "Data Analysis Skill",
+        "description": "Analyzes tabular CSV datasets and generates statistical charts",
+        "icon": null,
+        "category": "data",
+        "version": "1.0.0",
+        "source_type": "git",
+        "source_uri": "https://github.com/example/skills.git",
+        "source_ref": "9c1f4a7b2d8e3f5061a2b3c4d5e6f70819a2b3c4",
+        "source_subdir": "data_analysis",
+        "package_path": "/data/skills/team/data_analysis_skill",
+        "package_hash": "sha256:8d2e6f1a4b0c9d3e",
+        "input_schema": {"type": "object", "properties": {"dataset": {"type": "string"}}},
+        "default_config": {"max_rows": 1000},
+        "is_enabled": true,
+        "is_system": false,
+        "import_warnings": [],
+        "created_by_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+        "created_by_name": "alice",
+        "created_at": "2026-03-01T12:00:00Z",
+        "updated_at": "2026-03-01T12:00:00Z"
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="warn">
+  缺少 `team_id` 会直接返回 `422` + `1001`（FastAPI 校验失败），而不是空列表。响应信封是 `data.system` / `data.team`，**没有** `total` / `page` 等分页字段，也不使用 `{items: []}` 结构。
+</Callout>
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `422` | `1001` | 缺少必填的 `team_id` |
+| `404` | `4004` | `team_not_found` |
+| `403` | `3000` | 缺少 `skill:read` 权限 |
+| `403` | `3002` | `not_team_member` |
+
+---
+
+## 导入流程
+
+技能的安装分两步：**预览**（创建短期导入会话）→ **安装**（从会话中选定包）。预览会话有效期 **1 小时**，过期后安装返回 `400` + `1002`（`skill_import_session_expired`）。安装请求只需要包路径，`team_id` 与来源信息都取自会话。
+
+### 预览 ZIP 导入
+
+```
+POST /api/v1/skills/import/preview-zip
+```
+
+`multipart/form-data` 上传 ZIP，服务端扫描其中的技能包。
+
+| 表单字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `file` | file | 是 | ZIP 压缩包（`.zip`），其它扩展名会被拒绝 |
+| `team_id` | string (UUID) | 否 | 导入后归属的团队；调用者须为该团队 OWNER/ADMIN。省略表示导入系统技能，仅超级管理员可用 |
+
+限制：压缩包最大 **50 MB**、文件数最多 **500**、解压后总大小最大 **50 MB**、单个文件最大 **10 MB**。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/skills/import/preview-zip" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "team_id=b7f2c9d4-1a3e-4f5b-8c6d-9e0a1b2c3d4e" \
+  -F "file=@skills.zip"
+```
+
+### 预览 Git 导入
+
+```
+POST /api/v1/skills/import/preview-git
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string (UUID) \| null | 否 | 同 ZIP 预览 |
+| `repo_url` | string | 是 | 仓库地址，1–2000 字符；克隆前会做 URL 校验 |
+| `ref` | string \| null | 否 | 分支 / 标签 / 提交，最长 255 字符；默认仓库默认分支 |
+
+克隆超时 **180 秒**，超时或 URL 非法返回 `400` + `1002`（`skill_git_url_invalid`）。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/skills/import/preview-git" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id":"b7f2c9d4-1a3e-4f5b-8c6d-9e0a1b2c3d4e","repo_url":"https://github.com/example/skills.git","ref":"main"}'
+```
+
+### 预览响应
+
+两种预览返回同一结构：
+
+```json
+{
+  "code": 0,
+  "data": {
+    "session_id": "f0e1d2c3-b4a5-4968-8778-99aabbccddee",
+    "source_type": "zip",
+    "source_uri": "skills.zip",
+    "source_ref": null,
+    "source_subdir": null,
+    "skills": [
+      {
+        "package_path": "data_analysis_skill",
+        "name": "data_analysis_skill",
+        "display_name": "Data Analysis Skill",
+        "description": "Analyzes tabular CSV datasets",
+        "version": "1.0.0",
+        "category": "data",
+        "icon": null,
+        "valid": true,
+        "errors": [],
+        "warnings": [],
+        "conflict": null,
+        "file_count": 4,
+        "package_hash": "sha256:8d2e6f1a4b0c9d3e"
+      }
+    ],
+    "invalid": [],
+    "warnings": []
+  },
+  "msg": "success"
+}
+```
+
+### 预览项字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `package_path` | string | 包在归档/仓库根目录下的相对路径 |
+| `name` / `display_name` | string \| null | 技能名称与展示名 |
+| `description` | string | 描述 |
+| `version` | string | 版本，默认 `1.0.0` |
+| `category` | string | 分类 |
+| `icon` | string \| null | 图标 |
+| `valid` | boolean | `false` 表示该包无法安装 |
+| `errors` | array of string | 不可安装原因的 i18n 消息键，如 `skill_md_not_found` |
+| `warnings` | array of string | 告警消息键，如 `skill_name_conflict`、`skill_duplicate_name_in_source` |
+| `conflict` | object \| null | 目标团队已存在同名技能时给出 `{"type": "existing_team_skill", "skill_id": ..., "message": ...}` |
+| `file_count` | integer | 包内文件数 |
+| `package_hash` | string \| null | 包内容哈希 |
+
+`valid: false` 的包会出现在 `invalid` 而非 `skills`；`errors` / `warnings` 中的条目是 i18n 消息键，需要前端翻译后展示。
+
+### 安装导入
+
+```
+POST /api/v1/skills/import/{session_id}/install
+```
+
+### 路径参数
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `session_id` | string (UUID) | 预览接口返回的会话 ID |
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `items` | array | 否 | `[]` | 要安装的包；为空则不安装任何内容 |
+| `items[].package_path` | string | 是 | - | 必须匹配预览中的 `package_path` |
+| `items[].action` | string | 否 | `install` | `install`、`update` 或 `skip` |
+| `items[].skill_id` | string \| null (UUID) | 否 | - | `update` 的显式目标；必须属于会话所属团队 |
+| `is_enabled` | boolean | 否 | `true` | 应用于本次安装/更新后技能的 `is_enabled` |
+
+包选择规则：
+
+- `install`：目标团队已存在同名技能时该包失败（`skill_name_exists`）。
+- `update`：优先用显式 `skill_id`；未提供时按名称匹配团队技能；两者都不存在则整个请求 `404` + `4000`（`skill_not_found`）。
+- `skip`：只记录 `package_path`，不触碰任何技能。
+
+```json
+{
+  "items": [
+    {"package_path": "data_analysis_skill", "action": "install"},
+    {"package_path": "charts_skill", "action": "update", "skill_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"}
+  ],
+  "is_enabled": true
+}
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "installed": ["a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"],
+    "updated": [],
+    "skipped": ["charts_skill"],
+    "errors": ["other_skill: skill_name_exists"]
+  },
+  "msg": "Skills imported successfully"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `installed` | array of UUID | 新建技能的 ID |
+| `updated` | array of UUID | 更新技能的 ID |
+| `skipped` | array of string | 跳过的 `package_path` |
+| `errors` | array of string | `"<package_path>: <message_key>"` 形式的逐包错误 |
+
+<Callout type="warn">
+  逐包失败**不会**改变 HTTP 状态：即使 `errors` 非空，仍返回 `200 OK` + `code: 0`。集成方必须检查 `data.errors`，只用 HTTP 状态判断成败会漏掉失败。
+</Callout>
+
+---
+
+## 获取技能详情
+
+```
+GET /api/v1/skills/{skill_id}
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `team_id` | string (UUID) | 否 | 团队上下文。团队技能无论如何都要求调用者属于其所属团队；系统技能传入 `team_id` 时要求属于该团队，省略则不做团队校验 |
+
+**成功响应（200 OK）：** `data` 为[技能详情对象](#技能详情对象)。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `404` | `4000` | `skill_not_found` |
+| `404` | `4004` | `team_not_found` |
+| `403` | `3000` | 缺少 `skill:read` 权限 |
+| `403` | `3002` | `not_team_member` |
+
+---
+
+## 更新技能
+
+```
+PATCH /api/v1/skills/{skill_id}
+```
+
+仅更新请求体中出现的字段。
+
+### 请求体
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `display_name` | string \| null | 展示名，1–100 字符 |
+| `description` | string \| null | 描述 |
+| `icon` | string \| null | 图标，最长 100 字符 |
+| `category` | string \| null | 分类 |
+| `is_enabled` | boolean \| null | 启用 / 停用 |
+| `default_config` | object \| null | 默认配置 |
+
+**成功响应（200 OK）：** `data` 为更新后的[技能详情对象](#技能详情对象)。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `404` | `4000` | `skill_not_found` |
+| `403` | `3000` | 缺少 `skill:update` 权限，或系统技能非超级管理员 |
+| `403` | `3002` / `3003` | 非团队成员 / 非团队 OWNER-ADMIN |
+
+---
+
+## 删除技能
+
+```
+DELETE /api/v1/skills/{skill_id}
+```
+
+删除技能行及其私有包存储。仍被某个 Agent 的 `tools_config` 引用的技能**不能删除**。
+
+**成功响应（200 OK）：** `data: null`。
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `404` | `4000` | `skill_not_found` |
+| `400` | `1002` | `skill_referenced_by_agent`：技能仍被 Agent 引用 |
+| `403` | `3000` | 缺少 `skill:delete` 权限，或系统技能非超级管理员 |
+| `403` | `3002` / `3003` | 非团队成员 / 非团队 OWNER-ADMIN |
+
+---
+
+## 测试技能
+
+```
+POST /api/v1/skills/{skill_id}/test
+```
+
+在代码沙箱中执行一次技能。测试权限与更新一致：系统技能需超级管理员，团队技能需团队 OWNER/ADMIN。
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `arguments` | object | 否 | `{}` | 传给技能的参数 |
+| `config` | object | 否 | `{}` | 本次运行的配置覆盖 |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "success": true,
+    "result": {"rows": 1200, "columns": 8},
+    "error": null,
+    "stdout": "processed sales.csv\n",
+    "stderr": "",
+    "artifacts": [
+      {
+        "path": "/workspace/report.html",
+        "optional": false,
+        "description": "Generated report",
+        "file_type": "file",
+        "size": 20480,
+        "checksum": "sha256:...",
+        "content_type": "text/html",
+        "storage_path": "skills/artifacts/report.html",
+        "url": null,
+        "filename": "report.html"
+      }
+    ],
+    "duration_ms": 842
+  },
+  "msg": "success"
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `success` | boolean | 本次运行是否成功 |
+| `result` | any | 技能返回值 |
+| `error` | string \| null | 失败原因 |
+| `stdout` / `stderr` | string | 标准输出 / 标准错误 |
+| `artifacts` | array | 运行产物（结构见 [文件上传 API](./file-uploads) 的沙箱产物） |
+| `duration_ms` | integer \| null | 运行耗时（毫秒） |
+
+<Callout type="warn">
+  技能运行失败**不会**返回非 2xx：响应仍是 `200 OK` + `code: 0`，失败信息在 `data.success: false` 与 `data.error`。只判断 HTTP 状态会把执行失败当成成功。
+</Callout>
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `404` | `4000` | `skill_not_found` |
+| `403` | `3000` | 缺少 `skill:execute` 权限，或系统技能非超级管理员 |
+| `403` | `3002` / `3003` | 非团队成员 / 非团队 OWNER-ADMIN |
+
+---
+
+## 错误处理
+
+| HTTP | 错误码 | 触发场景 |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | 缺少令牌、令牌无效或已过期 |
+| `422` | `1001` | 请求校验失败：缺少 `team_id`、未知 `category`、`display_name` 长度越界、UUID 格式错误 |
+| `400` | `1002` | ZIP/Git 来源非法、压缩包超限、会话过期、`skill_referenced_by_agent` |
+| `403` | `3000` | 缺少权限码，或系统技能非超级管理员（`skill_system_admin_required`） |
+| `403` | `3002` / `3003` | `not_team_member` / `team_admin_required` |
+| `404` | `4000` / `4004` | 技能不存在 / 团队不存在 |
+| `400` | `1003` | 服务端内部错误 |
+
+<Callout type="info">
+  导入预览与安装的逐包错误只出现在响应体的 `errors` 字段，不以 HTTP 状态表达。
+</Callout>
+
+## 相关文档
+
+- [技能](/usage/guides/tools/skills) — 技能的导入、启用与在 Agent 中的使用
+- [Agent API](./agents) — 在 Agent 的 `tools_config` 中引用技能
+- [文件上传 API](./file-uploads) — 沙箱产物与文件解析
+- [错误处理](./errors) — 按 HTTP 状态与业务错误码恢复

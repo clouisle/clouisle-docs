@@ -1,10 +1,10 @@
 ---
 title: 知识库
-description: 理解文档处理、分块、向量与全文混合检索
+description: 理解文档解析、分块与嵌入、混合检索与跨团队只读共享
 icon: Database
 ---
 
-知识库把文档转换成可被 Agent 和工作流检索的分块。资源归属于团队，创建时选择嵌入模型，并可选重排序模型。
+知识库把文档转换成可被 Agent 和工作流检索的分块。资源归属于团队，创建时选定嵌入模型（可选重排序模型），并从多个来源摄取内容。
 
 ### 检索与摄取全流程（Deep-Dive）
 
@@ -44,7 +44,6 @@ icon: Database
                                                               ▼
                                   ┌────────────────────────────────────────────────────────┐
                                   │ 上下文组装与 Token 预算保护                            │
-                                  │ • 相邻分块窗口扩展 (expand_adjacent)                   │
                                   │ • 单文档分块上限截断与总预算控制                       │
                                   └────────────────────────────────────────────────────────┘
 ```
@@ -54,18 +53,46 @@ icon: Database
    - **媒体自动抽取 (`replace_embedded_media_data_uris`)**：自动提取文档内嵌的 base64 图片为独立存储资产（`/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}`），替换为轻量 URL，防止向量和 token 空间膨胀。
    - **结构扁平化与清洗**：CSV 转换为 Markdown 表格，JSON 扁平化为点路径键值，并通过 `bleach` 清除危险标签。
 2. **CJK 感知的切分实现**：
-   - 用户自定义分隔符通过 `_decode_separator_escapes` 转义为真实控制字符。
-   - 采用零内部重叠的层级标点递归切分（`\n\n`、`\n`、`。`、`！`、`？`、`；`、`，`、` `），并在切分块前部精准拼接前序切分块的尾部重叠字符，保证 token 边界确定性。
+   - 用户自定义分隔符通过 `_decode_separator_escapes` 把 `\n`、`\r`、`\t`、`\\` 还原为真实控制字符，因此在表单里输入 `\n\n` 才能按换行切分。
+   - 采用零内部重叠的层级标点递归切分（`\n\n`、`\n`、`。`、`！`、`？`、`. `、`! `、`? `、`；`、`; `、`，`、`, `、空格、字符），并在切分块前部精准拼接前序切分块的尾部重叠字符，保证 token 边界确定性。
+   - 表格与代码块按结构整体保留：小表格不拆，大表格按行切分并在每个子块重复表头，避免字符切分破坏表意。
 3. **双引擎混合检索与加权 RRF**：
    - **词法检索**：PostgreSQL `pg_search`（BM25 索引）。
    - **稠密向量**：Qdrant 向量数据库（按 `{prefix}_{dimension}` 维度集合隔离）。
-- **加权 RRF 融合**：计算多通道加权倒数排名融合分数（默认 `k = 60`，`dense_weight = 1.0`，`lexical_weight = 1.0`）。单通道异常时自动降级单路召回。
-4. **神经重排序（Cross-Encoder Rerank）**：融合后的候选分块经 Cross-Encoder 语义深度重打分，并按阈值 `rerank_score_threshold` 过滤。
-5. **上下文组装与窗口扩展**：
-   - **相邻块扩展 (`expand_adjacent`)**：命中切分块可自动带出前后相邻块，还原段落上下文。
-   - **Token 预算保护**：受 `context_token_budget` 与单文档最大分块数 `max_chunks_per_document` 严格约束。
+   - **加权 RRF 融合**：计算多通道加权倒数排名融合分数（默认 `k = 60`，`dense_weight = 1.0`，`lexical_weight = 1.0`）。单通道异常时自动降级单路召回。
+4. **神经重排序（Cross-Encoder Rerank）**：重排序默认开启（`rerank_enabled = true`），从 RRF 结果中取前 `rerank_candidate_k`（默认 `10`，范围 `1-100`）个候选交给 Cross-Encoder 重新打分，并按可选的 `rerank_score_threshold`（`0-1`，默认不限）过滤。
+5. **上下文组装与预算保护**：受 `context_token_budget`（总 Token 预算）与 `max_chunks_per_document`（单文档分块上限）约束，防止单个长文件挤占其他召回结果。
+
+### 分块与嵌入
+
+- `chunk_size` 默认 **`1000` 字符**（最小 `100`，表单上限 `2000`），`chunk_overlap` 默认 **`100` 字符**（最小 `0`）；两者都以**字符**而非 Token 计量，Token 估算按 `4` 字符 ≈ `1` Token。
+- `separator` 为空时使用内置优先级分隔符表；填写自定义分隔符会替换首个主分隔符，其余层级作为后备。
+- 创建知识库时必须选择嵌入模型与维度：`embedding_model_id` **创建后不可更改**，维度在首个文档处理时记录，之后所有文档与查询都必须匹配同一维度，否则报维度不匹配错误。签名/维度变化需要显式重处理（rechunk）或新建知识库。
+
+### 检索与排序
+
+| 参数 | 默认值 | 范围 | 说明 |
+| --- | --- | --- | --- |
+| `search_mode` | 知识库设置默认不填（生效为 `hybrid`） | `vector` / `fulltext` / `hybrid` | 请求级可覆盖；混合模式必须至少有一个权重为正 |
+| `top_k` | `5` | 检索请求 `1-20`，知识库设置最多 `100` | 返回结果条数 |
+| `score_threshold` | `0.0` | `0-1` | 稠密相似度下限 |
+| `dense_weight` / `lexical_weight` | `1.0` / `1.0` | `>= 0` | RRF 双通道权重 |
+| `rrf_k` | `60` | `1-1000` | RRF 排名常数 |
+| `rerank_candidate_k` | `10` | `1-100` | 重排序候选池大小 |
+
+<Callout type="warn">
+**相邻分块扩展（`expand_adjacent`）为内部检索选项，默认关闭，且未在当前公开搜索接口（`POST /knowledge-bases/{id}/search`）中暴露**，因此不要在检索实验室或 API 文档里当作可用参数。它在内部检索服务中可开启，开启后会额外取回命中块的 `chunk_index ± 1` 相邻块以还原段落；目前没有内置调用方开启它。
+</Callout>
+
+### 团队可见性与跨团队共享
+
+- 知识库归属于团队：团队成员按角色访问；`visibility = private` 的知识库仅创建者可见。
+- **跨团队共享是只读的**：`KnowledgeBaseSharePermission` 只有 `read_only` 一个取值，被共享团队可以列出并检索该知识库，但**不能**上传文档、修改设置或删除。写操作仍要求知识库所属团队的成员身份（必要时要求团队管理员）。
+- 共享约束：`private` 知识库不能共享（`private_kb_cannot_be_shared`）、不能共享给所属团队自己、重复共享返回 `kb_already_shared`。
+- 列表接口的 `include_shared` 默认 `true`（把共享给当前团队的知识库一并列出），`own_only` 默认 `false`；两者同时使用可从「含共享」切换到「仅本团队」。
 
 ### 检索实验室
 
-**命中测试 / 检索实验室**可运行单配置测试或 A/B 对比，展示每条结果在向量、全文、融合和重排阶段的排名与分数，并可把本地预设应用到生产知识库设置。
-相关内容：[导入文档](../guides/knowledge/import-documents.mdx)、[分块](../guides/knowledge/chunking.mdx)、[知识库设置参考](/reference/knowledge-settings)。
+**命中测试 / 检索实验室**可运行单配置测试或 A/B 对比，展示每条结果在向量、全文、融合和重排阶段的排名与分数，并可把本地预设应用到生产知识库设置。对比不同分块策略时先在预览里确认切分结果，再对已处理文档执行重新分块。
+
+相关内容：[导入文档](../guides/knowledge/import-documents.mdx)、[分块](../guides/knowledge/chunking.mdx)、[检索与质量调优](../guides/knowledge/retrieval.mdx)、[知识库设置参考](/reference/knowledge-settings)。

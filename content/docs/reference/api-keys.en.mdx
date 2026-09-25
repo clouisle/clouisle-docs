@@ -11,23 +11,37 @@ API Keys are used for programmatic calls to Agents, workflows, and other protect
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | string | Required | `1-100` characters |
-| `scopes` | string[] | `["chat"]` | Permission scopes; subject to actual backend permissions |
-| `rate_limit` | integer | `1000` | Requests per minute; `0` means unlimited |
+| `scopes` | string[] | `["chat"]` | Permission scopes; an empty list means full access (data-model semantics), subject to actual backend permission checks |
+| `rate_limit` | integer | `1000` | Requests per minute; `0` means unlimited; `ge=0`. **The backend does not enforce this value today** — see [Limits & Quotas](/reference/rate-limits) |
 | `expires_at` | datetime/null | null | null means never expires |
 | `agent_ids` | UUID[] | `[]` | Empty list allows access to all Agents |
 | `workflow_ids` | UUID[] | `[]` | Empty list allows access to all workflows |
 | `is_active` | boolean | true (after creation) | Disabled keys fail authentication |
 
-## Authentication
+## Key Format & Authentication
 
-Put the full key in:
+A full key looks like `clou_` followed by 64 hex characters (32 random bytes, hex-encoded). The server stores the **first 12 characters** as `key_prefix` for fast candidate lookup. Request header:
 
 ```http
 Authorization: Bearer clou_your_api_key_here
 ```
 
-The server first recognizes the `clou_` prefix, then validates the hash, active status, expiration, and associated user. Both JWT and API Keys use the Bearer format, but an API Key's resource scope is limited by the key itself.
+Validation flow:
+
+1. Look up **active** candidate keys by the first 12 characters as `key_prefix` — a disabled key is never found, so it ultimately returns `2001` (`INVALID_TOKEN`).
+2. Compare the key hash against each candidate; if none match, it also returns `2001`.
+3. Check `expires_at`: an expired key returns `2002` (`TOKEN_EXPIRED`).
+4. Check that the associated user exists and is active; an inactive user returns `2004` (`INACTIVE_USER`).
+5. On success, `last_used_at` is updated and subsequent authorization runs with that user's global role permissions.
+
+Both JWT and API Keys use the Bearer format, but an API Key's resource scope is limited by both the key's own bindings and its owner's permissions.
+
+## Resource Scopes
+
+- When `agent_ids` is non-empty, the key can only access the listed Agents; empty means all Agents.
+- When `workflow_ids` is non-empty, it can only run the listed workflows; empty means all workflows.
+- `scopes` is an additional permission-scope list; an empty list means full access, and creation passes `["chat"]` by default.
 
 ## Lifecycle
 
-Copy the key immediately after creation and store it in a Secret manager. Editing can change the name, scopes, rate limit, expiration, resource scopes, and active status, but a lost full key cannot be recovered. Deletion is irreversible; to rotate, create a new key, migrate callers, then disable the old key.
+Copy the key immediately after creation and store it in a Secret manager. Editing can change the name, scopes, rate limit value, expiration, resource scopes, and active status, but a lost full key **cannot be recovered**. Deletion is irreversible; to rotate, create a new key, migrate callers, then disable the old key.

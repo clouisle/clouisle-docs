@@ -12,7 +12,7 @@ This tutorial builds a “ticket routing” workflow: it receives user input, de
 
 ## Final Result
 
-The published workflow has an input variable, classification branches, knowledge base retrieval, an HTTP request, an output node, and run tracing.
+The published workflow has an input variable, classification branches, knowledge base retrieval, an HTTP tool call, an output node, and run tracing.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/tutorial-workflow-final.png" alt="Ticket routing workflow final result" />
@@ -23,14 +23,14 @@ The published workflow has an input variable, classification branches, knowledge
 
 <Callout type="info">Define the input contract clearly so later nodes get stable types through the variable selector.</Callout>
 
-Create a workflow and select the **User input** start node, then add: `customer_id` (text, required), `message` (paragraph, required), `priority` (dropdown option, optional, default `normal`).
+Create a workflow and select the **User Input** start node, then add: `customer_id` (text, required), `message` (paragraph, required), `priority` (dropdown option, optional, default `normal`).
 
 ## Step 2: Classify & Branch
 
 <Callout type="info">Classify before side-effecting operations so not all requests go to the same business queue.</Callout>
 
-1. Add a **Question classification** node and define three categories: `billing`, `technical`, `general`.
-2. Add a **Conditional branch** to route high-priority or technical issues to the knowledge base and API branch.
+1. Add a **Question Classifier** node and define three categories: `billing`, `technical`, `general`.
+2. Add a **Condition** to route high-priority or technical issues to the knowledge base and API branch.
 3. Connect inputs and classification outputs with the variable selector.
 
 <figure>
@@ -40,24 +40,24 @@ Create a workflow and select the **User input** start node, then add: `customer_
 
 ## Step 3: Retrieve & Call the HTTP API
 
-<Callout type="info">Tool and HTTP nodes should only receive necessary parameters; inject sensitive credentials with tool credential injection.</Callout>
+<Callout type="info">Tool nodes should only receive necessary parameters; inject sensitive credentials with tool credential injection.</Callout>
 
-1. Add **Knowledge base retrieval** with the query `{message}` and Top K of `5`.
-2. Add an **HTTP request**, select `POST`, and use the test endpoint as the URL.
-3. In the request body, map `customer_id`, the classification result, and the knowledge base summary.
-4. Set a `30` second timeout and test the failure branch.
+1. Add **Knowledge Retrieval** with the query `{message}` and Top K of `5`.
+2. The `http_request` node exists only at the executor layer and is not offered in the editor's node panel. Instead, create an HTTP tool under **Capabilities** > **Tools** > **Create Tool** > **HTTP API**: select `POST`, use the test endpoint as the URL, and keep **Timeout (s)** at its default `30`.
+3. Back in the workflow, add a **Tool** node and select the HTTP tool you just created.
+4. In the parameter configuration, map `customer_id`, the classification result, and the knowledge base summary to the tool's inputs, then test the failure branch.
 
 ## Step 4: Define Outputs & Debug
 
 1. Add an **Output** node and map `category`, `ticket_id`, `answer`, and `sources`.
 2. Open the **Checklist** and fix all errors.
-3. Select **Debug run** and test a normal request, an unknown category, an API timeout, and a no-knowledge-base result separately.
+3. Select **Debug Run** and test a normal request, an unknown category, an API timeout, and a no-knowledge-base result separately.
 4. In the run drawer, review each node's inputs, outputs, and errors.
 
 ## Step 5: Publish the Webhook
 
-1. Open **Workflow settings**, select the Webhook trigger, and save.
-2. Select **Publish**; in the run page presentation options, choose **Form & results**.
+1. Open **Workflow Settings**, select the Webhook trigger, and save.
+2. Select **Publish**; in the run page presentation options, choose **Form and result**.
 3. In **Access API**, copy the URL.
 4. Send a JSON request with an API Key and use `stream_url` to view SSE execution events.
 

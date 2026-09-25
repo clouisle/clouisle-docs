@@ -15,6 +15,8 @@ icon: Database
 
 创建知识库时 `embedding_dimension` 为空，系统在首批文档切片向量化后写入实测维度。此后再更新 `embedding_model_id` 会被拒绝，提交维度不一致的向量则抛出 `DimensionMismatchError`。供应商支持范围与 Qdrant 多维集合映射见 [Embedding 适配器与向量维度](/reference/embedding-adapters)。
 
+知识库的 `visibility` 默认为 `private`（仅创建者可访问），可设为 `team`（团队成员可访问）；`public` 仅为兼容保留。
+
 ## 分块与重排序
 
 | 字段 | 类型 | 默认值 | 限制 |
@@ -22,6 +24,7 @@ icon: Database
 | `chunk_size` | integer | `1000` | `>=100` 字符 |
 | `chunk_overlap` | integer | `100` | `>=0` 字符 |
 | `separator` | string/null | `null` | 自定义文本分隔符 |
+| `rerank_model_id` | UUID/null | `null` | 团队授权的重排序模型 ID；需与 `rerank_enabled` 配合 |
 | `rerank_enabled` | boolean | `true` | 是否启用重排序 |
 | `rerank_candidate_k` | integer | `10` | `1-100` |
 | `rerank_score_threshold` | number/null | `null` | `0-1` |
@@ -38,6 +41,10 @@ icon: Database
 | `rrf_k` | integer/null | `null`（设置）；请求默认 `60` | `1-1000` |
 
 混合检索要求稠密权重或词法权重至少一个大于 `0`。查询长度为 `1-1000` 字符；批量对比最多 `10` 个配置且 ID 必须唯一。
+
+<Callout type="info" title="expand_adjacent 为内部选项">
+检索层还有一个 `expand_adjacent` 开关（默认 `false`）：开启后会把命中切片在文档中的相邻切片一并召回，以补足上下文。它是检索服务的**内部请求参数**，**当前未通过公开检索 API 暴露**，无法在知识库设置或搜索请求中配置；当前公开检索接口也不提供该字段。
+</Callout>
 
 ## 文档与状态
 

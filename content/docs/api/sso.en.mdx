@@ -1,0 +1,342 @@
+---
+title: SSO API
+description: Single sign-on flows, connection unlinking, and admin provider configuration
+icon: ShieldCheck
+---
+
+The SSO API covers three things: **provider discovery** for the login page, the browser-redirect **single sign-on flow** (OAuth2 / OIDC, SAML2, CAS), and the user **unlinking their own SSO identity**. Provider CRUD belongs to the admin surface under `/api/v1/admin/sso`.
+
+<Callout type="info" title="Prerequisites and authentication">
+  `GET /api/v1/sso/providers`, `GET /api/v1/sso/login/{provider_name}`, and `GET /api/v1/sso/callback/{provider_name}` are **public**, need no authentication, and return redirects or JSON rather than the unified envelope.
+
+  `DELETE /api/v1/sso/connections/{connection_id}` requires a signed-in user (it can only unlink their own connections).
+
+  Admin endpoints use permission codes: `GET /api/v1/admin/sso/providers` requires `admin:sso:read`; creating, updating, deleting, and testing providers — and unlinking any user's connection — require `admin:sso:update`.
+
+  Provider configuration (`config`, `attribute_mapping`, `allow_signup`, `require_approval`, `default_role_id`) is covered in [SSO configuration](/usage/guides/administration/sso).
+</Callout>
+
+<Callout type="warn">
+  `login` and `callback` return an **HTTP 307 redirect**, not a `{code, data, msg}` envelope. The frontend receives a `token` or `error` query parameter on its `/sso-callback` route. When the `sso_enabled` site setting is `false`, `GET /sso/providers` returns an empty array `[]` even if providers are configured.
+</Callout>
+
+## Endpoints
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| GET | `/api/v1/sso/providers` | List enabled providers (login page) | Public |
+| GET | `/api/v1/sso/login/{provider_name}` | Begin SSO login; redirect to the identity provider | Public |
+| GET | `/api/v1/sso/callback/{provider_name}` | Identity-provider callback; finish login and redirect back | Public |
+| DELETE | `/api/v1/sso/connections/{connection_id}` | Unlink one of the caller's SSO connections | Signed-in user |
+| GET | `/api/v1/admin/sso/providers` | List all providers (including disabled) | `admin:sso:read` |
+| POST | `/api/v1/admin/sso/providers` | Create a provider | `admin:sso:update` |
+| PUT | `/api/v1/admin/sso/providers/{provider_id}` | Update a provider | `admin:sso:update` |
+| DELETE | `/api/v1/admin/sso/providers/{provider_id}` | Delete a provider | `admin:sso:update` |
+| POST | `/api/v1/admin/sso/providers/{provider_id}/test` | Test whether the provider config can build an authorization URL | `admin:sso:update` |
+| DELETE | `/api/v1/admin/sso/connections/{connection_id}` | Unlink any user's SSO connection | `admin:sso:update` |
+
+---
+
+## 1. List enabled providers
+
+```
+GET /api/v1/sso/providers
+```
+
+Used by the login page to render SSO buttons. Only `is_enabled=true` providers are returned, and no sensitive configuration is included.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "name": "github",
+      "display_name": "GitHub",
+      "icon_url": "https://cdn.example.com/github.svg",
+      "button_text": "Continue with GitHub",
+      "protocol": "oauth2"
+    }
+  ],
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Provider ID |
+| `name` | string | Unique provider identifier (used in login URLs) |
+| `display_name` | string | User-facing name |
+| `icon_url` | string \| null | Icon URL |
+| `button_text` | string \| null | Button text |
+| `protocol` | string | `oauth2`, `oidc`, `saml2`, or `cas` |
+
+---
+
+## 2. Begin SSO login
+
+```
+GET /api/v1/sso/login/{provider_name}
+```
+
+### Query parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `redirect` | string | No | **Same-origin relative path** (e.g. `/dashboard`) to land on after login. Values with a scheme/host, starting with `//`, or containing a backslash are ignored and fall back to `/dashboard` |
+
+**Behaviour:**
+
+1. Validates that the provider exists and is enabled; otherwise it redirects to `{frontend}/sso-callback?error=sso_provider_not_found`.
+2. Generates a random `state` (the `session_id`, `secrets.token_urlsafe(32)`) and creates an SSO session that expires after 10 minutes, storing the PKCE `code_verifier` / `nonce` (OAuth2, OIDC) or RelayState.
+3. Builds the callback URL from the **backend** origin: `{backend}/api/v1/sso/callback/{provider_name}`.
+4. Returns `307 Temporary Redirect` to the identity provider's authorization URL.
+
+**Failure redirect:**
+
+```
+{frontend}/sso-callback?error=<error_code>&redirect=<path>
+```
+
+| `error` | Meaning |
+| --- | --- |
+| `sso_provider_not_found` | Provider missing or disabled |
+| `sso_login_failed` | Provider initialization failed (unsupported protocol, bad config, …) |
+
+<Callout type="info" title="About state">
+  For OAuth2 / OIDC the `state` is the server-generated SSO session ID, used on callback to retrieve the PKCE `code_verifier` / `nonce`; SAML2 passes the same session ID through `RelayState` and CAS through `state` or `ticket`. The `state` in the callback URL is therefore **not** a client-chosen value — do not construct or reuse it yourself.
+</Callout>
+
+---
+
+## 3. Identity-provider callback
+
+```
+GET /api/v1/sso/callback/{provider_name}
+```
+
+The identity provider redirects the browser here after the user authenticates. Parameters differ by protocol:
+
+| Protocol | Callback parameters | Session identifier source |
+| --- | --- | --- |
+| `oauth2` / `oidc` | `code`, `state` | `state` |
+| `cas` | `ticket` (and optionally `state`) | `state` or `ticket` |
+| `saml2` | form-POSTed `SAMLResponse`, `RelayState` | `RelayState` |
+
+**Success** → the browser is redirected to:
+
+```
+{frontend}/sso-callback?token=<access_token>&redirect=<path>
+```
+
+`token` is a standard JWT access token (lifetime controlled by the `session_timeout_days` site setting, default 7 days). When `single_session` is enabled the server records the session so older tokens are invalidated. The SSO session is deleted immediately after success.
+
+**Failure** → redirect to `{frontend}/sso-callback?error=<error_code>&redirect=<path>`. Common `error` values:
+
+| `error` | Meaning |
+| --- | --- |
+| `sso_provider_not_found` | Provider does not exist |
+| `sso_session_expired` | Session missing or older than 10 minutes |
+| `sso_login_failed` | User-info exchange failed or `provider_user_id` is missing |
+| `pending_approval` | New user requires admin approval before signing in |
+| `inactive` | Account is deactivated |
+
+<Callout type="warn">
+  For deactivated or pending-approval accounts the SSO flow **does not issue a token** — it only returns the `error` to the frontend. Surface it as a message; do not treat the user as signed in.
+</Callout>
+
+---
+
+## 4. Unlink your own SSO connection
+
+```
+DELETE /api/v1/sso/connections/{connection_id}
+```
+
+### Path parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `connection_id` | string (UUID) | Yes | User SSO connection ID |
+
+Only connections **belonging to the caller** can be operated on. If the account has no password and this is its last SSO connection, deletion is refused (the account would become unreachable).
+
+The caller's connection list is available from the `sso_connections` field of `GET /api/v1/users/me`; see the [Users API](./users).
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": null,
+  "msg": "success"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `4000` | `sso_connection_not_found`: unknown connection or not owned by the caller |
+| `400` | `1004` | `cannot_disconnect_only_auth_method`: no password and this is the only sign-in method |
+
+---
+
+## 5. Admin: provider configuration
+
+The following endpoints are mounted under `/api/v1/admin/sso`.
+
+### 5.1 List all providers
+
+```
+GET /api/v1/admin/sso/providers
+```
+
+Requires `admin:sso:read`. Returns **all** providers (including `is_enabled=false`) with their full configuration.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Provider ID |
+| `name` | string | Unique identifier, must match `^[a-z][a-z0-9_-]*$` |
+| `protocol` | string | `oauth2`, `oidc`, `saml2`, or `cas` |
+| `display_name` | string | User-facing name, max 100 characters |
+| `icon_url` | string \| null | Icon URL, must start with `http(s)://` |
+| `button_text` | string \| null | Button text, max 50 characters |
+| `config` | object | Protocol-specific configuration (below) |
+| `attribute_mapping` | object | Provider attribute → user field mapping, e.g. `{"email": "email"}` |
+| `is_enabled` | boolean | Whether the provider is enabled |
+| `allow_signup` | boolean | Whether users may be auto-created |
+| `require_approval` | boolean | Whether new users need admin approval |
+| `default_role_id` | string (UUID) \| null | Default role for new SSO users |
+| `created_at` / `updated_at` | string (ISO 8601) | Creation and update timestamps |
+
+`config` fields by protocol:
+
+| Protocol | Typical fields |
+| --- | --- |
+| `oauth2` / `oidc` | `client_id`, `client_secret`, `issuer_url`, `authorization_url`, `token_url`, `userinfo_url`, `scopes` |
+| `saml2` | `sp_entity_id`, `idp_entity_id`, `sso_url`, `slo_url`, `x509_cert`, `acs_url` |
+| `cas` | `server_url`, `service_url`, `version` |
+
+### 5.2 Create a provider
+
+```
+POST /api/v1/admin/sso/providers
+```
+
+Requires `admin:sso:update`. Body fields match the table above (`name`, `protocol`, `display_name`, `config` required; `attribute_mapping` defaults to `{}`, `is_enabled` to `true`, `allow_signup` to `true`, `require_approval` to `false`).
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/sso/providers" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "github",
+    "protocol": "oauth2",
+    "display_name": "GitHub",
+    "config": {"client_id": "...", "client_secret": "...", "authorization_url": "https://github.com/login/oauth/authorize", "token_url": "https://github.com/login/oauth/access_token", "userinfo_url": "https://api.github.com/user", "scopes": ["read:user", "user:email"]},
+    "attribute_mapping": {"email": "email", "username": "login"},
+    "is_enabled": true,
+    "allow_signup": true,
+    "require_approval": false
+  }'
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `6305` | `sso_provider_name_exists`: identifier already taken |
+| `422` | `1001` | `name` violates the naming pattern, or `icon_url` is not an `http(s)` URL |
+
+### 5.3 Update a provider
+
+```
+PUT /api/v1/admin/sso/providers/{provider_id}
+```
+
+Requires `admin:sso:update`. Every field is optional and only the supplied ones are applied; a conflicting `name` also returns `6305`.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `6300` | `sso_provider_not_found` |
+| `400` | `6305` | `sso_provider_name_exists` |
+
+### 5.4 Delete a provider
+
+```
+DELETE /api/v1/admin/sso/providers/{provider_id}
+```
+
+Requires `admin:sso:update`. Deleting a provider also removes its configuration.
+
+**Errors:** `400` + `6300` (`sso_provider_not_found`).
+
+### 5.5 Test a provider
+
+```
+POST /api/v1/admin/sso/providers/{provider_id}/test
+```
+
+Requires `admin:sso:update`. Attempts to build an authorization URL with a test `state` and callback to validate the configuration.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "status": "success",
+    "message": "SSO provider configuration is valid",
+    "authorization_url": "https://github.com/login/oauth/authorize?client_id=..."
+  },
+  "msg": "success"
+}
+```
+
+When the configuration is invalid the response is still `200 OK`, but `data.status` is `"error"`, `message` is a generic error string, and `authorization_url` is absent.
+
+<Callout type="warn">
+  The test outcome is expressed in `data.status` and is **not** conveyed by the HTTP status: `code: 0` + `status: "error"` means the configuration is broken. Only a missing provider returns `400` + `6300`.
+</Callout>
+
+### 5.6 Unlink any user's connection
+
+```
+DELETE /api/v1/admin/sso/connections/{connection_id}
+```
+
+Requires `admin:sso:update`. Semantics match self-service unlinking, but any user's connection may be targeted; the "no password and only sign-in method" protection still applies.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `4000` | `sso_connection_not_found` |
+| `400` | `1004` | `cannot_disconnect_only_auth_method` |
+
+---
+
+## Error handling
+
+| HTTP | Code | Trigger |
+| --- | --- | --- |
+| `403` | `3000` | Missing `admin:sso:read` / `admin:sso:update` |
+| `400` | `1004` | Unlinking would leave the account with no sign-in method |
+| `400` | `6300` | Provider not found (admin endpoints) |
+| `400` | `6305` | Duplicate provider identifier |
+| `400` | `4000` | SSO connection missing or not owned by the caller |
+| `422` | `1001` | Request validation failed (provider naming, `icon_url` format, …) |
+
+The login/callback flow does not use the unified envelope; failures arrive as the `error` parameter on the frontend's `/sso-callback`: `sso_provider_not_found`, `sso_session_expired`, `sso_login_failed`, `pending_approval`, `inactive`.
+
+## Related
+
+- [Authentication API](./auth) — password login, JWT tokens, and TOTP two-factor verification
+- [SSO configuration](/usage/guides/administration/sso) — per-protocol settings and attribute mapping
+- [Users API](./users) — the `sso_connections` field on a user profile
+- [Error Handling](./errors) — recover by HTTP status and business error code

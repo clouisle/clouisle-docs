@@ -133,7 +133,7 @@ API Key 的创建与状态变更：
 字段级变更的 `before` / `after` 数据在存储前会经过 `AuditLogService.sanitize_changes` 处理：
 
 - **敏感字段掩码**：键名包含 `password`、`hashed_password`、`api_key`、`secret_key`、`access_token`、`refresh_token`、`private_key`、`secret` 或 `token` 的字段会被掩码。字符串超过 8 个字符只显示前 8 位加 `***`，其余值替换为 `***`。
-- **邮箱部分掩码**：如 `a***e@example.com`。
+- **邮箱部分掩码**：本地部分超过 2 个字符时首尾各留 1 个（`a***e@example.com`）；不超过 2 个字符时只留首字符（`a***@example.com`）。
 - **嵌套字典递归处理**。
 - **值截断**：单字段最大 500 字符，超大结构替换为预览字符串。
 
@@ -143,7 +143,12 @@ API Key 的创建与状态变更：
 
 ### 导出格式
 
-支持 CSV 和 JSON 两种格式。导出接口 `GET /api/v1/admin/audit-logs/export?format=csv|json` 与列表接口使用相同筛选条件，最多返回 `10,000` 条。
+支持 CSV 和 JSON 两种格式。导出接口 `GET /api/v1/admin/audit-logs/export?format=csv|json` 支持列表接口**除 `resource_id` 之外**的全部筛选参数（`user_id`、`team_id`、`action`、`resource_type`、`status`、`start_date`、`end_date`、`search`），最多返回 `10,000` 条，按时间倒序。
+
+<Callout type="warn" title="导出的 search 与列表不同">
+  列表接口的 `search` 匹配资源名称、资源 ID 与 IP 地址；**导出接口的 `search` 只匹配资源名称与 IP 地址**（不含资源 ID），也没有 `resource_id` 参数。用「资源 ID」搜索后导出，结果会比列表页多——排查问题时请以资源名称或 IP 作为导出条件。
+</Callout>
+
 
 **CSV 列：** ID、Time、User、Action、Resource Type、Resource Name、Operation、Status、IP Address、Error Message
 
@@ -168,18 +173,34 @@ curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" 
 
 ### 手动归档
 
-1. 前往**审计日志** > **归档**
-2. 点击**归档**
-3. 归档任务异步执行（需要 `audit:export`），通过返回的任务 ID 跟踪状态
+1. 前往**管理后台** > **站点设置** > **存储**。
+2. 在**审计日志**分区点击**归档**并确认。
+3. 任务异步执行（需要 `audit:export`）；界面每 `2` 秒轮询一次任务状态，**5** 分钟后超时。
+
+> **注意：** 手动归档入口在**存储**设置页，不在审计日志页——审计日志页只提供查看、筛选和导出。
+
+**调用的端点：**
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | 触发归档，返回 `{ "task_id", "status": "pending" }` |
+| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | 查询任务状态：`PENDING` / `STARTED` / `SUCCESS`（含 `result.archived_count`）/ `FAILURE`（含 `error`） |
+| `POST` | `/api/v1/admin/audit-logs/archive` | 审计日志路由下的等价触发器：同样提交 `tasks.archive_old_audit_logs`，但只返回 `task_id`，**没有**配套的状态查询端点 |
+
+三个端点都要求 `audit:export`；触发成功与失败都会写入审计日志（`trigger_audit_log_archive`）。
 
 **归档机制：**
 
-- 归档任务 `tasks.archive_old_audit_logs` 选取超过保留截止日期的日志
-- 日志按月导出为本地 JSON 文件，如 `/var/log/clouisle/audit_archives/audit_logs_202602.json`（已有月度文件会追加）
-- 已归档日志从数据库中删除
+- 归档任务 `tasks.archive_old_audit_logs` 选取超过保留截止日期（`now - audit_log_retention_days`）的日志
+- 日志按月导出为本地 JSON 文件，如 `/var/log/clouisle/audit_archives/audit_logs_202602.json`（已存在的月度文件会追加）
+- 归档完成后已归档日志从数据库中删除
 
 <Callout type="warn">
-  **Roadmap：** 暂无定时自动归档（如每日凌晨 2 点）和 S3/Azure/Blob 归档目标，归档输出写入本地 `audit_log_archive_path` 配置的路径。
+  归档会**从数据库删除**已归档日志，只留下本地 JSON 文件。归档路径必须落在持久卷上，否则容器重建即丢失唯一副本；同时确认 `audit_log_retention_days` 已被合规要求确认过再触发。
+</Callout>
+
+<Callout type="warn">
+  **Roadmap：** 没有定时自动归档，必须手动触发；也没有 S3/Azure/Blob 等远程归档目标，归档输出只写入本地 `audit_log_archive_path` 配置的路径。
 </Callout>
 
 <Callout type="warn">
@@ -188,7 +209,11 @@ curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" 
 
 ### 归档状态查询
 
-`GET /api/v1/admin/audit-logs/stats/retention` 返回：已配置的保留天数、截止日期、待归档日志数、最旧日志和下次归档时间。
+`GET /api/v1/admin/audit-logs/stats/retention` 返回：已配置的保留天数（`retention_days`）、截止日期（`cutoff_date`）、待归档日志数（`logs_to_archive`）、最旧日志时间（`oldest_log_date`）与 `next_archive_date`。
+
+<Callout type="warn">
+  `next_archive_date` 是接口**按「次日 03:00」计算出来的展示值**，背后没有对应的 Celery Beat 定时任务——归档始终是手动触发的。不要把它当作「系统会在该时间自动归档」的承诺（`app/core/celery.py` 的 `beat_schedule` 里没有归档任务）。
+</Callout>
 
 ## 统计接口
 
@@ -199,7 +224,7 @@ curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" 
 </Callout>
 
 <Callout type="warn">
-  **Roadmap：** 暂无审计日志实时监控仪表盘。站点设置中的 `audit_alert_enabled`、`audit_alert_webhook` 及失败登录阈值等配置项当前未被任何监控或通知代码消费。
+  **Roadmap：** 暂无审计日志实时监控仪表盘。站点设置中的 `audit_alert_enabled`、`audit_alert_webhook` 及失败登录阈值等配置项当前未被任何监控或通知代码消费（见[站点设置](./site-settings.mdx)的「审计告警」小节）。
 </Callout>
 
 ## API 端点参考
@@ -211,7 +236,9 @@ curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" 
 | `GET` | `/api/v1/admin/audit-logs/export?format=csv\|json` | 导出审计日志（最多 10,000 条） | `audit:export` |
 | `GET` | `/api/v1/admin/audit-logs/stats` | 获取审计统计聚合 | `audit:read` |
 | `GET` | `/api/v1/admin/audit-logs/stats/retention` | 获取保留与归档状态 | `audit:read` |
-| `POST` | `/api/v1/admin/audit-logs/archive` | 触发手动归档任务 | `audit:export` |
+| `POST` | `/api/v1/admin/audit-logs/archive` | 触发手动归档任务（仅返回 `task_id`） | `audit:export` |
+| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | 触发手动归档任务（存储设置页使用，返回 `task_id` + `status`） | `audit:export` |
+| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | 查询归档任务状态与结果 | `audit:export` |
 
 ## 最佳实践
 

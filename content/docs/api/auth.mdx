@@ -1,50 +1,53 @@
 ---
 title: 认证与用户登录 API
-description: 用户注册、人机验证、密码登录、两步验证 (TOTP)、密码找回与邮箱验证接口
+description: 用户注册、人机验证、密码登录、TOTP 两步验证、密码找回与邮箱验证接口
 icon: KeyRound
 ---
 
-认证与用户登录 API 提供账户注册、图形验证码人机验证、OAuth2 兼容的密码登录、两步验证 (TOTP) 挑战与校验、密码重置以及邮箱验证能力。基础路径为 `/api/v1`。
+认证与登录接口提供账户注册、点击式人机验证、OAuth2 兼容的密码登录、TOTP 两步验证挑战与校验、密码重置与邮箱验证。基础路径为 `/api/v1`。
+
+<Callout type="info">
+  TOTP 的**绑定与解绑**在独立的 `/api/v1/totp/*` 端点上（见 [TOTP API](./totp)），SSO 在 `/api/v1/sso/*`（见 [SSO API](./sso)）。本页聚焦登录链路本身，以及登录时如何使用这两者。
+</Callout>
 
 ## 端点总览
 
 | 方法 | 路径 | 用途 | 认证方式 |
 | --- | --- | --- | --- |
 | GET | `/api/v1/captcha` | 获取基于点击的人机验证挑战 | 公开 |
-| POST | `/api/v1/captcha/click` | 提交点击轨迹并换取单次有效验证码凭证 | 公开 |
-| POST | `/api/v1/login/access-token` | 用户名/邮箱与密码登录，换取 JWT Access Token | 公开 |
-| POST | `/api/v1/login/verify-totp` | 使用临时凭证完成 TOTP 两步验证挑战 | 公开（带 `temp_token`） |
-| POST | `/api/v1/logout` | 退出当前会话并将令牌加入黑名单 | Bearer JWT |
-| POST | `/api/v1/register` | 注册新用户账户（开放注册） | 公开 |
-| POST | `/api/v1/send-verification` | 发送注册或绑定邮箱验证码 | 公开 |
-| POST | `/api/v1/verify-email` | 通过 6 位数字验证码验证邮箱 | 公开 |
-| GET | `/api/v1/verify` | 通过邮件中的链接令牌验证邮箱 | 公开 |
+| POST | `/api/v1/captcha/click` | 提交点击轨迹，换取一次性验证凭证 | 公开 |
+| POST | `/api/v1/login/access-token` | 用户名/邮箱 + 密码登录 | 公开 |
+| POST | `/api/v1/login/verify-totp` | 用临时令牌 + 动态码换取正式令牌 | 公开（需 `temp_token`） |
+| POST | `/api/v1/logout` | 注销当前会话并将令牌加入黑名单 | Bearer JWT |
+| POST | `/api/v1/register` | 注册新账户 | 公开 |
+| POST | `/api/v1/send-verification` | 发送邮箱验证码/链接 | 公开 |
+| POST | `/api/v1/verify-email` | 用 6 位验证码验证邮箱 | 公开 |
+| GET | `/api/v1/verify` | 用邮件链接中的令牌验证邮箱 | 公开 |
 | POST | `/api/v1/resend-verification` | 重新发送注册验证邮件 | 公开 |
-| POST | `/api/v1/forgot-password` | 请求发送找回密码验证码或链接 | 公开 |
-| POST | `/api/v1/reset-password` | 通过验证码或重置令牌设置新密码 | 公开 |
-| GET | `/api/v1/sso/providers` | 获取已启用的公开 SSO 身份提供商列表 | 公开 |
-| GET | `/api/v1/sso/login/{provider_name}` | 发起 SSO 登录重定向 | 公开 |
-| GET | `/api/v1/sso/callback/{provider_name}` | 处理 SSO 身份认证回调 | 公开 |
-| DELETE | `/api/v1/sso/connections/{connection_id}` | 解绑用户的指定 SSO 连接 | Bearer JWT |
-| POST | `/api/v1/totp/setup` | 生成 TOTP 密钥与绑定二维码 | Bearer JWT |
-| POST | `/api/v1/totp/enable` | 输入验证码正式启用两步验证 | Bearer JWT |
-| POST | `/api/v1/totp/disable` | 输入密码与验证码停用两步验证 | Bearer JWT |
-| POST | `/api/v1/totp/regenerate-backup-codes` | 重新生成 10 个备用恢复码 | Bearer JWT |
-| GET | `/api/v1/totp/status` | 查询当前用户的两步验证开启状态 | Bearer JWT |
+| POST | `/api/v1/forgot-password` | 请求找回密码邮件 | 公开 |
+| POST | `/api/v1/reset-password` | 用验证码或令牌设置新密码 | 公开 |
 
----
+## 令牌与会话
+
+登录成功返回 JWT，请求时放在 `Authorization: Bearer <token>`。
+
+| 项目 | 值 |
+| --- | --- |
+| 有效期 | 站点设置 `session_timeout_days`，默认 **30 天**（设置行缺失时代码回退值为 7 天） |
+| 刷新机制 | 无 refresh token，过期后需重新登录 |
+| 注销 | `POST /api/v1/logout` 将令牌写入黑名单，立即失效 |
+| 单会话模式 | `single_session = true` 时，新登录会使旧令牌失效，旧令牌请求返回 HTTP `401` / `2001` |
+| 注销失败 | 未携带令牌时返回 HTTP `401` / `2000` |
 
 ## 人机验证（Captcha）
 
-系统配置开启人机验证时，注册、密码登录和找回密码需要携带人机验证凭据。
+站点开启 `enable_captcha`（默认 `false`）时，**注册、密码登录、找回密码**都需要携带人机验证凭证。
 
 ### 1. 获取验证挑战
 
 ```http
 GET /api/v1/captcha
 ```
-
-#### 成功响应（200 OK）
 
 ```json
 {
@@ -59,9 +62,9 @@ GET /api/v1/captcha
 }
 ```
 
-### 2. 提交点击换取证明
+`challenge` 是一个 JSON 字符串（需自行解析），`expires_in` 为 `300` 秒。
 
-客户端记录用户的点击坐标与鼠标轨迹后提交：
+### 2. 提交点击换取凭证
 
 ```http
 POST /api/v1/captcha/click
@@ -73,13 +76,19 @@ Content-Type: application/json
   "clicked_option": "red_circle",
   "elapsed_ms": 1340,
   "pointer": [
-    {"x": 105.5, "y": 80.2, "t": 1200},
-    {"x": 108.0, "y": 82.0, "t": 1340}
+    {"x": 105.5, "y": 80.2, "t": 1200, "event": "move"},
+    {"x": 108.0, "y": 82.0, "t": 1340, "event": "move"}
   ]
 }
 ```
 
-#### 成功响应（200 OK）
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `captcha_id` | string | 是 | 挑战返回的 ID |
+| `challenge` | string | 是 | 原样回传挑战字符串 |
+| `clicked_option` | string | 是 | 用户选择的选项标识 |
+| `elapsed_ms` | integer | 是 | 从展示到点击的耗时（毫秒） |
+| `pointer` | array | 否 | 指针轨迹点，每项含 `x`、`y`、`t`，可选 `event`（默认 `move`）；空数组也可以 |
 
 ```json
 {
@@ -92,55 +101,85 @@ Content-Type: application/json
 }
 ```
 
----
+凭证一次性使用：同一套 `captcha_id` + `captcha_token` 不能重复换取登录。
+
+| HTTP | code | 场景 |
+| --- | --- | --- |
+| `400` | `5302` | 需要人机验证但未携带 `captcha_id` / `captcha_token` |
+| `400` | `5303` | 凭证无效、已使用或已过期；或提交的轨迹未通过校验 |
 
 ## 密码登录与两步验证
 
 ### 1. 提交凭证登录
 
-采用标准 OAuth2 表单格式（`application/x-www-form-urlencoded`）：
+标准 OAuth2 表单（`application/x-www-form-urlencoded`，**不是** JSON）：
 
 ```http
 POST /api/v1/login/access-token
 Content-Type: application/x-www-form-urlencoded
 
-username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-91fa-4ff8-9125-5e3681428256&captcha_token=proof-token-string
+username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-...&captcha_token=proof-token-string
 ```
 
-- `username` 可以传入用户名或电子邮箱。
-- 若启用了人机验证，必须传递有效的 `captcha_id` 和 `captcha_token`。
+| 表单字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `username` | string | 是 | 用户名或邮箱；后端字段名为 `identifier`，通过别名接收 |
+| `password` | string | 是 | 密码 |
+| `captcha_id` | string | 开启人机验证时必填 | 验证挑战 ID |
+| `captcha_token` | string | 开启人机验证时必填 | 点击凭证 |
+| `captcha_answer` | string | 否 | 旧客户端兼容字段：`captcha_token` 为空时用它作为凭证兜底 |
 
-#### 直接登录成功响应（200 OK）
+登录前的检查顺序（决定了你会看到哪个错误）：
+
+1. 站点关闭密码登录（`sso_enabled = true` 且 `sso_allow_password_login = false`）→ `400` / `6306`。
+2. 账号被锁定 → `400` / `5300`，`data.lockout_seconds` 给出剩余秒数。
+3. 密码错误 → `400` / `2003`，`data.remaining_attempts` 给出剩余尝试次数；失败次数达到 `max_login_attempts`（默认 `5`）会按 `lockout_duration_minutes`（默认 `15` 分钟）锁定并返回 `5300`。
+4. 账号停用或待审批 → `400` / `2004`（`approval_status = pending` 时提示待审批）。
+5. 已开启 TOTP → 返回 `requires_totp`（见下）。
+6. 站点强制 TOTP（`require_totp = true`）而用户未绑定 → 返回 `requires_totp_setup`。
+7. 开启邮箱验证（`email_verification` 默认 `true`）且用户未验证（超级管理员除外）→ `400` / `5004`，`data.email` 给出邮箱。
+
+#### 直接登录成功（200 OK）
 
 ```json
 {
   "code": 0,
-  "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "bearer"
-  },
-  "msg": "login_successful"
+  "data": { "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "token_type": "bearer" },
+  "msg": "Login successful"
 }
 ```
 
-#### 要求两步验证（TOTP 挑战响应）
+#### 要求两步验证（TOTP 挑战）
 
-当用户已开启两步验证，后端不直接发放正式 `access_token`，而是返回有效时长为 5 分钟的临时凭证 `temp_token`：
+账号已开启 TOTP 时不发放正式令牌，而是返回有效期 **5 分钟**的临时令牌：
 
 ```json
 {
   "code": 0,
-  "data": {
-    "requires_totp": true,
-    "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-  },
+  "data": { "requires_totp": true, "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
   "msg": "totp_required"
 }
 ```
 
+#### 要求先绑定两步验证
+
+站点开启 `require_totp` 且账号未绑定时，返回有效期 **30 分钟**的临时令牌，用于先调用 `/api/v1/totp/setup` 完成绑定：
+
+```json
+{
+  "code": 0,
+  "data": { "requires_totp_setup": true, "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+  "msg": "totp_setup_required"
+}
+```
+
+<Callout type="info">
+  这三种都是**成功响应**（`code: 0`），不是错误。客户端必须先判断 `data` 中的分支标志（`requires_totp` / `requires_totp_setup` / `force_password_change`），再决定跳转到哪一步。
+</Callout>
+
 #### 强制修改密码
 
-若密码已过期或管理员标记必须修改密码：
+密码过期或管理员标记必须修改时，仍发放正式令牌，但带标记：
 
 ```json
 {
@@ -151,11 +190,13 @@ username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-91fa-
     "force_password_change": true,
     "reason": "expired"
   },
-  "msg": "login_successful_change_password_required"
+  "msg": "Login successful. You must change your password before continuing."
 }
 ```
 
-### 2. 校验 TOTP 验证码完成登录
+`reason` 为 `expired`（密码过期）或 `force`（管理员强制）。此时应引导用户调用 `POST /api/v1/users/me/change-password`。
+
+### 2. 校验 TOTP 完成登录
 
 ```http
 POST /api/v1/login/verify-totp
@@ -164,13 +205,35 @@ Content-Type: application/x-www-form-urlencoded
 temp_token=temp-jwt-token-string&code=123456&is_backup_code=false
 ```
 
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `temp_token` | string | 是 | 登录步骤返回的 5 分钟临时令牌 |
-| `code` | string | 是 | 身份验证器生成的 6 位动态验证码，或 8 位备用恢复码 |
-| `is_backup_code` | boolean | 否 | 当使用备用码时设为 `true`，默认 `false` |
+| 表单字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `temp_token` | string | 是 | — | 上一步返回的临时 JWT |
+| `code` | string | 是 | — | 身份验证器生成的 6 位动态码，或使用 `is_backup_code=true` 时提交备用恢复码 |
+| `is_backup_code` | boolean | 否 | `false` | 是否按备用恢复码校验 |
 
-校验成功后返回标准 `access_token` 与 `token_type: bearer`。
+全部字段都是 **form 字段**；用 JSON body 提交会得到 `422`。
+
+成功时按与登录相同的规则处理强制改密，并返回：
+
+```json
+{
+  "code": 0,
+  "data": { "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "token_type": "bearer" },
+  "msg": "Two-factor authentication verified successfully"
+}
+```
+
+失败路径：
+
+| HTTP | code | 场景 |
+| --- | --- | --- |
+| `400` | `2001` | 临时令牌无效或已被篡改 |
+| `400` | `2002` | 临时令牌已过期（`totp_setup_expired`） |
+| `400` | `5313` | 该账号未开启 TOTP（或密钥缺失） |
+| `400` | `5312` | 连续失败次数过多被限速，`data.seconds` 为剩余等待秒数 |
+| `400` | `5311` | 动态码或备用码不正确 |
+
+使用备用恢复码成功校验后，该码立即失效，剩余可用数量会记入审计日志。
 
 ### 3. 注销登录
 
@@ -179,9 +242,7 @@ POST /api/v1/logout
 Authorization: Bearer YOUR_TOKEN
 ```
 
-将当前会话加入黑名单注销。
-
----
+将当前令牌加入黑名单，响应 `data: null`，`msg` 为 `Logout successful`。注销后必须重新登录。
 
 ## 用户注册与邮箱验证
 
@@ -195,13 +256,36 @@ Content-Type: application/json
   "username": "bob",
   "email": "bob@example.com",
   "password": "StrongPassword123!",
+  "locale": "zh",
   "terms_accepted": true,
-  "captcha_id": "captcha-uuid",
-  "captcha_token": "proof-token"
+  "captcha_id": "c62040db-...",
+  "captcha_token": "proof-token-string"
 }
 ```
 
-注册成功后返回新创建的用户对象。若系统第一个注册的用户，会自动被授予超级管理员角色。
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `username` | string | 是 | 用户名，唯一 |
+| `email` | string | 是 | 邮箱，唯一 |
+| `password` | string | 是 | 密码，按密码策略校验 |
+| `locale` | string | 否 | 界面语言 |
+| `terms_accepted` | boolean | 站点要求时必填 | 站点开启 `require_terms_acceptance_on_register` 时必须为 `true`，否则 `1001` |
+| `captcha_id` / `captcha_token` | string | 站点开启人机验证时必填 | 见人机验证小节 |
+
+注册结果由站点设置决定，`msg` 与账号状态随设置变化：
+
+| 场景 | `approval_status` | `is_active` | `email_verified` | `msg` |
+| --- | --- | --- | --- | --- |
+| 系统第一个用户 | `approved` | `true` | `true` | `Registration successful. You are the first user and have been promoted to Super Admin!` |
+| `require_approval = true`（默认） | `pending` | `false` | 视邮箱验证设置 | `Registration successful. Your account is pending admin approval.` |
+| `require_approval = false` 且 `email_verification = true`（默认） | `approved` | `true` | `false` | `Registration successful. Please verify your email to activate your account.` |
+| 两者都关闭 | `approved` | `true` | `true` | `Registration successful` |
+
+<Callout type="warn">
+  `require_approval` 默认为 `true`，因此**默认注册不会直接可用**：新账号需要管理员在后台审批（或用户完成邮箱验证）后才能登录，如未完成，登录会返回 `2004`（待审批）或 `5004`（邮箱未验证）。系统**第一个**注册的用户跳过上述全部限制：直接激活、免邮箱验证并自动获得超级管理员角色；其余新用户会被分配默认角色与默认团队。
+</Callout>
+
+失败路径：用户名重复 `5002`；邮箱重复 `5003`；密码不符合策略 `1001`（`data.errors.password` 列出原因）；开放注册关闭 `5000`；人机验证缺失/失败 `5302`/`5303`。
 
 ### 2. 发送验证邮件
 
@@ -209,36 +293,62 @@ Content-Type: application/json
 POST /api/v1/send-verification
 Content-Type: application/json
 
-{
-  "email": "bob@example.com",
-  "purpose": "register"
-}
+{ "email": "bob@example.com", "purpose": "register" }
 ```
 
-`purpose` 可选 `register` 或 `reset_password`。发送间隔受 60 秒频控限制。
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `email` | string | 是 | — | 收件邮箱 |
+| `purpose` | string | 否 | `register` | `register` 或 `reset_password` |
 
-### 3. 输入 6 位验证码校验
+行为差异：
+
+- `purpose = register`：邮箱对应的用户必须存在且未验证；不存在返回 `400` / `4000`，已验证返回 `400` / `1001`。
+- `purpose = reset_password`：无论邮箱是否存在都返回成功（防枚举）；存在时发送重置邮件。
+
+同一邮箱同一用途有 **60 秒**冷却，冷却内重复请求返回 `400` / `5008`，`data.remaining_seconds` 为剩余秒数。SMTP 未启用时返回 `400` / `5007`。邮件在后台任务发送，响应只表示已入队。
+
+### 3. 用 6 位验证码验证邮箱
 
 ```http
 POST /api/v1/verify-email
 Content-Type: application/json
 
-{
-  "email": "bob@example.com",
-  "code": "839201",
-  "purpose": "register"
-}
+{ "email": "bob@example.com", "code": "839201", "purpose": "register" }
 ```
 
-响应返回 `{ "verified": true, "email": "bob@example.com" }`。
+| 字段 | 类型 | 必填 | 默认值 |
+| --- | --- | --- | --- |
+| `email` | string | 是 | — |
+| `code` | string | 是 | — |
+| `purpose` | string | 否 | `register` |
 
-### 4. 邮件链接一键校验
+`purpose = register` 时会把用户的 `email_verified` 置为 `true`。
+
+```json
+{ "code": 0, "data": { "verified": true, "email": "bob@example.com" }, "msg": "Email verified successfully" }
+```
+
+验证码错误或已被消费返回 `400` / `5005`。
+
+### 4. 用邮件链接验证邮箱
 
 ```http
 GET /api/v1/verify?token=email-verification-token-string
 ```
 
----
+`token` 是**查询参数**。令牌无效或已过期返回 `400` / `5006`，其余成功响应同验证码方式。
+
+### 5. 重新发送注册验证邮件
+
+```http
+POST /api/v1/resend-verification
+Content-Type: application/json
+
+{ "email": "bob@example.com" }
+```
+
+与 `send-verification` 的 `register` 用途不同，本端点对**不存在的邮箱也返回成功**（防枚举），但邮箱已通过验证时返回 `400` / `1001`。同样受 60 秒冷却（`5008`）与 SMTP 开关（`5007`）约束。
 
 ## 密码找回与重置
 
@@ -248,160 +358,86 @@ GET /api/v1/verify?token=email-verification-token-string
 POST /api/v1/forgot-password
 Content-Type: application/json
 
-{
-  "email": "alice@example.com"
-}
+{ "email": "alice@example.com" }
 ```
 
-无论邮箱是否存在，接口均统一返回成功以防止邮箱枚举。
+为防邮箱枚举，**无论邮箱是否存在都返回成功**（`msg` 为 `If the email exists, a password reset link has been sent`）。但当 SMTP 未启用时返回 `400` / `5007`，60 秒冷却内重复请求返回 `400` / `5008` —— 这两种情况下攻击者能推断出部署状态，请知悉这是刻意取舍（可用性优先）。
 
 ### 2. 确认重置密码
 
-支持使用 6 位验证码或邮件专用令牌两种方式：
+支持两种互斥的方式，至少提供一种（都不提供返回 `422`）：
 
 ```http
 POST /api/v1/reset-password
 Content-Type: application/json
 
-{
-  "email": "alice@example.com",
-  "code": "839201",
-  "new_password": "NewStrongPassword456!"
-}
+{ "email": "alice@example.com", "code": "839201", "new_password": "NewStrongPassword456!" }
 ```
-
-或者：
 
 ```http
 POST /api/v1/reset-password
 Content-Type: application/json
 
-{
-  "token": "reset-token-string",
-  "new_password": "NewStrongPassword456!"
-}
+{ "token": "reset-token-string", "new_password": "NewStrongPassword456!" }
 ```
 
-重置成功后自动清除该账户的历史连续失败尝试锁定计数。
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `email` + `code` | string | 二选一 | 6 位验证码方式，`purpose` 固定为 `reset_password` |
+| `token` | string | 二选一 | 邮件链接令牌方式 |
+| `new_password` | string | 是 | 新密码，按密码策略校验 |
 
----
+重置成功后会清空该账号的连续失败次数与锁定时间（`failed_login_attempts`、`locked_until`），因此被锁定的用户可以通过重置密码立即恢复登录。
 
-## 两步验证（TOTP）管理
+失败路径：验证码/令牌无效 `400` / `5005`；用户不存在 `400` / `4000`；新密码不符合策略 `400` / `1001`。
 
-用户登录后，在个人设置中配置 TOTP 2FA。
+## 两步验证与 SSO 的边界
 
-### 1. 生成绑定二维码
+登录流程只负责「挑战与校验」，后续管理在其他页面：
 
-```http
-POST /api/v1/totp/setup
-Authorization: Bearer YOUR_TOKEN
-```
-
-#### 成功响应（200 OK）
-
-```json
-{
-  "code": 0,
-  "data": {
-    "secret": "JBSWY3DPEHPK3PXP",
-    "qr_code": "data:image/png;base64,...",
-    "backup_codes": [
-      "a1b2c3d4",
-      "e5f6g7h8",
-      "i9j0k1l2",
-      "m3n4o5p6",
-      "q7r8s9t0",
-      "u1v2w3x4",
-      "y5z6a7b8",
-      "c9d0e1f2",
-      "g3h4i5j6",
-      "k7l8m9n0"
-    ]
-  },
-  "msg": "success"
-}
-```
-
-### 2. 确认开启
-
-```http
-POST /api/v1/totp/enable
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
-{
-  "code": "123456"
-}
-```
-
-### 3. 停用两步验证
-
-```http
-POST /api/v1/totp/disable
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
-{
-  "password": "CurrentPassword123!",
-  "code": "123456",
-  "is_backup_code": false
-}
-```
-
-### 4. 重新生成备用恢复码
-
-```http
-POST /api/v1/totp/regenerate-backup-codes
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
-{
-  "code": "123456"
-}
-```
-
-返回重新生成的 10 个备用码。
-
-### 5. 查询状态
-
-```http
-GET /api/v1/totp/status
-Authorization: Bearer YOUR_TOKEN
-```
-
-```json
-{
-  "code": 0,
-  "data": {
-    "enabled": true,
-    "enabled_at": "2026-09-10T14:30:00Z",
-    "remaining_backup_codes": 9
-  },
-  "msg": "success"
-}
-```
-
----
-
-## 错误代码
-
-| 错误码 | 标识 | 说明 |
+| 需求 | 端点 | 详见 |
 | --- | --- | --- |
-| `2000` | UNAUTHORIZED | 未认证或令牌无效 |
-| `2001` | INVALID_TOKEN | 临时凭据无效 |
-| `2002` | TOKEN_EXPIRED | 登录临时凭据或验证码已过期 |
-| `2003` | INVALID_CREDENTIALS | 用户名或密码错误 |
-| `2004` | INACTIVE_USER | 用户已被禁用或待审批 |
-| `5000` | REGISTRATION_DISABLED | 开放注册已关闭 |
-| `5004` | EMAIL_NOT_VERIFIED | 登录前必须完成邮箱验证 |
-| `5005` | VERIFICATION_CODE_INVALID | 邮箱验证码错误 |
-| `5006` | VERIFICATION_CODE_EXPIRED | 邮箱验证码已过期 |
-| `5008` | EMAIL_SEND_TOO_FREQUENT | 邮件发送过于频繁（60 秒冷却） |
-| `5300` | ACCOUNT_LOCKED | 连续失败次数超限，账户已被临时锁定 |
-| `5302` | CAPTCHA_REQUIRED | 需要提交人机验证码 |
-| `5303` | CAPTCHA_INVALID | 人机验证未通过或凭据已失效 |
-| `5310` | TOTP_REQUIRED | 需要提交两步验证码 |
-| `5311` | TOTP_INVALID | 两步验证动态码或备用码不正确 |
-| `5312` | TOTP_RATE_LIMITED | 两步验证连续尝试失败过多被限速 |
-| `5314` | TOTP_ALREADY_ENABLED | 该账户已开启两步验证 |
-| `6306` | PASSWORD_LOGIN_DISABLED | 系统已启用强制 SSO，密码登录已被禁用 |
+| 绑定 TOTP、生成备用码、查询状态、解绑 | `POST /api/v1/totp/setup`、`/enable`、`/disable`、`/regenerate-backup-codes`、`GET /api/v1/totp/status` | [TOTP API](./totp) |
+| 列出公开 SSO 提供商、发起 SSO 登录、处理回调 | `GET /api/v1/sso/providers`、`/sso/login/{provider_name}`、`/sso/callback/{provider_name}` | [SSO API](./sso) |
+| 解除本人已绑定的 SSO 连接 | `DELETE /api/v1/sso/connections/{connection_id}` | [SSO API](./sso) |
+
+<Callout type="warn">
+  站点启用 SSO 并关闭密码登录（`sso_allow_password_login = false`）后，`POST /api/v1/login/access-token` 会直接返回 `400` / `6306`。客户端应先调用 `GET /api/v1/sso/providers` 判断可用登录方式，再决定是否显示密码表单。
+</Callout>
+
+## 错误码
+
+| HTTP | code | 常量 | 场景 |
+| --- | --- | --- | --- |
+| `401` | `2000` | `UNAUTHORIZED` | 注销未携带令牌 |
+| `400` | `2001` | `INVALID_TOKEN` | `temp_token` 无效或已被篡改 |
+| `400` | `2002` | `TOKEN_EXPIRED` | 临时令牌过期（`totp_setup_expired`） |
+| `400` | `2003` | `INVALID_CREDENTIALS` | 用户名或密码错误 |
+| `400` | `2004` | `INACTIVE_USER` | 账号已停用或待审批 |
+| `400` | `5000` | `REGISTRATION_DISABLED` | 开放注册已关闭 |
+| `400` | `5002` | `USERNAME_EXISTS` | 用户名已被占用 |
+| `400` | `5003` | `EMAIL_EXISTS` | 邮箱已被占用 |
+| `400` | `5004` | `EMAIL_NOT_VERIFIED` | 登录前必须完成邮箱验证 |
+| `400` | `5005` | `VERIFICATION_CODE_INVALID` | 验证码或重置令牌无效 |
+| `400` | `5006` | `VERIFICATION_CODE_EXPIRED` | 验证码或邮件令牌已过期 |
+| `400` | `5007` | `EMAIL_SEND_FAILED` | SMTP 未配置，无法发送邮件 |
+| `400` | `5008` | `EMAIL_SEND_TOO_FREQUENT` | 60 秒冷却内重复发信 |
+| `400` | `5300` | `ACCOUNT_LOCKED` | 连续失败次数超限被锁定，`data.lockout_seconds` 为剩余秒数 |
+| `400` | `5302` | `CAPTCHA_REQUIRED` | 需要携带人机验证凭证 |
+| `400` | `5303` | `CAPTCHA_INVALID` | 人机验证凭证无效或已使用 |
+| `400` | `5311` | `TOTP_INVALID` | 动态码或备用码错误 |
+| `400` | `5312` | `TOTP_RATE_LIMITED` | TOTP 连续失败被限速，`data.seconds` 为剩余秒数 |
+| `400` | `5313` | `TOTP_NOT_ENABLED` | 该账号未开启两步验证 |
+| `400` | `5315` | `TOTP_SETUP_EXPIRED` | 绑定会话过期 |
+| `400` | `6306` | `PASSWORD_LOGIN_DISABLED` | 站点强制 SSO，密码登录已禁用 |
+
+<Callout type="info">
+  `5300`、`5400`、`5312` 等安全类错误都使用 HTTP `400`（只有模型配额 `6103` 使用 `429`）。请以响应体中的 `code` 为准，详见 [API 错误与重试](./errors)。
+</Callout>
+
+## 相关文档
+
+- [TOTP API](./totp)：两步验证的绑定、备用码与状态查询
+- [SSO API](./sso)：身份提供商配置、登录跳转与回调
+- [Users API](./users)：修改密码、密码状态查询与账号注销
+- [API 快速开始](./get-started)：用 API Key 直接调用 Agent

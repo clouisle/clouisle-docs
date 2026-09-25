@@ -1,49 +1,111 @@
 ---
 title: 浏览文档与元数据
-description: 查看知识库文档、系统字段与提取的元数据
+description: 查看知识库文档、系统字段、提取元数据与共享来源
 icon: FolderSearch
 ---
 
-在**知识库**中选择一个知识库即可浏览文档列表，按名称搜索和按状态（等待中/处理中/已完成/失败）筛选；点击文档查看详情、分块与元数据。
+在**知识库**中选择一个知识库即可浏览文档列表：按名称搜索，按状态（等待中/处理中/已完成/失败）或类型筛选，点击文档进入详情查看分块与元数据。共享进来的知识库会带来源徽章且整体只读。
+
+## 文档列表与筛选
+
+文档列表接口支持三个筛选维度，可同时使用：
+
+| 参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `search` | 字符串 | 按文档名称模糊匹配 |
+| `status` | 字符串数组 | `pending`、`processing`、`completed`、`error` |
+| `doc_type` | 字符串数组 | `pdf`、`docx`、`doc`、`pptx`、`txt`、`markdown`、`html`、`csv`、`xlsx`、`xls`、`json`、`url` |
+| `page` / `page_size` | 整数 | 默认 `1` / `20` |
+
+界面上的状态与类型筛选是单选的，接口本身接受数组——批量脚本可以一次筛多种类型或状态。
 
 ## 文档系统字段
 
 | 字段 | 说明 |
 | --- | --- |
-| `filename` / `name` | 文档名称 |
-| `doc_type` | 文件类型：`pdf`、`docx`、`doc`、`txt`、`markdown`、`html`、`csv`、`xlsx`、`xls`、`json`、`url` |
-| `file_size` | 文件大小（字节） |
+| `name` | 文档名称（默认取文件名；URL 导入可取自定义名称） |
+| `doc_type` | 文档类型：`pdf`、`docx`、`doc`、`pptx`、`txt`、`markdown`、`html`、`csv`、`xlsx`、`xls`、`json`、`url` |
+| `file_size` | 文件大小（字节）；URL 文档为空 |
+| `file_path` | 文件是否存储在服务端（URL 文档为空） |
+| `source_url` | 来源 URL（仅 URL 文档） |
 | `status` | `pending`、`processing`、`completed`、`error` |
+| `error_message` | 失败原因（仅 `error` 状态） |
 | `chunk_count` | 生成的分块数 |
-| `token_count` | 估算 Token 数 |
-| `source_url` | 来源 URL（通过网址导入的文档） |
+| `token_count` | 估算 Token 数（分块字符数 ÷ 4 求和） |
+| `metadata` | 自动提取的 JSON 元数据（见下） |
 | `processed_at` | 处理完成时间 |
 | `created_at` / `updated_at` | 创建/更新时间 |
 
 ## 提取的元数据
 
-`metadata` JSON 字段由处理管线自动提取（如 `title`、`author`、`language`、`section`，具体取决于文件格式与提取管线）。分块也带有自己的 `metadata`（如页码、章节），用于检索上下文。
+`metadata` 是 JSON 对象，由处理管线在提取文本时写入，**不提供逐字段编辑**，重新处理时会重新生成。常见的键：
 
-## 编辑
+- `format`：`markdown` 表示内容由文档转换器转成 Markdown（PDF/Office/HTML 走这条路）。
+- `char_count`：清理后的正文字符数。
+- `file_size`、`doc_type`：提取时的文件信息。
+- `media_assets`：文档中内嵌图片被抽取后的资源列表（图片可通过文档媒体接口访问）。
 
-文档唯一可编辑的字段是**名称**：
+分块也有自己的 `metadata`：
+
+- `section`：Markdown 文档的层级面包屑（如 `第一章 > 第二节`），用于说明分块来自哪一节。
+- `chunk_type`：`table`、`code`、`list` 或 `text`（仅非 `text` 时写入）。
+
+这些元数据会随检索结果与 RAG 上下文一起返回，便于在回答中标注引用来源。
+
+## 文档详情页能做什么
+
+| 操作 | 说明 | 权限 |
+| --- | --- | --- |
+| 预览分块 / 编辑分块 | 查看、修改、删除分块；未处理文档可调参后处理 | 写权限 |
+| 重试失败分段 | 仅 `error` 且存在失败分块时可用 | 写权限 |
+| 重新处理 | 删除旧分块与向量后按新设置重跑（手工修改会丢失） | 写权限 |
+| 下载原文件 | 下载上传的原始文件（URL 文档没有原文件） | 读权限 |
+| 查看源网址 | 打开 URL 文档的来源地址 | 读权限 |
+| 删除 | 删除文档及其分块 | 写权限 |
+
+共享进来的知识库（`is_owned = false`）在上述界面中标记为只读：上传、导入、编辑、删除等入口全部隐藏或禁用。
+
+## 共享来源与共享范围
+
+列表与详情页用两个徽章区分归属：
+
+| 徽章 | 出现条件 | 含义 |
+| --- | --- | --- |
+| **来自 `{团队}`**（`sharedFrom`） | `is_owned = false` | 该知识库属于其他团队并共享给你所在的团队；**只读**，写入操作和设置入口均不可用 |
+| **已共享 `{N}` 个团队**（`sharedCount`） | `is_owned ≠ false` 且 `shared_with_count > 0` | 你的团队拥有该知识库，并已共享给 N 个其他团队 |
+
+列表接口的 `include_shared` 与 `own_only` 决定是否把「共享进来」的知识库算进结果：
+
+| 请求 | 结果 |
+| --- | --- |
+| 默认（`include_shared=true`、`own_only=false`） | 包含共享给你所在团队的 TEAM/PUBLIC 知识库 |
+| `include_shared=false` 或 `own_only=true` | 只返回你正常可见（自己团队）的知识库，共享进来的被排除 |
+| `own_only=true`（非超管） | 在上一条基础上再限制为 `created_by = 当前用户` |
+
+跨团队共享的操作步骤、只读语义与撤销方式见[创建知识库](./create-knowledge-base.mdx)（共享章节）。
+
+## 编辑文档
+
+文档唯一可编辑的字段是**名称**（前端界面当前不提供重命名入口，需要用 API）。知识库端点只接受 JWT 用户会话，不接受 API Key：
 
 ```bash
 curl -X PUT "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID" \
-  -H "Authorization: Bearer $API_KEY" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name": "新名称"}'
+  -d '{"name": "员工手册（2026 版）"}'
 ```
 
-`metadata` JSON 在处理时重新生成，没有独立的编辑端点。
+`metadata` 在重新处理时重新生成，没有独立的元数据编辑端点；标签、分类、目录等也没有实现。
 
 ## 检索中的使用
 
-检索结果与 RAG 上下文会返回每个分块的 `metadata`。检索请求**不支持**基于 metadata 的过滤或加权——唯一的检索过滤是 `filter_doc_ids`（限制到指定文档 ID）。
+- 检索结果与 RAG 上下文会带上每个分块的 `metadata`，用于标注来源。
+- 检索请求**不支持**基于 metadata 的过滤或加权——唯一的检索过滤是 `filter_doc_ids`（把结果限制在指定文档 ID 内）。
+- 分块内容里的图片通过文档媒体接口提供（`/api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}`），需要携带鉴权头访问。
 
----
+## 相关页面
 
-参见：
-- [导入文档](./import-documents.mdx) — 上传与处理
-- [分块与处理](./chunking.mdx) — 分块预览与编辑
-- [检索与质量调优](./retrieval.mdx) — 检索实验室
+- [导入文档](./import-documents.mdx) — 上传、URL 导入与状态流转
+- [分块与文档处理](./chunking.mdx) — 分块预览、编辑与失败重试
+- [创建知识库](./create-knowledge-base.mdx) — 共享、权限与只读范围
+- [检索与质量调优](./retrieval.mdx) — 检索实验室与诊断

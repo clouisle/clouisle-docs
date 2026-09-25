@@ -12,7 +12,7 @@ Clouisle 采用前端、后端与基础设施分层的架构：Next.js 前端负
 | --- | --- | --- |
 | 前端 | Next.js 16（App Router）、TypeScript、Tailwind CSS 4 + shadcn/ui、Bun | 容器运行 Next.js standalone（`node server.js`），**不含 Nginx**；`deploy/nginx/default.conf` 仅是可选的外部反向代理示例 |
 | 后端 | FastAPI（Python 3.13）、Tortoise ORM + asyncpg、Celery + Redis | LangChain 适配器（对话/嵌入/文本切分）；自研 `WorkflowOrchestrator` 执行工作流；LangGraph 已声明但运行时未使用；MarkItDown 做文档转换 |
-| 基础设施 | PostgreSQL 17（`pg_search` 全文检索）、Redis 7（缓存/Celery broker/限速计数）、Qdrant（向量） | 向量按嵌入维度存入独立集合（`{prefix}_{dimension}`），维度由所选嵌入模型决定 |
+| 基础设施 | PostgreSQL 17（`pg_search` 全文检索）、Redis 7（缓存/Celery broker/SSE 事件缓冲/限速与锁定计数）、Qdrant（向量） | 向量按嵌入维度存入独立集合（`{prefix}_{dimension}`），维度由所选嵌入模型决定 |
 
 ### 请求链路与执行模型
 
@@ -27,7 +27,7 @@ Clouisle 采用前端、后端与基础设施分层的架构：Next.js 前端负
 Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行架构：
 
 ```text
-用户消息 ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis 队列 (Celery default)
+用户消息 ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis 队列 (Celery agent)
                    │ (202 Accepted, run_id)                           │
                    ▼                                                  ▼
               SSE 流式通道                                   Celery Worker (run_agent_task)
@@ -45,7 +45,7 @@ Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行�
                                                     (状态: WAITING)        带水印摘要消息
 ```
 
-1. **持久化 AgentRun**：发起运行提交 Celery 任务并立即返回 `202 Accepted` 与 `run_id`。客户端通过 SSE（`/chat/runs/{run_id}/stream`）监听事件流，支持断线后基于 `from_sequence` 无缝重连，后台工具执行不受影响。
+1. **持久化 AgentRun**：发起运行提交 Celery 任务并立即返回 `202 Accepted` 与 `run_id`。任务路由到 `agent` 队列，由主 Worker 消费；**如果部署时把 Worker 的 `-Q` 改写掉了 `agent`，运行会永远停在 `queued` 且不报错**，用户只会看到「排队中」（队列映射见[部署架构](../../self-host/architecture.mdx)）。客户端通过 SSE（`/chat/runs/{run_id}/stream`）监听事件流，支持断线后基于 `from_sequence` 无缝重连，后台工具执行不受影响。`agent` 队列任务**不配置自动重试**——模型调用与工具执行有副作用，重试会重复执行；Worker 崩溃导致的中断运行由 Beat 每 2 分钟投递的 `sweep-lost-agent-runs` 回收并标记为 `interrupted`（不会重放）。
 2. **AgentLoop ReAct 引擎**：管理多轮迭代推理与工具调用（最大轮次 `max_iterations`、单轮超时与凭据安全注入）。
 3. **三层上下文压缩机制**：
    - **微压缩（Micro Compaction）**：自动截断或摘要过长的工具输出和原始 base64 数据，保护 token 预算。
@@ -82,7 +82,7 @@ Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行�
 3. **暂停与恢复机制**：需要人工确认的 `pause` 节点持久化 `WorkflowPauseRequest` 并将状态设为 `WAITING`，待用户提交反馈后恢复执行。
 ### 扩展性
 
-前端与 API 无状态，可多副本水平扩展；Celery Worker 按队列（`default`、`knowledge`、`workflow`）独立扩展。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。部署拓扑与卷说明见 [部署架构](../../self-host/architecture.mdx)。
+前端与 API 无状态，可多副本水平扩展。主 Worker（`python main.py worker -c 4 -Q default,agent,knowledge,workflow`）一次消费 `default`、`agent`、`knowledge`、`workflow` 四个队列；按队列独立扩容时，额外启动只订阅单一队列的 Worker（例如 `-Q agent`）即可，但**任何时刻都必须有 Worker 消费 `default` 和 `agent`**，否则通知、清理任务与 Agent 对话会静默堆积在队列里。代码沙箱是独立的第五个队列 `sandbox`，由专用 `sandbox-worker` 消费，扩容它不影响知识库与工作流。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。完整队列映射、Beat 周期任务与扩缩容命令见[部署架构](../../self-host/architecture.mdx)。
 
 ### 安全与多租户
 
@@ -93,7 +93,21 @@ Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行�
 
 ### 性能与缓存
 
-用户会话默认 `30` 天（站点设置 `session_timeout_days` 控制），JWT 兜底令牌 `8` 天；站点设置不缓存、每次直读数据库；限速按 API Key 每分钟计数（`rate_limit`，默认 `1000`）。
+用户会话默认 `30` 天（站点设置 `session_timeout_days` 控制），JWT 兜底令牌 `8` 天；站点设置不缓存、每次直读数据库。
+
+平台没有统一的全局限速中间件，各保护机制按场景独立实现，边界也各不相同：
+
+| 机制 | 限制 | 落地位置 |
+| --- | --- | --- |
+| 登录失败锁定 | 同一账户连续失败 `max_login_attempts`（默认 `5`）次后锁定 `lockout_duration_minutes`（默认 `15`）分钟 | 账户字段 + 站点设置 |
+| TOTP 校验 | 300 秒窗口内失败 `5` 次即锁定 `900` 秒 | Redis 计数 |
+| 管理员批量邮件 | 每个发送者 `100` 封/小时 | Redis 计数（TTL 3600 秒） |
+| 单收件人邮件 | 每个邮箱 `5` 封/天 | Redis 计数（TTL 86400 秒） |
+| API Key 每分钟请求数 | `rate_limit` 字段默认 `1000`/分钟，`0` 表示不限——**仅存储，当前不执行** | 元数据字段 |
+
+<Callout type="warn">
+不要把 API Key 的 `rate_limit` 当成生效的防滥用措施，也不要指望单靠验证码兜住暴力破解：真正拦截登录失败的是账户级锁定与 TOTP 锁定（详见 [团队与安全](./security.mdx)）。
+</Callout>
 
 ### 健康检查
 

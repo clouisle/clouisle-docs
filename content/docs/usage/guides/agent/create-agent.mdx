@@ -21,7 +21,7 @@ Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排�
 2. 填写名称（`1-100` 字符）与描述（最多 `500` 字符）。
 3. 选择所属团队。
 4. 进入 Agent Studio 编排页后选择右上角 **Agent 设置**，配置模型、开场消息、建议问题与可见性。
-5. 可见性选择**私有**或**团队**。
+5. 可见性默认为**私有**（仅创建者可访问），可切换为**团队**。
 
 <TypeTable
   type={{
@@ -30,10 +30,12 @@ Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排�
     team_id: { description: '所属团队 ID', type: 'string', required: true },
     model_id: { description: 'LLM 模型（团队授权的 TeamModel）', type: 'string', required: true },
     system_prompt: { description: '定义 Agent 行为的系统提示词', type: 'string' },
-    max_iterations: { description: '工具调用迭代上限', type: 'number', default: 5 },
+    max_iterations: { description: '工具调用迭代上限（每次工具调用计一次迭代）', type: 'number', default: 5 },
     visibility: { description: '可见性', type: "'private' | 'team'", default: 'private' },
   }}
 />
+
+**最大迭代次数（Max Iterations）** 是 Agent 的设置项 `max_iterations`：Agent 在一次回复里最多执行多少轮工具调用，默认 `5`，取值范围 `1-200`（后端校验）。设得过低会让复杂任务提前以 `max_iterations_reached` 结束；设得过高则可能在工具反复失败时消耗大量 Token。
 
 <Callout type="info">
   Agent 不暴露逐采样参数（Temperature、Max Tokens、Top P、Frequency/Presence Penalty）。LLM 采样默认值配置在模型本身的 `default_params` 中。Agent 只配置 `model_id`、`system_prompt`、`max_iterations`、工具集和知识库关联。
@@ -107,6 +109,10 @@ Agent Studio（`/app/apps/{agent_id}`）采用双列响应式布局，将编排�
 | 生图 | **生图** | 默认 `1024×1024`（`256-4096`），单次最多 `4` 张（`1-10`） |
 | 生视频 | **生视频** | 默认 `5` 秒（`1-30` 秒），宽高比 `16:9` |
 | 记忆 | **记忆** | 最大记忆数 `10`（`1-50`），自动提取默认开启 |
+
+媒体生成只覆盖**图片和视频**两种（没有音频/TTS 生成能力）。生图与生视频都会把 `generate_image` / `generate_video` 工具注入模型，并调用团队已授权的对应模型；关闭开关后模型看不到这些工具。
+
+关于上下文：长对话的压缩是**单次摘要**——请求超过触发预算时，把较早历史生成一条摘要替换掉，只保留最近一段原文；它只作用于当前会话，**不**等同于跨会话记忆。记忆是独立的**实体/关系图谱**，跨会话持久保存。
 
 详细配置请参阅[附件与媒体](./media)和[记忆与上下文](./memory)。
 

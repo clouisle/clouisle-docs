@@ -121,6 +121,10 @@ Authorization: Bearer YOUR_TOKEN
 | `current_prompt` | string | 是 | 待优化的当前提示词内容 |
 | `feedback` | string | 是 | 优化诉求或修改意见 |
 
+<Callout type="warn">
+  与 `/generate` 的差异：`/generate` 接受 JSON 请求体（需带 `Content-Type: application/json`），而 `/optimize` **没有任何请求体**，两个必填参数都是查询参数。`/optimize` **也没有 `language` 参数**——优化用的元提示词固定以中文构建，模型按中文指令返回改写后的提示词。
+</Callout>
+
 ### SSE 响应事件类型
 
 | 事件名 (`event`) | 数据结构 (`data`) | 说明 |
@@ -128,9 +132,25 @@ Authorization: Bearer YOUR_TOKEN
 | `start` | `{"model": "string"}` | 启动生成，返回实际调用的底层模型名称 |
 | `content_delta` | `{"delta": "string"}` | 流式增量内容片段 |
 | `complete` | `{"total_length": number}` | 生成完成，返回优化后文本总字符数 |
-| `error` | `{"code": number, "msg": "string"}` | 生成过程中断或报错（如无可用模型时返回业务码 `4004`） |
+| `error` | `{"code": number, "msg": "string"}` | 生成过程中断或报错（如无可用模型时返回业务码 `6100`） |
 
 ---
+
+## 错误事件
+
+两个端点都以 `200 OK` 建立 SSE 连接，失败通过流内的 `error` 事件传递，而不是 HTTP 状态码：
+
+```
+event: error
+data: {"code": 6100, "msg": "No chat model available"}
+```
+
+| 触发条件 | 事件 `data.code` | 说明 |
+| --- | --- | --- |
+| 系统未配置已启用的默认聊天模型 | `6100`（`MODEL_NOT_FOUND`） | 在发送 `start` 之前即结束流，`msg` 为本地化的 `no_chat_model_available` |
+| 生成/优化过程中抛异常 | `1000`（`UNKNOWN_ERROR`） | `msg` 为本地化的通用流式错误文案；服务端记录完整堆栈 |
+
+因此客户端不能用 HTTP 状态判断成败，必须监听 `error` 事件与连接提前关闭，并把已收到的 `content_delta` 作为不完整结果处理。
 
 ## 常见错误代码
 
@@ -138,5 +158,5 @@ Authorization: Bearer YOUR_TOKEN
 | --- | --- | --- |
 | `2000` | UNAUTHORIZED | 缺少 Bearer 令牌或令牌无效 |
 | `2004` | INACTIVE_USER | 账号已被停用或待审批 |
-| `4004` | MODEL_NOT_FOUND | 系统中未找到已启用的默认聊天模型（`no_chat_model_available`） |
-| `9999` | UNKNOWN_ERROR | 生成过程异常中断 |
+| `6100` | MODEL_NOT_FOUND | 系统中未找到已启用的默认聊天模型（`no_chat_model_available`） |
+| `1000` | UNKNOWN_ERROR | 生成过程异常中断 |

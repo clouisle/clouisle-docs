@@ -8,19 +8,32 @@ First confirm service status and recent configuration changes, then start troubl
 
 ## API Cannot Connect to Database
 
-Check `POSTGRES_SERVER`, `POSTGRES_PORT`, the database password, and PostgreSQL readiness. Compose uses `db`; source development uses `localhost`. Confirm pg_search and `pg_stat_statements` are preloaded, then restart the database before checking extensions.
+Check `POSTGRES_SERVER`, `POSTGRES_PORT`, the database password, and PostgreSQL readiness. The service name depends on the deployment: `db` in Compose, `postgres` in Kubernetes, `localhost` for source development. Confirm pg_search and `pg_stat_statements` are preloaded (the supplied image starts with `shared_preload_libraries=pg_search,pg_stat_statements -c pg_stat_statements.track=all`), then restart the database before checking extensions. In Kubernetes, API/Worker/Beat all carry a `wait-for-postgres` initContainer; a pod stuck in `Init` means the database is not ready yet.
 
 ## Frontend Cannot Access API
 
-Confirm the external proxy routes `/api/*` to `api:8000` and `NEXT_PUBLIC_API_URL` is correct at browser build time. Do not set the API address to an internal host the browser cannot resolve inside the container, and do not use `localhost` as the API address for Sandbox Worker.
+Confirm the external proxy or Ingress routes `/api` to `api:8000`, and that the frontend build-time `NEXT_PUBLIC_API_URL` uses the same prefix as the backend `API_V1_STR` (default `/api/v1`). Do not set the API address to an internal host the browser cannot resolve inside the container, and do not use `localhost` as the API address for Sandbox Worker.
+
+When browser calls work but server-side page fetching fails, check whether `frontend` sets `BACKEND_INTERNAL_URL`: the code default is `http://localhost:8000` (Compose injects `http://api:8000`), and the single-file K8s manifest and Helm defaults do not inject it, so SSR targets `localhost:8000` inside the pod.
 
 ## Worker Does Not Process Tasks
 
 Check the Redis connection, password, queue names, and Worker logs. Knowledge Base uses Celery background processing; `beat` must run only one replica. Before cleaning or restarting Workers, confirm no production documents are being processed.
 
+Locate the backlog by queue. The five queues are `default`, `agent`, `knowledge`, `workflow` (all consumed by `worker`) and `sandbox` (consumed by `sandbox-worker`):
+
+```bash
+# add -a <password> when REDIS_PASSWORD is set
+docker compose exec redis redis-cli llen agent
+docker compose exec redis redis-cli llen knowledge
+docker compose logs -f worker
+```
+
+Tasks sitting in a queue with nothing consuming them mean the worker command or deployment for that queue is wrong. The classic case is a `worker` whose `-Q` omits `agent`: every durable AgentRun piles up in the `agent` queue and conversations stay in progress with no error. Full queue-to-task mapping: [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
+
 ## Sandbox Artifact Upload Fails
 
-Confirm `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`, the API and Sandbox Worker use the same signing configuration, or configure a dedicated `SANDBOX_ARTIFACT_UPLOAD_API_KEY`. Check whether the artifact path is inside `/workspace` and whether the file exceeds the `10MB` default limit.
+Confirm `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`, the API and Sandbox Worker use the same signing configuration, or configure a dedicated `SANDBOX_ARTIFACT_UPLOAD_API_KEY`. Artifacts must stay inside `/workspace` (the policy rejects anything else), uploads go to the internal endpoint `/api/v1/upload/sandbox-artifact`, and both the per-file and total limits default to `10MB`. Worker and sandbox-worker mount no uploads volume, so they must be able to reach the API through `API_INTERNAL_BASE_URL`.
 
 ## Sandbox Jobs Fail with bwrap User Namespace Error [#bwrap-user-namespace-error]
 

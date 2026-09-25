@@ -8,15 +8,46 @@ icon: CodeXml
 
 ## 基础依赖
 
-启动 PostgreSQL 17 + pg_search、Redis 7 和 Qdrant 1.18.3。复制根目录 `.env.example` 为 `.env`，设置数据库、Redis、Qdrant、前后端 URL 和 `NEXT_PUBLIC_API_URL`。
+启动 PostgreSQL 17 + pg_search、Redis 和 Qdrant 1.18.3。复制根目录 `.env.example` 为 `.env`，设置数据库、Redis、Qdrant、前后端 URL 和 `NEXT_PUBLIC_API_URL`。
+
+推荐用仓库自带的开发编排启动基础设施：
+
+```bash
+cp .env.example .env
+docker compose -f deploy/docker-compose.dev.yml --env-file .env up -d
+```
+
+<Callout type="warn">
+  `deploy/docker-compose.dev.yml` 使用**固定凭据并忽略 `.env`**：PostgreSQL 为 `postgres` / `password`，Redis 密码是 `clouisle-redis-cbd3c07d`，只有 `QDRANT_API_KEY` 从 `.env` 读取（必填，未设置时 compose 直接失败）。只有在同时修改该文件时，才在 `.env` 里设置 `POSTGRES_PASSWORD` / `REDIS_PASSWORD`。
+</Callout>
 
 ## 后端
 
-在 `backend/` 安装 `pyproject.toml` 中的依赖，初始化数据库后启动 FastAPI API 和 Celery Worker/Beat。开发服务监听 API `8000`，OpenAPI 页面为 `/docs`。
+需要 Python `3.13+` 与 `uv`。安装依赖后启动 API、Worker、Beat（各自独立终端），数据库在首次运行时自动初始化：
+
+```bash
+uv sync --project backend
+
+uv run --project backend main.py server          # API，默认 127.0.0.1:8000
+uv run --project backend main.py worker          # 默认消费 default,agent,knowledge,workflow
+uv run --project backend main.py beat
+
+# 可选：需要代码执行/沙箱功能时
+uv run --project backend main.py sandbox-worker -c 1
+```
+
+开发服务监听 API `8000`，OpenAPI 页面为 `/docs`。常用开发命令：`uv run ruff check .`、`uv run ruff format .`、`cd backend && uv run pytest`。
 
 ## 前端
 
-在 `frontend/` 安装 Bun 依赖，设置 `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`，运行 Next.js 开发服务，默认端口 `3000`。
+需要 Bun `1.0+`。安装依赖并启动开发服务器（默认端口 `3000`）：
+
+```bash
+bun install --cwd frontend
+bun run --cwd frontend dev
+```
+
+源码开发时设置 `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`。`bun run --cwd frontend lint|build|test` 可用于校验。
 
 <Callout type="warn">
   源码启动命令会随项目开发变化；以根目录 README、`backend/pyproject.toml`、`frontend/package.json` 和当前脚本为准。部署生产环境使用发布镜像或 Compose/Helm，不要把开发服务器暴露到公网。

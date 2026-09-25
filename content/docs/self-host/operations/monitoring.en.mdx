@@ -49,6 +49,29 @@ WHERE NOT i.indisvalid;
 
 For index creation, cleanup, and verification steps, see [Database Maintenance and Index Tuning](./database-maintenance.mdx).
 
+## Observability console
+
+The built-in observability console lives under **Monitoring** > **Observability** (route `/dashboard/observability`) and is backed by `GET /api/v1/admin/observability/*`, which requires the `admin:dashboard:access` permission. There is **no** Prometheus-style `/metrics` endpoint and no built-in Prometheus, Grafana, Datadog, or ELK integration; external monitoring must collect logs and poll the health endpoint plus this API.
+
+The endpoints fall into two groups with different parameter semantics:
+
+| Endpoint | Parameters | Notes |
+| --- | --- | --- |
+| `/overview`, `/agents`, `/agent/{agent_id}`, `/workflows`, `/workflow/{workflow_id}`, `/throughput`, `/tokens` | `time_range` | Usage statistics; accepts `7d`/`30d`/`90d`/`all`, default `30d`, and an invalid value falls back to `30d` |
+| `/timeouts` | `time_range` + `source` (`all`/`agent`/`workflow`) + `page`/`page_size` | Paged timeout event list |
+| `/agents`, `/workflows`, `/timeouts` | `page` (≥1), `page_size` (1–100, default 20), `sort_by`, `sort_order` | Paging and sorting |
+| `/throughput` | `granularity` (`hour`/`day`) | Defaults to `hour` for `7d` and `day` otherwise |
+| `/system/health`, `/system/trend`, `/system/workers` | none | **Current snapshots**; they take no `time_range` |
+| `/system/slow-queries` | `threshold_ms` (default `1000`, ≥1), `page` (≥1), `page_size` (1–100, default 20) | Reads `pg_stat_statements` |
+
+`/system/workers` returns the Celery-side queue and worker state: `status`, `worker_count`, `active_tasks`, `reserved_tasks`, `scheduled_tasks`, plus the `pending` length of **all five queues** (`default`, `knowledge`, `workflow`, `agent`, `sandbox`) and a per-task pending breakdown. `/system/health` returns CPU, memory, disk, database, Redis, and that worker snapshot, and appends the result to a Redis snapshot list that `/system/trend` reads back. Every observability payload is cached for `30` seconds.
+
+<Callout type="info">
+  `/system/slow-queries` depends on the `pg_stat_statements` extension. When it returns `available: false`, read the `reason` field: `shared_preload_libraries` does not include it, the database user lacks permission, or the extension was never created. The supplied PostgreSQL image preloads it and sets `track=all`.
+</Callout>
+
+The basic health check `GET /api/v1/health` requires no authentication and is meant for container healthchecks and external liveness probes; it returns only `{"status": "healthy"}` with no dependency detail.
+
 ## Product Metrics
 
 The workspace dashboard and Agent/Workflow monitoring pages provide conversation counts, message counts, Tokens, response time, tool calls, Workflow run counts, success rate, failure counts, and average duration. Filter by team and resource permissions; different users may see different data scopes.

@@ -1,0 +1,526 @@
+---
+title: Memories API
+description: Manage the current user's long-term memory entities and relation graph
+icon: Brain
+---
+
+The Memories API maintains the **private, per-user** long-term memory graph: the entities (nodes) extracted from agent conversations and the directed relations (edges) between them. Every endpoint is scoped to the calling user — there is no `team_id` anywhere in a path or query string, and one user can never read or modify another user's entities or relations. Base path: `/api/v1/memories`.
+
+<Callout type="info" title="Prerequisites and authentication">
+  All endpoints require an authenticated JWT user session (`Authorization: Bearer <token>`). They **do not accept API-key authentication** and perform no permission-code checks — data isolation is implemented entirely by filtering on `user_id`.
+
+  For an ID that does not belong to the caller, the server treats it as non-existent and never distinguishes "not found" from "not allowed". Note that "resource not found" here is **HTTP `400` + business code `4000`** (`memory_entity_not_found` / `memory_relation_not_found`), not HTTP `404` — judge success by the response `code`, not the HTTP status.
+
+  Memories are usually extracted automatically during agent conversations; the manual routes below exist for corrections and clean-up. See [Agent memory](/usage/guides/agent/memory) for what triggers extraction.
+</Callout>
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/memories/entities` | List the caller's memory entities |
+| POST | `/api/v1/memories/entities` | Create a memory entity manually |
+| GET | `/api/v1/memories/entities/{entity_id}` | Get an entity with its outgoing and incoming relations |
+| PUT | `/api/v1/memories/entities/{entity_id}` | Update an entity |
+| DELETE | `/api/v1/memories/entities/{entity_id}` | Delete an entity and all of its relations |
+| GET | `/api/v1/memories/relations` | List the caller's memory relations |
+| POST | `/api/v1/memories/relations` | Create a memory relation manually |
+| DELETE | `/api/v1/memories/relations/{relation_id}` | Delete a relation |
+| GET | `/api/v1/memories/graph` | Get the memory graph for visualization |
+
+Every response uses the standard envelope `{"code": 0, "data": ..., "msg": "success"}`.
+
+## Authentication and authorization
+
+| Item | Value |
+| --- | --- |
+| Authentication | JWT `Bearer` token (`get_current_user`) |
+| API key | **Not supported** |
+| Permission codes | None (no `PermissionChecker`) |
+| Scope | User-level: only rows whose `user_id` is the caller |
+
+## Data structures
+
+### Entity object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Entity ID |
+| `user_id` | string (UUID) | Owning user |
+| `name` | string | Entity name, max 255 characters |
+| `entity_type` | string | Entity type (enum below) |
+| `description` | string \| null | Detailed description |
+| `properties` | object | Free-form properties, default `{}` |
+| `source_conversation_id` | string \| null | Conversation the entity was extracted from |
+| `source_message_id` | string \| null | Message the entity was extracted from |
+| `access_count` | integer | Number of times the entity was recalled, default `0` |
+| `last_accessed_at` | string \| null | Last recall timestamp |
+| `created_at` | string | Creation timestamp |
+| `updated_at` | string | Last update timestamp |
+
+Within one user, `name` + `entity_type` is unique; a duplicate create does not add a row (see [Create entity](#create-entity)).
+
+### Relation object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Relation ID |
+| `user_id` | string (UUID) | Owning user |
+| `source_entity_id` | string (UUID) | Source entity ID |
+| `target_entity_id` | string (UUID) | Target entity ID |
+| `relation_type` | string | Relation type (enum below) |
+| `description` | string \| null | Relation description |
+| `properties` | object | Free-form properties, default `{}` |
+| `source_conversation_id` | string \| null | Conversation the relation was extracted from |
+| `source_message_id` | string \| null | Message the relation was extracted from |
+| `created_at` | string | Creation timestamp |
+| `updated_at` | string | Last update timestamp |
+
+Within one user, `source_entity_id` + `target_entity_id` + `relation_type` is unique.
+
+### `entity_type` enum
+
+| Value | Meaning |
+| --- | --- |
+| `person` | The user themselves or people they mention |
+| `preference` | User preferences |
+| `skill` | Skills and technologies |
+| `project` | Projects and work |
+| `goal` | Goals and objectives |
+| `fact` | General facts |
+| `concept` | Abstract concepts |
+| `organization` | Companies and teams |
+| `location` | Places |
+| `custom` | Anything else |
+
+### `relation_type` enum
+
+| Value | Meaning |
+| --- | --- |
+| `prefers` | User prefers X |
+| `works_on` | User works on X |
+| `knows` | User knows X |
+| `uses` | User uses X |
+| `works_at` | User works at X |
+| `located_in` | User/entity is located in X |
+| `has_goal` | User has goal X |
+| `related_to` | Generic association |
+| `part_of` | X is part of Y |
+
+---
+
+## List entities
+
+```
+GET /api/v1/memories/entities
+```
+
+Returns the caller's entities with optional type filter and pagination. Results are not explicitly ordered — they follow database order; sort by `created_at` / `name` yourself if you need a stable order.
+
+### Query parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `entity_type` | string | No | - | Filter by entity type |
+| `page` | integer | No | 1 | Page number, minimum 1 |
+| `page_size` | integer | No | 20 | Items per page, 1–100 |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/memories/entities?entity_type=preference&page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f",
+        "user_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+        "name": "Python",
+        "entity_type": "preference",
+        "description": "Prefers concise Python snippets using async/await syntax.",
+        "properties": {"level": "expert"},
+        "source_conversation_id": "0b2c3d4e-5f60-4a71-8b92-c3d4e5f60718",
+        "source_message_id": null,
+        "access_count": 4,
+        "last_accessed_at": "2026-09-20T10:15:00Z",
+        "created_at": "2026-03-02T08:30:00Z",
+        "updated_at": "2026-09-20T10:15:00Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+The pagination envelope is always `data.items` / `data.total` / `data.page` / `data.page_size`.
+
+---
+
+## Create entity
+
+```
+POST /api/v1/memories/entities
+```
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Yes | Entity name, max 255 characters |
+| `entity_type` | string | Yes | Entity type enum value |
+| `description` | string \| null | No | Entity description |
+| `properties` | object | No | Additional properties, default `{}` |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/memories/entities" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Python",
+    "entity_type": "preference",
+    "description": "Prefers concise Python snippets using async/await syntax.",
+    "properties": {"level": "expert"}
+  }'
+```
+
+**200 OK:** `data` is the created (or updated — see below) [entity object](#entity-object).
+
+<Callout type="warn" title="Same name + type is an upsert">
+  When `name` + `entity_type` already exists, **no new row is created**; the request is merged into the existing entity: `description` is appended after the previous description, `properties` is merged key by key (existing keys are overwritten), and the vector embedding is refreshed. The response still has `code: 0`, but `data.id` is the pre-existing entity ID.
+
+  On failure (for example an internal error) the endpoint returns `400` + `1003`.
+</Callout>
+
+---
+
+## Get entity
+
+```
+GET /api/v1/memories/entities/{entity_id}
+```
+
+Returns the entity plus every relation where it is the source (`outgoing_relations`) and every relation where it is the target (`incoming_relations`). Neither relation list is paginated.
+
+### Path parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `entity_id` | string (UUID) | Yes | Entity ID |
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "entity": {
+      "id": "8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f",
+      "user_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+      "name": "Python",
+      "entity_type": "preference",
+      "description": "Prefers concise Python snippets using async/await syntax.",
+      "properties": {"level": "expert"},
+      "source_conversation_id": null,
+      "source_message_id": null,
+      "access_count": 4,
+      "last_accessed_at": "2026-09-20T10:15:00Z",
+      "created_at": "2026-03-02T08:30:00Z",
+      "updated_at": "2026-09-20T10:15:00Z"
+    },
+    "outgoing_relations": [
+      {
+        "id": "c6d5e4f3-a2b1-4c0d-9e8f-7a6b5c4d3e2f",
+        "user_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+        "source_entity_id": "8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f",
+        "target_entity_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "relation_type": "uses",
+        "description": null,
+        "properties": {},
+        "source_conversation_id": null,
+        "source_message_id": null,
+        "created_at": "2026-03-02T08:31:00Z",
+        "updated_at": "2026-03-02T08:31:00Z"
+      }
+    ],
+    "incoming_relations": []
+  },
+  "msg": "success"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `4000` | `memory_entity_not_found`: unknown ID or not owned by the caller |
+
+---
+
+## Update entity
+
+```
+PUT /api/v1/memories/entities/{entity_id}
+```
+
+### Request body
+
+Every field is optional. Omitted or `null` fields are left untouched, so **`description` cannot be cleared through this endpoint**.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | string \| null | New name, max 255 characters |
+| `description` | string \| null | New description (overwrites, does not append) |
+| `properties` | object \| null | Merged into the existing `properties`, existing keys overwritten |
+
+```bash
+curl -X PUT "https://your-domain.com/api/v1/memories/entities/8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Python 3.13",
+    "description": "Prefers concise Python snippets using async/await syntax.",
+    "properties": {"level": "expert", "years": 5}
+  }'
+```
+
+**200 OK:** `data` is the updated [entity object](#entity-object). Changing `name` or `description` also refreshes the entity's vector embedding.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `4000` | `memory_entity_not_found` |
+| `400` | `1003` | `memory_entity_update_failed` |
+
+---
+
+## Delete entity
+
+```
+DELETE /api/v1/memories/entities/{entity_id}
+```
+
+Deletes the entity, cascade-deletes every relation that references it, and removes its vector from Qdrant.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {"message": "Memory entity deleted successfully"},
+  "msg": "Memory entity deleted successfully"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `4000` | `memory_entity_not_found` |
+| `400` | `1003` | `memory_entity_delete_failed` |
+
+---
+
+## List relations
+
+```
+GET /api/v1/memories/relations
+```
+
+### Query parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `entity_id` | string (UUID) | No | - | Filter by entity; matches relations where it is either the source **or** the target |
+| `relation_type` | string | No | - | Filter by relation type |
+| `page` | integer | No | 1 | Page number, minimum 1 |
+| `page_size` | integer | No | 20 | Items per page, 1–100 |
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "c6d5e4f3-a2b1-4c0d-9e8f-7a6b5c4d3e2f",
+        "user_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+        "source_entity_id": "8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f",
+        "target_entity_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "relation_type": "uses",
+        "description": null,
+        "properties": {},
+        "source_conversation_id": null,
+        "source_message_id": null,
+        "created_at": "2026-03-02T08:31:00Z",
+        "updated_at": "2026-03-02T08:31:00Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## Create relation
+
+```
+POST /api/v1/memories/relations
+```
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `source_entity_id` | string (UUID) | Yes | Source entity; must belong to the caller |
+| `target_entity_id` | string (UUID) | Yes | Target entity; must belong to the caller |
+| `relation_type` | string | Yes | Relation type enum value |
+| `description` | string \| null | No | Relation description |
+| `properties` | object | No | Additional properties, default `{}` |
+
+**200 OK:** `data` is the [relation object](#relation-object).
+
+<Callout type="info" title="Duplicate relations are idempotent">
+  When the same `source_entity_id` + `target_entity_id` + `relation_type` already exists, the existing relation is returned (`code: 0`); no row is written and the request's `description` / `properties` do not overwrite the stored ones.
+</Callout>
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `1002` | `memory_source_entity_not_found` / `memory_target_entity_not_found` (unknown entity or not owned by the caller) |
+| `400` | `1002` | `memory_relation_create_failed` (other creation failures) |
+| `400` | `1003` | Internal server error |
+
+---
+
+## Delete relation
+
+```
+DELETE /api/v1/memories/relations/{relation_id}
+```
+
+### Path parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `relation_id` | string (UUID) | Yes | Relation ID |
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {"message": "Memory relation deleted successfully"},
+  "msg": "Memory relation deleted successfully"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `4000` | `memory_relation_not_found` |
+| `400` | `1003` | `memory_relation_delete_failed` |
+
+---
+
+## Get memory graph
+
+```
+GET /api/v1/memories/graph
+```
+
+Returns the entities and relations used for visualization. The response contains only `entities` and `relations` — no pagination fields.
+
+### Query parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `entity_ids` | array of UUID | No | - | Repeat the parameter to use these entities as subgraph seeds |
+| `max_depth` | integer | No | 1 | Subgraph traversal depth, 1–3 (out of range returns `422`) |
+
+When `entity_ids` is omitted the endpoint returns the caller's **complete** graph (all entities + all relations, unpaginated). With `entity_ids` it returns a **bounded** subgraph: the server caps the number of nodes and relations and silently truncates the remainder — use `GET /entities` and `GET /relations` with pagination when you need the full data.
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/memories/graph?entity_ids=8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f&max_depth=2" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "entities": [
+      {
+        "id": "8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f",
+        "user_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+        "name": "Python",
+        "entity_type": "preference",
+        "description": "Prefers concise Python snippets using async/await syntax.",
+        "properties": {"level": "expert"},
+        "source_conversation_id": null,
+        "source_message_id": null,
+        "access_count": 4,
+        "last_accessed_at": "2026-09-20T10:15:00Z",
+        "created_at": "2026-03-02T08:30:00Z",
+        "updated_at": "2026-09-20T10:15:00Z"
+      }
+    ],
+    "relations": [
+      {
+        "id": "c6d5e4f3-a2b1-4c0d-9e8f-7a6b5c4d3e2f",
+        "user_id": "3d1f7a92-5b6c-4f8e-9a01-2c3d4e5f6a7b",
+        "source_entity_id": "8f14e45f-ceea-467a-9c1c-1b0c1a2d3e4f",
+        "target_entity_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "relation_type": "uses",
+        "description": null,
+        "properties": {},
+        "source_conversation_id": null,
+        "source_message_id": null,
+        "created_at": "2026-03-02T08:31:00Z",
+        "updated_at": "2026-03-02T08:31:00Z"
+      }
+    ]
+  },
+  "msg": "success"
+}
+```
+
+---
+
+## Error handling
+
+| HTTP | Code | Trigger |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | Missing, invalid, or expired token |
+| `400` | `4000` | Entity/relation does not exist or is not owned by the caller |
+| `400` | `1002` | A relation references a missing entity, or relation creation failed |
+| `400` | `1003` | Internal error while creating, updating, or deleting an entity |
+| `422` | `1001` | Request validation failed: malformed UUID, unknown enum value, `page` < 1, `page_size` outside 1–100, `max_depth` outside 1–3 |
+
+<Callout type="info">
+  This endpoint group has no dedicated rate limiting. See [Error Handling](./errors) for the general conventions.
+</Callout>
+
+## Related
+
+- [Agent memory](/usage/guides/agent/memory) — automatic extraction, recall, and the enable/disable switch
+- [Conversations API](./conversations) — the conversations referenced by `source_conversation_id`
+- [Agents API](./agents) — the chat entry points that produce memory extractions
+- [Error Handling](./errors) — recover by HTTP status and business error code

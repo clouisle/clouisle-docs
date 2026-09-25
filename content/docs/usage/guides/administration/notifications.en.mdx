@@ -1,18 +1,59 @@
 ---
 title: Notifications & External Channels
-description: View notifications, configure delivery channels, and enable automatic event notifications
+description: View notifications, configure delivery channels, and choose which events create automatic notifications
 icon: BellRing
 ---
 
-The notification center aggregates site-wide, team, and personal notifications, with search, unread filtering, and mark-as-read. Automatic notifications are triggered by system events, and administrators can select event types and external channels.
+The notification center aggregates site-wide, team, and personal notifications, with search, unread filtering, and bulk mark-as-read. Automatic notifications are triggered by system events: administrators decide **which event types produce a notification** and **which external channels deliver it** — regular users can only view and mark as read.
 
 ## View Notifications
 
-Navigate to **Notifications** and filter by scope, priority, and type. Notification types include announcements, security, pending, status updates, and general notifications. Document processing, workflow runs, Agent publishing, API Key expiration, quota, and security events can trigger automatic notifications.
+Notifications have three scopes, and visibility is computed server-side from team membership:
+
+| Scope | Value | Who sees it |
+| --- | --- | --- |
+| Global | `global` | Every signed-in user |
+| Team | `team` | Members of the target team |
+| User | `user` | One specific user |
+
+Levels are `low` / `medium` / `high`. **Read state is per-user** (a `NotificationRead` row), so marking something read never affects anyone else. Expired notifications (`expires_at` in the past) are hidden by default — so a notification "disappearing" usually means it expired, not that it was deleted.
+
+Filters accepted by `GET /api/v1/notifications`:
+
+| Parameter | Description |
+| --- | --- |
+| `scope` | Filter by scope (`global`, `team`, `user`) |
+| `type` | Exact event type, e.g. `kb.doc_failed` |
+| `level` | Filter by level (`low`, `medium`, `high`) |
+| `search` | Case-insensitive substring over title, content, and type |
+| `unread_only` | Return unread only |
+| `created_from` / `created_to` | Filter by creation time range |
+| `page` / `page_size` | Pagination; `page_size` max `100` (default `20`) |
+
+<Callout type="warn">
+  There is no `PATCH /api/v1/notifications/{id}`, and no per-user single-item delete. Marking read is **bulk-only** via `POST /api/v1/notifications/read` (pass `notification_ids` or `mark_all: true`); deleting is admin-only. Clearing one specific item is therefore not possible today — filter, then mark the batch as read.
+</Callout>
 
 ## Configure Channels
 
-In **Site settings** > **Notification channels**, select Email, DingTalk, WeCom, Feishu, Slack, or Webhook. Fill in the channel credentials and send a test message; do not put signing secrets in URL query parameters. When a `webhook_secret` is configured for the Webhook channel, outgoing requests include `X-Webhook-Signature: sha256=<hex>` and `X-Webhook-Signature-256: <hex>` — HMAC-SHA256 over the raw body; receivers should verify against the raw body with constant-time comparison.
+Configure channels under **Site Settings** → **Notification Channels**. A channel delivers only when **both** conditions hold: its `*_enabled` flag is `true` *and* the required credentials are filled in. Every channel switch defaults to `false`.
+
+| Channel | Key settings | Test endpoint |
+| --- | --- | --- |
+| Email | `smtp_enabled`, `smtp_host`, `smtp_port`, `smtp_encryption` (`none`/`ssl`/`tls`), `smtp_username`, `smtp_password`, `email_from_name`, `email_from_address` | `/test-email` |
+| DingTalk | `dingtalk_enabled`, `dingtalk_notification_type` (`webhook` or `app`), webhook URL/secret, or app key/secret/agent ID | `/test-dingtalk` |
+| WeCom | `wechat_enabled`, `wechat_notification_type` (`webhook` or `app`), webhook URL, or corp ID (`wechat_corp_id`) / agent ID (`wechat_agent_id`) / app secret (`wechat_secret`) | `/test-wechat` |
+| Feishu | `feishu_enabled`, `feishu_notification_type` (`webhook` or `app`), webhook URL/secret, or app ID/secret | `/test-feishu` |
+| Slack | `slack_enabled`, `slack_webhook_url` | `/test-slack` |
+| Webhook | `webhook_enabled`, `webhook_url`, `webhook_method` (`POST`/`GET`), `webhook_headers`, `webhook_body_template`, `webhook_secret` | `/test-webhook` |
+
+Send a test message before saving. **Never put a signing secret in a URL query parameter** — query strings end up in proxies, gateways, and browser history.
+
+When a Webhook channel has `webhook_secret` configured, outgoing requests carry `X-Webhook-Signature: sha256=<hex>` and `X-Webhook-Signature-256: <hex>`, both HMAC-SHA256 over the **raw request body**. Receivers MUST verify against the unparsed, unmodified raw body using a constant-time comparison, otherwise verification fails or gives false positives.
+
+<Callout type="info">
+  `webhook_body_template` supports the placeholders `{{title}}`, `{{content}}`, and `{{link_url}}`. If a receiver rejects the payload, the delivery record moves to `failed` — but the in-app notification has already been created, so an external channel outage never loses the message.
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/notification-channel-settings.png" alt="Notification channel settings" />
@@ -21,12 +62,90 @@ In **Site settings** > **Notification channels**, select Email, DingTalk, WeCom,
 
 ## Automatic Notifications
 
-On the **Automatic notifications** page:
+The **Automatic Notifications** page controls two things:
 
-1. Select the global external channel.
-2. Enable events grouped by team, user, knowledge base, workflow, Agent, API Key, and security (about 18 default event types).
-3. After saving, verify in-app and external status with a test event.
+- `channels`: which external channels participate in delivery (multi-select; selecting none keeps notifications in-app only)
+- `enabled_types`: which event types create a notification
 
-Default events include document processing, workflow runs, Agent publish/unpublish, API Key expiring/expired, anomalous login, account lockout, and password change. The API Key expiration check runs via Celery Beat daily at `09:00`, with reminders `7`, `3`, and `1` day before expiration. Anomalous-login detection keeps the last `30` days, up to `10` IPs and `10` devices per user; logging in from a new IP or device triggers an anomaly notification.
+Endpoints are `GET` / `PUT /api/v1/admin/site-settings/auto-notifications`; reading requires `admin:settings:read`, updating requires `admin:settings:update`. Submitting an unknown type is rejected (`invalid_notification_type`) rather than silently dropped.
 
-External delivery states include pending, sending, sent, and failed; failures record retry counts. Do not rely on external channels alone — confirm important security events in the notification center and audit log as well.
+There are **25** available types, of which **19 are enabled by default**:
+
+| Group | Type | Enabled by default |
+| --- | --- | --- |
+| Team | `team.member_added`, `team.member_removed`, `team.role_changed`, `team.ownership_transferred`, `team.model_granted`, `team.model_revoked` | yes |
+| User | `user.activated`, `user.deactivated`, `user.password_reset`, `user.pending_approval` | yes |
+| Knowledge base | `kb.doc_indexed`, `kb.doc_failed` | yes |
+| Workflow | `workflow.run_failed` | yes |
+| Workflow | `workflow.pause_pending` | yes |
+| Workflow | `workflow.run_success` | no |
+| Agent | `agent.published`, `agent.unpublished` | no |
+| API key | `apikey.expiring`, `apikey.expired` | yes |
+| Security | `security.login_anomaly`, `security.account_locked`, `security.password_changed` | yes |
+| Password expiry | `password.expiring`, `password.expired` | no |
+| Password expiry | `password.force_change` | no (no producing code) |
+
+<Callout type="warn" title="Disabling a type drops the event permanently">
+  If a type is not in `enabled_types`, the notification is **never created** when the event fires (the check happens before creation), and enabling it later cannot backfill the missed events. `workflow.run_success` is off by default on purpose — notifying on every successful run quickly drowns the notification center. Turn it on only if you genuinely need per-run confirmation.
+</Callout>
+
+### Scheduled Checks
+
+These automatic notifications are produced by Celery Beat, in the server timezone:
+
+| Task | Time | Behaviour |
+| --- | --- | --- |
+| `tasks.check_api_key_expiration` | Daily at `09:00` | Finds keys expiring within `7` days and reminds only at exactly `7`, `3`, and `1` day remaining (`apikey.expiring`); already-expired keys send `apikey.expired` |
+| `tasks.check_password_expiration` | Daily at `08:00` | Expired passwords send `password.expired`; inside the warning window (`password_expiration_warning_days`, default `7` days) it reminds only at `7`, `3`, and `1` day remaining (`password.expiring`) |
+
+The "remind only at 7/3/1 days" rule is deliberate de-duplication — without it the same user would be pinged every single day.
+
+### Login Anomaly Detection
+
+Login anomaly notifications are not a rules engine; they compare against a stored login fingerprint:
+
+- Each user keeps the last **30** days of at most **10** IPs and **10** user agents (oldest entries are evicted).
+- Seeing an IP or user agent **outside the known set** flags the login and sends `security.login_anomaly`.
+- **A first-ever login is never flagged** (there is no history to compare against), so a brand-new account produces a clean first record.
+- The history lives in Redis; when Redis is unavailable the check is skipped rather than reporting a false anomaly.
+
+<Callout type="warn">
+  A single proxy egress IP hides the real origin, and shared NAT egress makes "new IP" unreliable. High-security deployments should pair anomaly notifications with audit logs (`login_success` / `login_failed`) instead of relying on anomaly detection alone.
+</Callout>
+
+### Delivery States
+
+External delivery states are pending, sending, success, and failed. Failures record a retry count.
+
+<Callout type="warn">
+  Do not rely on external channels alone. Confirm important security events in both the notification center and the [audit log](./audit-logs.mdx): the audit log is the authoritative persisted record, while an external channel can fail silently due to expired credentials or network problems.
+</Callout>
+
+## Notification API
+
+| Method | Path | Description | Permission |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/notifications` | List visible notifications (scope/type/level/search/unread/time filters, paginated) | Signed-in user |
+| `GET` | `/api/v1/notifications/unread-count` | Unread count | Signed-in user |
+| `POST` | `/api/v1/notifications/read` | Bulk mark read (`notification_ids` or `mark_all`) | Signed-in user |
+| `GET` / `PUT` | `/api/v1/admin/site-settings/auto-notifications` | Read/update auto-notification config | `admin:settings:read` / `admin:settings:update` |
+| `GET` | `/api/v1/admin/notifications` | Admin list of all notifications (includes per-channel `deliveries`) | Signed-in user + admin scoping checks |
+| `POST` | `/api/v1/admin/notifications` | Admin creates a notification | `admin:notification:create` |
+| `DELETE` | `/api/v1/admin/notifications/{id}` | Admin deletes a notification | `admin:notification:delete` |
+
+<Callout type="info">
+  The admin list adds scoping checks: a non-global-admin caller (`has_global_admin_access` false) cannot request `scope=global` (`insufficient_privileges`, 403) and **must supply `team_id`** (`notification_scope_requires_team`, 400) and pass that team's admin check. This is what stops a team admin from seeing or managing another team's notifications.
+</Callout>
+
+### Administrator Notes
+
+- **Users:** check the notification center regularly; act on security notifications immediately and change the password when prompted.
+- **Administrators:** configure and successfully test a channel *before* selecting it in Automatic Notifications — selecting an unconfigured channel sends nothing and creates a false sense of coverage.
+- Choose enabled types deliberately: `workflow.run_success` and the `agent.*` events are high-volume and should be enabled only when truly needed.
+
+---
+
+See also:
+- [Site Settings](./site-settings.mdx) — exact channel fields, defaults, and test endpoints
+- [Audit Logs](./audit-logs.mdx) — the authoritative operation record
+- [Roles & Permissions](./roles-permissions.mdx) — `admin:settings:*` and `admin:notification:*` permissions

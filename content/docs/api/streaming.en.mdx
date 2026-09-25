@@ -46,6 +46,28 @@ data: {"status":"completed","message_id":"msg-456"}
 
 `run_status` enters `waiting` while the model awaits an `ask_user` answer. Use the pending fields to render the question form and submit answers through `POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers`. Each run emits exactly one `run_end` with status `completed`, `stopped`, `failed`, or `interrupted`.
 
+Run status values:
+
+| Status | Description |
+| --- | --- |
+| `queued` | Persisted and enqueued, waiting for a worker to pick it up. |
+| `running` | A worker is executing the model loop. |
+| `waiting` | Blocked on a structured `ask_user` answer; the event carries the pending tool-call details. |
+| `stopping` | A stop request was received; the run is winding down cooperatively. |
+| `completing` | The model loop finished and the final message is being persisted. |
+| `completed` / `stopped` / `failed` / `interrupted` | Terminal states: finished normally, stopped, failed, or lost with its worker. |
+
+### Reconnection
+
+The run event stream is `GET /api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N`, where `after_sequence` defaults to `0` and negative values are clamped to `0`:
+
+1. Record the `sequence` of every run event you receive.
+2. After a disconnect, resubscribe with the highest processed `sequence` as `after_sequence`.
+3. The server replays only events with `sequence > after_sequence` before following the live stream, so nothing is duplicated or lost.
+4. For a non-streaming catch-up, read the same buffered events from `GET /api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N`.
+
+On reconnect, reuse the existing `conversation_id` / `run_id` instead of creating new resources, and stop reconnecting once `run_end` arrives.
+
 ## Workflow Events
 
 Workflow streams contain status events for run start, node start/output/skipped, run complete, failure, cancel, and timeout. Use the `stream_url` from the initial Webhook response to subscribe; use `from_sequence` to resume reading.

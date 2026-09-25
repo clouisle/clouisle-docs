@@ -6,13 +6,17 @@ icon: ShieldCheck
 
 权限由后端统一检查。前端菜单隐藏只是体验层；API 仍会返回权限错误。
 
+<Callout type="info" title="四层权限模型">
+Clouisle 的权限判定是四层复合结构：**身份绕过层**（`is_superuser`）→ **全局能力层**（`User → Role → Permission`）→ **团队门限层**（`TeamMember.role`）→ **对象层**（资源 `visibility` 与创建者规则）。任何一层不通过，请求即失败。
+</Callout>
+
 ## 权限目录
 
 ### 特殊权限
 
 | 权限 | 说明 |
 | --- | --- |
-| `*` | 通配权限码；运行时绕过实际由 `is_superuser` 决定 |
+| `*` | 通配权限码，可满足任意 permission code 检查；它本身只是 Super Admin 角色持有的一个普通权限码，运行时真正的「无条件绕过」由 `is_superuser` 决定 |
 | `admin:dashboard:access` | 管理台访问，区分「管理员」与「普通用户」的关键权限 |
 
 ### 管理类权限（需 `admin:dashboard:access`，按全局角色授予）
@@ -21,9 +25,10 @@ icon: ShieldCheck
 | --- | --- |
 | `admin:user:read/create/update/delete` | 用户管理 |
 | `admin:role:read/create/update/delete` | 角色管理 |
-| `admin:permission:read` | 查看权限列表 |
+| `admin:permission:read/create/update/delete` | 权限查看与维护 |
 | `admin:model:read/create/update/delete` | 模型管理 |
 | `admin:memory:read` | 查看记忆记录 |
+| `admin:memory:update/delete` | 编辑或删除管理台记忆记录（Admin 预置角色只持有 `admin:memory:read`） |
 | `admin:conversation:read/delete` | 管理台会话管理 |
 | `admin:notification:create/delete` | 管理台通知管理 |
 | `admin:team:read/create/update/delete` | 全局团队管理 |
@@ -34,11 +39,10 @@ icon: ShieldCheck
 | `admin:settings:update` | 修改站点设置 |
 | `admin:sso:read` | 查看 SSO 提供商与配置 |
 | `admin:sso:update` | 管理 SSO 提供商与用户 SSO 连接 |
-| `admin:memory:update/delete` | 编辑或删除管理台记忆记录 |
 | `audit:read` | 查看审计日志 |
-| `audit:export` | 导出审计日志 |
+| `audit:export` | 导出审计日志（归档审计日志也使用该权限，独立于 `admin:settings:update`） |
 
-### 资源类权限（受团队数据隔离约束，可通过团队/资源作用域角色授予）
+### 资源类权限（受团队数据隔离约束，通过全局角色授予）
 
 | 权限 | 说明 |
 | --- | --- |
@@ -54,31 +58,42 @@ icon: ShieldCheck
 
 ## 内置角色矩阵
 
-后端在系统启动时初始化 5 个全局内置角色，各角色拥有的默认权限如下：
+后端在系统启动时幂等初始化 5 个全局内置角色，各角色拥有的默认权限如下：
 
 | 角色名称 | 角色类型 | 核心权限特征 | 典型适用人员 |
 | --- | --- | --- | --- |
-| **Super Admin** | 全局内置 | 拥有通配权限码 `*`，完全绕过权限限制，可执行系统配置、角色管理、审计导出等所有操作 | 运维负责人、系统所有者 |
-| **Admin** | 全局内置 | 包含 `admin:dashboard:access` 与所有资源的管理类与普通操作权限，但不包含系统角色/权限自身的增删改、以及修改全局站点设置 | 工作空间管理员、技术主管 |
-| **Team Admin** | 全局内置 | 团队级管理员角色；具备 Member 全部权限以及团队自身的更新与管理权限（`team:update`、`team:manage`） | 团队负责人、项目组长 |
+| **Super Admin** | 全局内置 | 持有通配权限码 `*`，且以 `is_superuser` 绕过权限与团队成员校验，可执行系统配置、角色管理、审计导出等所有操作 | 运维负责人、系统所有者 |
+| **Admin** | 全局内置 | 包含 `admin:dashboard:access` 与几乎所有资源的管理类权限；**不含** `admin:role:create/update/delete`、`admin:permission:create/update/delete`、`admin:settings:update`、`admin:sso:update`、`admin:memory:update/delete` | 工作空间管理员、技术主管 |
+| **Team Admin** | 全局内置 | 具备 Member 的全部权限，另加 `team:update` 与 `team:manage`；由启动迁移授予团队 `owner`/`admin` 成员 | 团队负责人、项目组长 |
 | **Member** | 全局内置 | 无 `admin:dashboard:access`；具备团队内 Agent、工作流、知识库、工具、Skill 的创建/编辑/运行完整协作权限 | 研发人员、业务编排人员 |
-| **Viewer** | 全局内置 | 只读角色；具备团队内已发布 Agent 和工作流的查看与对话/运行权限，以及工具/Skill 的读取与执行 | 业务审计人员、观察员 |
+| **Viewer** | 全局内置 | 只读角色；具备团队内已发布 Agent 和工作流的查看与对话/运行权限，以及工具/Skill 的读取与执行（无 `apikey:*`） | 业务审计人员、观察员 |
 
-### 团队成员身份映射
+## 团队成员角色与团队作用域
 
-团队内成员角色（`owner`、`admin`、`member`、`viewer`）采用作用域映射机制：
-- `owner` 与 `admin` 对应团队作用域下的 `Team Admin` 或 `Admin` 权限集
-- `member` 对应团队作用域下的 `Member` 角色
-- `viewer` 对应团队作用域下的 `Viewer` 角色
-- 团队内角色不会隐式赋予全局管理台访问权（`admin:dashboard:access`）
+团队内成员角色（`owner`、`admin`、`member`、`viewer`）只是团队内的**组织级别标记**，本身不构成角色授权。当前授权链路完全基于全局权限：
+
+1. `PermissionChecker` 检查用户的全局角色是否命中 permission code（`*` 视为全量，`is_superuser` 直接放行）。
+2. 资源带 `team_id` 时，再校验 `TeamMember` 归属；对管理动作要求 `TeamMember.role in (owner, admin)`；团队 `viewer` 只能执行只读/使用类动作。
+
+<Callout type="warn" title="团队作用域 RBAC 已退役">
+历史设计中的 `ScopedRoleAssignment`（团队作用域角色）与 `check_scoped_permission` **已退役**：`ScopedRoleAssignment` 模型仍在代码中定义并导出，但没有任何逻辑创建或读取它。启动迁移 `migrate_team_admin_roles()` 会为 `TeamMember.role in (owner, admin)` 的成员显式补授全局 **Team Admin** 角色，并删除遗留的团队作用域授权记录。因此团队管理能力来自全局 `Team Admin` 角色，而不是团队成员作用域。
+</Callout>
+
+团队管理边界（`team_access.py`）：
+
+- `TEAM_MANAGEMENT_PERMISSIONS` = `team:update`、`team:manage`、`team:delete`、`tool:delete`：执行这些动作必须同时满足「拥有全局权限码」且「在该团队内是 `owner` 或 `admin`」。
+- `VIEWER_ALLOWED_PERMISSIONS`：团队 `viewer` 只能执行 `team:read`、`agent:read`/`agent:chat`、`workflow:read`/`workflow:run`/`workflow:execute`、`kb:read`/`kb:test`、`tool:read`/`tool:execute`、`skill:read`/`skill:execute`、`conversation:read`，其余写操作一律拒绝。
+- 团队内的 `viewer` 与全局 **Viewer** 角色不是同一个东西：团队 `viewer` 只表示在该团队内处于最低管理级别，不会自动授予全局 `Viewer` 权限码。
+- 添加成员、修改成员角色、移除成员、主动离开团队、转移所有权等操作只维护 `TeamMember.role`，不会授予或回收任何全局角色；`owner` 不会被自动分配为默认团队角色。
+
 ## 侧边栏菜单映射
 
 | 菜单 | 所需权限 | 超管 | Admin | Member | Viewer |
 | --- | --- | :-: | :-: | :-: | :-: |
 | Dashboard | `admin:dashboard:access` | ✓ | ✓ | | |
-| Teams | `team:read` | ✓ | ✓ | ✓ | ✓ |
+| Teams | `admin:team:read` | ✓ | ✓ | | |
 | Knowledge Bases | `admin:knowledge-base:read` | ✓ | ✓ | | |
-| Activities | `conversation:read` | ✓ | ✓ | ✓ | ✓ |
+| Activities | `admin:conversation:read` + `workflow:read`（需同时满足） | ✓ | ✓ | | |
 | Users | `admin:user:read` | ✓ | ✓ | | |
 | Roles | `admin:role:read` | ✓ | ✓ | | |
 | Permissions | `admin:permission:read` | ✓ | ✓ | | |
@@ -92,15 +107,25 @@ icon: ShieldCheck
 | Audit Logs | `audit:read` | ✓ | ✓ | | |
 | Site Settings | `admin:settings:read` | ✓ | ✓ | | |
 
-「管理」菜单组（Users、Roles、Permissions、Models、Audit Logs 等）仅在用户拥有 `admin:dashboard:access` 时可见。
+侧边栏分五组：**General**（Dashboard、Teams、Knowledge Bases、Activities）、**System**（Users、Roles、Permissions）、**Resources**（Models、Apps、Capabilities、API Keys、Memories）、**Monitoring**（Observability、Notifications、Audit Logs）、**Settings**（Site Settings、Help Center）。
+
+- **System、Resources、Monitoring** 三组整组受 `admin:dashboard:access` 约束：没有该权限时整组隐藏。
+- **General 与 Settings** 不按 `admin:dashboard:access` 整组隐藏，但每个条目仍需各自的权限（例如只有 `admin:team:read` 的用户能看到 Teams 与 Activities，看不到 Dashboard）。Help Center 外链无需权限。
+- 路由权限映射见 `frontend/lib/route-permissions.ts`：`/apps` 与 `/capabilities` 使用前缀匹配；不存在 `/tools` 路由（工具/Skill 管理位于 `/capabilities`）；`/site-settings/sso` 使用 `admin:sso:read`；Storage 页的「归档审计日志」单独使用 `audit:export`。
 
 ## 检查顺序
 
-超级管理员直接通过。管理类权限使用全局角色；普通资源权限还需检查团队/资源作用域角色。资源不属于当前团队、用户不是成员、用户状态无效或 API Key 未列出目标资源时，请求会失败。
+超级管理员（`is_superuser`）在 `PermissionChecker` 中直接通过，不检查角色权限，通常也跳过团队成员校验。普通用户依次经过：
+
+1. **全局权限**：`User → Role → Permission` 是否命中目标 permission code（`*` 视为全量）。
+2. **团队门限**：资源属于某团队时，必须是该团队成员；管理动作还需 `owner`/`admin`，团队 `viewer` 受只读/使用白名单限制。
+3. **对象可见性**：`private` 资源还需通过创建者规则。
+
+资源不属于当前团队、用户不是成员、用户状态无效或 API Key 未列出目标资源时，请求会失败。
 
 ## 角色限制
 
-系统角色和系统权限不能删除；默认团队、所有者和超级管理员有额外保护。所有权转让、移除所有者、修改系统权限等操作会被明确拒绝。
+系统角色（`is_system_role`）和系统权限（`is_system`）不能删除；默认团队、所有者和超级管理员有额外保护。所有权转让、移除所有者、修改系统权限等操作会被明确拒绝（对应错误码 `5200`–`5214`）。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/permission-guarded-navigation.png" alt="按权限过滤的管理导航" />

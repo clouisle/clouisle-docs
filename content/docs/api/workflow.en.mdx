@@ -41,20 +41,32 @@ Workflow management and user-initiated run/status routes require an authenticate
 | GET | `/api/v1/workflows/{workflow_id}` | Get workflow details |
 | PUT | `/api/v1/workflows/{workflow_id}` | Update workflow |
 | DELETE | `/api/v1/workflows/{workflow_id}` | Delete workflow |
-| POST | `/api/v1/workflows/{workflow_id}/run` | Execute workflow |
+| POST | `/api/v1/workflows/{workflow_id}/publish` | Publish workflow |
+| POST | `/api/v1/workflows/{workflow_id}/unpublish` | Unpublish workflow |
+| POST | `/api/v1/workflows/{workflow_id}/duplicate` | Duplicate workflow |
+| POST | `/api/v1/workflows/{workflow_id}/regenerate-webhook-token` | Regenerate Webhook Token |
+| POST | `/api/v1/workflows/{workflow_id}/run` | Execute a published workflow |
+| POST | `/api/v1/workflows/{workflow_id}/debug` | Debug-run against the current draft |
+| GET | `/api/v1/workflows/runs` | List runs across workflows |
+| GET | `/api/v1/workflows/runs/stats` | Run statistics across workflows |
 | GET | `/api/v1/workflows/runs/{run_id}` | Get execution status |
-| GET | `/api/v1/workflows/{workflow_id}/runs` | List execution history |
-| POST | `/api/v1/workflows/runs/{run_id}/cancel` | Cancel execution |
+| DELETE | `/api/v1/workflows/runs/{run_id}` | Delete a run record |
 | GET | `/api/v1/workflows/runs/{run_id}/stream` | SSE execution event stream |
 | GET | `/api/v1/workflows/runs/{run_id}/nodes` | Node execution details |
+| POST | `/api/v1/workflows/runs/{run_id}/cancel` | Cancel execution |
+| GET | `/api/v1/workflows/{workflow_id}/runs` | List execution history for a workflow |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | Current user's runs for a workflow |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | Current user's run details |
+| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}/nodes` | Node details for the current user's run |
 | GET | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-request` | Get pending pause/approval request |
-| POST | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-requests/{req_id}/submit` | Submit approval or variables to resume execution |
-| POST | `/api/v1/workflows/webhook/{webhook_token}` | Webhook trigger |
+| POST | `/api/v1/workflows/{workflow_id}/runs/{run_id}/pause-requests/{pause_request_id}/submit` | Submit approval or variables to resume execution |
 | GET | `/api/v1/workflows/{workflow_id}/stats` | Workflow statistics |
 | GET | `/api/v1/workflows/{workflow_id}/stats/trends` | Trend data |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine` | Current user's runs |
-| GET | `/api/v1/workflows/{workflow_id}/runs/mine/{run_id}` | Current user's run details |
-| POST | `/api/v1/workflows/{workflow_id}/regenerate-webhook-token` | Regenerate Webhook Token |
+| GET | `/api/v1/workflows/{workflow_id}/versions` | Version snapshot list |
+| GET | `/api/v1/workflows/{workflow_id}/versions/{version}` | Version snapshot details |
+| POST | `/api/v1/workflows/{workflow_id}/versions` | Create a version snapshot |
+| POST | `/api/v1/workflows/{workflow_id}/versions/{version}/restore` | Restore a version snapshot |
+| POST | `/api/v1/workflows/webhook/{webhook_token}` | Webhook trigger |
 ---
 
 ## List Workflows
@@ -473,6 +485,52 @@ Progress is available via `GET /api/v1/workflows/runs/{run_id}/stream` (SSE, opt
 
 ---
 
+## Publish, Unpublish, and Duplicate
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/v1/workflows/{workflow_id}/publish` | Publish the workflow: `status` becomes `published` and a `webhook_token` is assigned/kept |
+| `POST /api/v1/workflows/{workflow_id}/unpublish` | Unpublish: `status` returns to `draft` |
+| `POST /api/v1/workflows/{workflow_id}/duplicate` | Copy the workflow inside its team, including nodes, edges, configs, and variables |
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-446655440000/publish" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+- Publish/unpublish return the updated `WorkflowOut`.
+- Duplicate returns the new `WorkflowOut` in `draft` status with `run_count`/`success_count`/`fail_count` reset to zero.
+- Only a workflow with `status: published` can be executed via `POST /{workflow_id}/run`; otherwise the call returns `403` with `workflow_not_published`.
+
+## Debug Run
+
+```
+POST /api/v1/workflows/{workflow_id}/debug
+```
+
+Runs the workflow using its **current draft** definition (no publish required). The body is the same as `run` (`{"inputs": {...}}`) and it requires `workflow:run` plus write access to the workflow. The created run has `is_debug: true` and can be filtered with `is_debug=true` in run lists.
+
+**Response (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "run_id": "run-790",
+    "stream_url": "/api/v1/workflows/runs/run-790/stream"
+  },
+  "msg": "Workflow execution started"
+}
+```
+
+## Delete a Run
+
+```
+DELETE /api/v1/workflows/runs/{run_id}
+```
+
+Deletes a run record (along with its node executions). On success `data` is `{"id": "<run_id>"}`.
+
 ## Get Execution Status
 
 Check the status of a workflow run.
@@ -541,7 +599,7 @@ curl -X GET "https://your-domain.com/api/v1/workflows/runs/run-789" \
 **Run status values:** `pending`, `running`, `success`, `waiting`, `failed`, `cancelled`, `timeout`.
 
 <Callout type="info">
-  A user's own published-workflow runs can also be retrieved via `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}` (requires `workflow:run`). Node-level execution detail is available at `GET /api/v1/workflows/runs/{run_id}/nodes`.
+  A user's own published-workflow runs can also be retrieved via `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}` (requires `workflow:run`), with node-level detail at `GET /api/v1/workflows/{workflow_id}/runs/mine/{run_id}/nodes`. Node-level execution detail from the management view is available at `GET /api/v1/workflows/runs/{run_id}/nodes`.
 </Callout>
 
 ---
@@ -570,7 +628,9 @@ GET /api/v1/workflows/{workflow_id}/runs
 | `page_size` | integer | No | 20 | Items per page (maximum 100) |
 | `status` | string | No | - | Filter by status: `pending`, `running`, `success`, `waiting`, `failed`, `cancelled`, `timeout` |
 | `is_debug` | boolean | No | - | Filter by debug runs |
-| `search` | string | No | - | Search runs |
+| `search` | string | No | - | Search by run ID (non-UUID values return no results) |
+| `created_after` | string | No | - | Only runs created after this time (ISO 8601) |
+| `created_before` | string | No | - | Only runs created before this time (ISO 8601) |
 
 ### Request Example
 
@@ -665,6 +725,55 @@ curl -X POST "https://your-domain.com/api/v1/workflows/runs/run-789/cancel" \
 ```
 
 ---
+
+## Cross-Workflow Runs and Statistics
+
+Beyond per-workflow queries, you can list runs and statistics across **every accessible workflow**. Both narrow results by each workflow's visibility (YUN-153): another member's PRIVATE workflow is hidden even within the same team, matching the access rules of `GET /workflows/{workflow_id}`.
+
+### List Runs Across Workflows
+
+```
+GET /api/v1/workflows/runs
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `team_id` | array | No | - | Filter by team (repeatable, requires team membership) |
+| `workflow_id` | array | No | - | Filter by workflow (repeatable) |
+| `status` | array | No | - | Filter by status (repeatable) |
+| `trigger_type` | array | No | - | Filter by trigger type (repeatable) |
+| `user_id` | array | No | - | Filter by triggering user (repeatable) |
+| `is_debug` | boolean | No | - | Only debug runs |
+| `search` | string | No | - | Search by workflow name |
+| `page` | integer | No | 1 | Page number |
+| `page_size` | integer | No | 20 | Items per page (max 100) |
+
+Requires `workflow:read`.
+
+### Run Statistics Across Workflows
+
+```
+GET /api/v1/workflows/runs/stats?period=7d
+```
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `team_id` | string | No | - | Filter by team |
+| `period` | string | No | - | Time range: `7d`, `30d` |
+| `own_only` | boolean | No | `false` | Only workflows created by the current user |
+
+Returns `total_runs`, `runs_by_status`, `runs_by_workflow` (top 10 workflows by run count), and `avg_duration_ms`. Requires `workflow:read`.
+
+## Workflow Versions
+
+Integer-numbered version snapshots of a single workflow are managed by this router's `/{workflow_id}/versions` endpoints; the full version-management API with diff, publish, archive, rollback, and fork lives in the [Workflow Versions API](/api/workflow-versions) under `/api/v1/workflow-versions/...`.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/workflows/{workflow_id}/versions` | List snapshots (newest version first) |
+| GET | `/api/v1/workflows/{workflow_id}/versions/{version}` | Get an integer version snapshot |
+| POST | `/api/v1/workflows/{workflow_id}/versions` | Snapshot the current state |
+| POST | `/api/v1/workflows/{workflow_id}/versions/{version}/restore` | Restore that snapshot |
 
 ## Webhook Trigger
 
@@ -777,7 +886,11 @@ curl -X GET "https://your-domain.com/api/v1/workflows/550e8400-e29b-41d4-a716-44
 }
 ```
 
-A trends endpoint is also available: `GET /api/v1/workflows/{workflow_id}/stats/trends?period=7d` (period: `7d`, `30d`).
+A trends endpoint is also available: `GET /api/v1/workflows/{workflow_id}/stats/trends?period=7d` (`period` defaults to `7d`; `7d` and `30d` are supported; the response contains `period` and a per-day `data` array of `date`, `runs`, `success`, `failed`, `avgDuration`).
+
+<Callout type="warn">
+  Although `{workflow_id}/stats` and `{workflow_id}/stats/trends` only declare `workflow:read`, the implementation validates **write** access to the target workflow (`require_write=True`). Only callers with write access (the creator, or a team member with write permission) can read these two endpoints; read-only shares are rejected.
+</Callout>
 
 ---
 

@@ -1,32 +1,121 @@
 ---
 title: 导入文档
-description: 上传文件或 URL 并跟踪解析、嵌入和索引状态
+description: 上传文件或从 URL 导入文档，跟踪解析、嵌入与索引状态
 icon: Upload
 ---
 
-打开知识库详情后，选择**上传文档**上传本地文件，或选择**导入网址**添加网页/YouTube URL。当前后端文档类型包括 `pdf`、`docx`、`doc`、`txt`、`markdown`、`html`、`csv`、`xlsx`、`xls`、`json` 和 `url`。
+在知识库详情页选择**上传文档**上传本地文件，或选择**导入网址**添加网页/YouTube URL。上传只是把文件存到知识库并创建一条 `pending` 记录；**必须再执行处理**，文档才会被解析、切分、嵌入并进入检索。
 
-## 上传与状态
+## 支持的格式
 
-1. 选择文件；前端会显示上传进度。
-2. 上传成功后文档状态为**等待中**。
-3. 选择**开始处理**，必要时先**预览分块**。
-4. 处理完成后状态为**已完成**，文档才会参与检索。
-5. 失败文档显示错误信息，可选择**重新处理**或仅重试失败分段。
+| 类型 | 扩展名 | 解析方式 |
+| --- | --- | --- |
+| PDF | `.pdf` | 文档转换器 → Markdown 文本 |
+| Word | `.docx`、`.doc` | 文档转换器 → Markdown 文本 |
+| Excel | `.xlsx`、`.xls` | 文档转换器 → Markdown 文本 |
+| PowerPoint | `.pptx` | 文档转换器 → Markdown 文本 |
+| 纯文本 | `.txt` | 按 UTF-8 解码 |
+| Markdown | `.md`、`.markdown` | 按 UTF-8 解码，走 Markdown 结构化分块 |
+| HTML | `.html`、`.htm` | 文档转换器 → Markdown 文本 |
+| CSV | `.csv` | 结构化提取 |
+| JSON | `.json` | 结构化提取 |
+| 网页 | `url` | 服务端抓取 |
+
+<Callout type="warn" title="不支持的情况">
+  旧版 `.ppt`、XML、压缩包（ZIP/TAR/GZ）与文件夹上传均不支持，扫描件/图片也没有 OCR——只包含图片的 PDF 提取结果为空，处理会失败。
+</Callout>
+
+## 上传文件
+
+1. 在知识库详情页选择**上传文档**。
+2. 拖放文件到对话框，或点击选择文件（可多选）。
+3. 前端会逐文件校验扩展名与大小，不合格的文件会立即报错并从队列中移除。
+4. 点击**上传**，界面显示上传进度。
+5. 每个文件生成一条文档，状态为 `pending`。
+
+前端校验只是为了尽早报错，**服务端会再次校验**扩展名与文件大小：超限返回 `file_too_large`，不支持的格式返回 `invalid_document_type`。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-document-processing.png" alt="文档处理状态" />
-  <figcaption>文档处理状态</figcaption>
+  <figcaption>文档列表中的处理状态与错误提示</figcaption>
 </figure>
 
 ## 上传限制
 
-站点默认单文件限制为 `50MB`，管理员可在**站点设置** > **存储**中调整到 `1-1024MB`。后端会拒绝超过当前设置的文件。不要把旧指南中的固定 `100MB` 当作当前默认值。
+- 单文件默认上限 **`50MB`**，由站点设置 `kb_document_max_upload_size_mb` 控制，可调范围 `1-1024MB`。
+- 上传对话框会读取该站点设置并显示当前值（`最大文件大小：50MB`），因此在管理员调整后应刷新页面。
+- 限制是**单文件**的：可以一次选择多个文件，但每个文件单独计数、单独创建文档。
+- 不支持 ZIP 打包上传，也没有知识库级存储配额；存储占用按团队层面观察。
 
-## URL 导入
+## 状态与处理阶段
 
-输入完整的 `http://` 或 `https://` 地址和可选文档名称。页面或 YouTube 内容由服务端抓取并进入同一处理队列。外部站点不可访问、内容为空或解析失败时，查看文档错误信息和 API 日志。
+```text
+上传/导入 → 提取文本 → 清理 → 分块 → 生成嵌入 → 建立全文索引 → completed
+```
+
+| 状态 | 含义 | 可以做什么 |
+| --- | --- | --- |
+| `pending` | 文件已保存，等待处理 | 预览分块、开始处理、快速处理、删除 |
+| `processing` | 正在提取、切分、嵌入或建索引 | 等待完成，可查看进度 |
+| `completed` | 已建立索引，参与检索 | 命中测试、编辑分块、重新处理 |
+| `error` | 处理失败，附错误信息 | 查看错误、重试失败分段、重新处理 |
+
+处理方式有三种，按需要选择：
+
+- **快速处理**：直接按知识库（或文档）现有分块设置处理，不经过预览。
+- **开始处理**（预览页）：先用**预览分块**确认甚至编辑分块，再提交这些分块生成嵌入。
+- **批量处理**：在文档表格中勾选多个文档，用选择工具栏批量**快速处理**等待中文档。
 
 <Callout type="warn">
-  上传文档与处理文档是两个阶段。文档出现在列表中不代表已经完成嵌入；只有状态为**已完成**才适合绑定到 Agent。
+  上传与处理是两个阶段。文档出现在列表中不代表已经完成嵌入；只有状态为 `completed` 的文档才适合在 Agent 中引用，也才会被检索命中。
 </Callout>
+
+## 从网址导入
+
+1. 在知识库详情页选择**导入网址**。
+2. 填写完整的 `http://` 或 `https://` 地址，以及文档名称（`1-255` 字符）。界面把名称标为可选，但接口的 `name` 字段是必填的，留空提交会被校验拒绝并回显字段错误，建议一并填写。
+3. 点击**导入**——系统先对目标地址做安全校验（拒绝内网、回环与云元数据地址），通过后创建 `url` 类型文档并跳转到预览页。
+4. 在预览页生成分块预览后提交处理：URL 内容由服务端在此时抓取，因此**导入不会自动开始处理**。
+
+导入失败时（地址不可达、内容为空、解析失败），文档会保留错误信息，可查看源网址或删除后重试。
+
+## 失败与重试
+
+| 错误 | 常见原因 | 处理方式 |
+| --- | --- | --- |
+| `file_too_large` | 超过站点上限 | 压缩文件或请管理员提高上限 |
+| `invalid_document_type` | 扩展名/MIME 不在支持列表 | 转换格式 |
+| 提取失败 | 文件损坏、加密、纯图片 | 重新导出或解除密码后重传 |
+| 全部/部分嵌入失败 | 模型凭据、配额、维度不匹配 | 检查模型授权与维度，然后**重试失败分段** |
+| 全文索引不可用 | PostgreSQL / `pg_search` 异常 | 检查数据库与扩展 |
+
+**重试失败分段**只对状态为 `error` 且存在失败分块的文档可用；如果原文本身没问题（例如只是模型临时故障），这比重新处理更省成本，因为不会丢弃已成功的分块。
+
+## 通过 API 导入
+
+知识库端点只接受 JWT 用户会话（`Authorization: Bearer <ACCESS_TOKEN>`），不接受 API Key：
+
+```bash
+# 上传文件（multipart，字段名固定为 file）
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/upload" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -F "file=@./handbook.pdf"
+
+# 导入网址（可选 name）
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/url" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Release Notes", "source_url": "https://example.com/releases"}'
+
+# 处理文档（可选覆盖分块设置）
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID/process" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"chunk_size": 1000, "chunk_overlap": 100, "clean_text": true}'
+```
+
+## 相关页面
+
+- [分块与文档处理](./chunking.mdx) — 预览、处理与编辑分块
+- [浏览文档与元数据](./browse-documents.mdx) — 状态、字段与元数据
+- [知识库设置参考](/reference/knowledge-settings) — 上传上限与分块字段

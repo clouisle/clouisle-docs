@@ -1,0 +1,456 @@
+---
+title: Team Models API
+description: Configure which models a team may use, their quotas, and usage
+icon: Boxes
+---
+
+The Team Models API decides **which models a team may use**, along with per-model quota limits and current usage. The routes are mounted under the team prefix, so every path looks like `/api/v1/teams/{team_id}/models...`.
+
+<Callout type="error" title="Writes are superuser-only">
+  `POST`, `PUT`, and `DELETE` (including batch) all depend on `get_current_active_superuser`: **only superusers can change team model authorizations**. A non-superuser call returns `403` + `3001` (`insufficient_privileges`).
+
+  In the product UI, the team page's **model authorization** tab is **read-only** — it only calls `GET /teams/{team_id}/models` and tells the user the models are assigned by a system administrator. Do not add write entry points for team members.
+</Callout>
+
+<Callout type="info" title="Prerequisites and authentication">
+  All endpoints require an authenticated JWT user session (`Authorization: Bearer <token>`).
+
+  Read endpoints (list, `available-models`, `quota`) perform no permission-code check, only membership: superusers may read directly; anyone else must be a member of the team, otherwise `403` + `3002` (`not_team_member`).
+
+  Write endpoints require a superuser; no team role is needed.
+</Callout>
+
+## Endpoints
+
+| Method | Path | Purpose | Access |
+| --- | --- | --- | --- |
+| GET | `/api/v1/teams/{team_id}/models` | List the team's model authorizations | Team member |
+| POST | `/api/v1/teams/{team_id}/models` | Authorize a model for the team | Superuser |
+| PUT | `/api/v1/teams/{team_id}/models/{model_id}` | Update one authorization's limits/status | Superuser |
+| DELETE | `/api/v1/teams/{team_id}/models/{model_id}` | Revoke one model authorization | Superuser |
+| POST | `/api/v1/teams/{team_id}/models/batch` | Authorize multiple models | Superuser |
+| DELETE | `/api/v1/teams/{team_id}/models/batch` | Revoke multiple authorizations | Superuser |
+| GET | `/api/v1/teams/{team_id}/available-models` | List authorized, enabled models | Team member |
+| GET | `/api/v1/teams/{team_id}/models/quota` | Report quota usage per model | Team member |
+
+## Authorization object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Authorization ID |
+| `team_id` | string (UUID) | Owning team |
+| `model_id` | string (UUID) | Model ID |
+| `model` | object | Model brief: `id`, `name`, `provider`, `provider_display_name`, `model_id`, `model_type`, `capabilities` |
+| `daily_token_limit` | integer \| null | Daily token quota; `null` = unlimited |
+| `monthly_token_limit` | integer \| null | Monthly token quota; `null` = unlimited |
+| `daily_request_limit` | integer \| null | Daily request quota; `null` = unlimited |
+| `monthly_request_limit` | integer \| null | Monthly request quota; `null` = unlimited |
+| `daily_tokens_used` | integer | Tokens used today, default `0` |
+| `monthly_tokens_used` | integer | Tokens used this month, default `0` |
+| `daily_requests_used` | integer | Requests today, default `0` |
+| `monthly_requests_used` | integer | Requests this month, default `0` |
+| `is_enabled` | boolean | Whether this authorization is active, default `true` |
+| `priority` | integer | Selection priority within the team, default `0`; higher wins |
+| `created_at` / `updated_at` | string (ISO 8601) | Creation and update timestamps |
+
+`model_type` values: `chat`, `embedding`, `rerank`, `tts`, `stt`, `audio_generation`, `text_to_image`, `text_to_video`, `decision`.
+
+---
+
+## 1. List team model authorizations
+
+```
+GET /api/v1/teams/{team_id}/models
+```
+
+### Query parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `model_type` | string | No | Filter by model type, e.g. `chat`, `embedding` |
+
+Results are ordered by `priority` descending, then `created_at` ascending.
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/teams/550e8400-e29b-41d4-a716-446655440000/models?model_type=chat" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "team_id": "550e8400-e29b-41d4-a716-446655440000",
+      "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+      "model": {
+        "id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+        "name": "GPT-4o",
+        "provider": "openai",
+        "provider_display_name": "OpenAI",
+        "model_id": "gpt-4o",
+        "model_type": "chat",
+        "capabilities": {"chat": true, "vision": true}
+      },
+      "daily_token_limit": 1000000,
+      "monthly_token_limit": 20000000,
+      "daily_request_limit": null,
+      "monthly_request_limit": null,
+      "daily_tokens_used": 122880,
+      "monthly_tokens_used": 1980420,
+      "daily_requests_used": 412,
+      "monthly_requests_used": 6031,
+      "is_enabled": true,
+      "priority": 0,
+      "created_at": "2026-09-01T09:00:00Z",
+      "updated_at": "2026-09-20T11:30:00Z"
+    }
+  ],
+  "msg": "success"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `404` | `4004` | `team_not_found` |
+| `403` | `3002` | `not_team_member`: not a team member and not a superuser |
+
+---
+
+## 2. Authorize a model
+
+```
+POST /api/v1/teams/{team_id}/models
+```
+
+**Superuser only.**
+
+### Request body
+
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `model_id` | string (UUID) | Yes | - | Model to authorize |
+| `daily_token_limit` | integer \| null | No | `null` | Daily token quota, ≥ 0 |
+| `monthly_token_limit` | integer \| null | No | `null` | Monthly token quota, ≥ 0 |
+| `daily_request_limit` | integer \| null | No | `null` | Daily request quota, ≥ 0 |
+| `monthly_request_limit` | integer \| null | No | `null` | Monthly request quota, ≥ 0 |
+| `is_enabled` | boolean | No | `true` | Whether the authorization is active |
+| `priority` | integer | No | `0` | Selection priority |
+
+A `null` or omitted limit means **unlimited**.
+
+```json
+{
+  "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+  "daily_token_limit": 1000000,
+  "monthly_token_limit": 20000000,
+  "is_enabled": true,
+  "priority": 0
+}
+```
+
+**200 OK:** `data` is the created [authorization object](#authorization-object). A `team.model_granted` notification is sent to the team.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `403` | `3001` | `insufficient_privileges`: not a superuser |
+| `404` | `4004` | `team_not_found` |
+| `404` | `6100` | `model_not_found` |
+| `400` | `6102` | `team_model_already_authorized`: already authorized |
+| `422` | `1001` | Request validation failed (missing `model_id`, negative limits) |
+
+---
+
+## 3. Update an authorization
+
+```
+PUT /api/v1/teams/{team_id}/models/{model_id}
+```
+
+**Superuser only.** Every field is optional; only the supplied ones are updated.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `daily_token_limit` | integer \| null | Daily token quota, ≥ 0 |
+| `monthly_token_limit` | integer \| null | Monthly token quota, ≥ 0 |
+| `daily_request_limit` | integer \| null | Daily request quota, ≥ 0 |
+| `monthly_request_limit` | integer \| null | Monthly request quota, ≥ 0 |
+| `is_enabled` | boolean \| null | Whether the authorization is active |
+| `priority` | integer \| null | Selection priority |
+
+```json
+{
+  "daily_token_limit": 2000000,
+  "is_enabled": false
+}
+```
+
+**200 OK:** `data` is the updated [authorization object](#authorization-object).
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `403` | `3001` | Not a superuser |
+| `404` | `6101` | `team_model_not_found`: the team is not authorized for that model |
+
+---
+
+## 4. Revoke an authorization
+
+```
+DELETE /api/v1/teams/{team_id}/models/{model_id}
+```
+
+**Superuser only.** A `team.model_revoked` notification is sent to the team.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "team_id": "550e8400-e29b-41d4-a716-446655440000",
+    "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c"
+  },
+  "msg": "Model authorization revoked successfully"
+}
+```
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `403` | `3001` | Not a superuser |
+| `404` | `6101` | `team_model_not_found` |
+
+---
+
+## 5. Batch authorize
+
+```
+POST /api/v1/teams/{team_id}/models/batch
+```
+
+**Superuser only.**
+
+### Request body
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `model_ids` | array of string (UUID) | Yes | Models to authorize, at least one |
+| `daily_token_limit` | integer \| null | No | Daily token quota applied to each new authorization |
+| `monthly_token_limit` | integer \| null | No | Monthly token quota applied to each new authorization |
+| `daily_request_limit` | integer \| null | No | Daily request quota applied to each new authorization |
+| `monthly_request_limit` | integer \| null | No | Monthly request quota applied to each new authorization |
+
+```json
+{
+  "model_ids": [
+    "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+    "8a7b6c5d-4e3f-4a2b-9c8d-7e6f5a4b3c2d"
+  ],
+  "monthly_token_limit": 5000000
+}
+```
+
+**200 OK:** `data` is the array of **newly created** authorization objects.
+
+<Callout type="info">
+  Already-authorized models and unknown model IDs are **silently skipped** — no error, and they are absent from the result — so the returned array may be shorter than `model_ids`. Batch creation does not set `is_enabled` / `priority`; new rows use the defaults (`true` / `0`).
+</Callout>
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `403` | `3001` | Not a superuser |
+| `404` | `4004` | `team_not_found` |
+| `422` | `1001` | `model_ids` empty or malformed |
+
+---
+
+## 6. Batch revoke
+
+```
+DELETE /api/v1/teams/{team_id}/models/batch
+```
+
+**Superuser only.** The body only contains `model_ids` (at least one).
+
+```json
+{
+  "model_ids": ["6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c"]
+}
+```
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": {"deleted_count": 1},
+  "msg": "Model authorizations revoked successfully"
+}
+```
+
+`deleted_count` is the number of rows actually deleted; missing authorizations are not counted. A `team.model_revoked` notification is sent to the team.
+
+**Errors:**
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `403` | `3001` | Not a superuser |
+| `404` | `4004` | `team_not_found` |
+
+---
+
+## 7. List available models
+
+```
+GET /api/v1/teams/{team_id}/available-models
+```
+
+Returns only models that are **authorized, whose authorization is enabled, and whose model record is also enabled** (`is_enabled=true`), ordered by `priority` descending. Backend services and frontend dropdowns should use this route rather than the full catalog.
+
+### Query parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `model_type` | string | No | Filter by model type |
+
+**200 OK:** `data` is an array of model briefs:
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+      "name": "GPT-4o",
+      "provider": "openai",
+      "provider_display_name": "OpenAI",
+      "model_id": "gpt-4o",
+      "model_type": "chat",
+      "capabilities": {"chat": true, "vision": true}
+    }
+  ],
+  "msg": "success"
+}
+```
+
+**Errors:** `404` + `4004` (`team_not_found`), `403` + `3002` (`not_team_member`).
+
+---
+
+## 8. Get quota usage
+
+```
+GET /api/v1/teams/{team_id}/models/quota
+```
+
+Returns quota and usage for every authorized model, including disabled authorizations.
+
+**200 OK:**
+
+```json
+{
+  "code": 0,
+  "data": [
+    {
+      "model_id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+      "model_name": "GPT-4o",
+      "model_type": "chat",
+      "daily_token_limit": 1000000,
+      "daily_tokens_used": 122880,
+      "daily_token_percent": 12.29,
+      "monthly_token_limit": 20000000,
+      "monthly_tokens_used": 1980420,
+      "monthly_token_percent": 9.9,
+      "is_enabled": true,
+      "is_quota_exceeded": false
+    }
+  ],
+  "msg": "success"
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `model_id` | string (UUID) | Model ID |
+| `model_name` | string | Model name |
+| `model_type` | string | Model type |
+| `daily_token_limit` | integer \| null | Daily token quota |
+| `daily_tokens_used` | integer | Tokens used today |
+| `daily_token_percent` | number \| null | Percentage used today (two decimals); `null` when the quota is `null` |
+| `monthly_token_limit` | integer \| null | Monthly token quota |
+| `monthly_tokens_used` | integer | Tokens used this month |
+| `monthly_token_percent` | number \| null | Percentage used this month; `null` when the quota is `null` |
+| `is_enabled` | boolean | Whether the authorization is active |
+| `is_quota_exceeded` | boolean | Whether the quota is exceeded |
+
+<Callout type="warn">
+  `is_quota_exceeded` is based on **token limits only** (`daily_tokens_used >= daily_token_limit` or `monthly_tokens_used >= monthly_token_limit`, with a non-`null` limit). Request-count limits do not feed this flag, and this response does not return request usage or percentages.
+</Callout>
+
+**Errors:** `404` + `4004` (`team_not_found`), `403` + `3002` (`not_team_member`).
+
+---
+
+## 9. Default model lookup
+
+```
+GET /api/v1/models/default/{model_type}
+```
+
+Looks up the global default model for a model type, used to pick a default when none is specified. Requires a signed-in user.
+
+**200 OK:** `data` is a model brief (`ModelBrief`), or `null` when no enabled default exists for that type:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "6f1c2a3b-4d5e-4f6a-8b9c-0d1e2f3a4b5c",
+    "name": "GPT-4o",
+    "provider": "openai",
+    "provider_display_name": "OpenAI",
+    "model_id": "gpt-4o",
+    "model_type": "chat",
+    "capabilities": {"chat": true, "vision": true}
+  },
+  "msg": "success"
+}
+```
+
+<Callout type="info">
+  The default model is a **platform-level** setting (`is_default=true` and `is_enabled=true`) and is unrelated to team authorization: after obtaining it, still confirm the team is authorized for it (see `available-models`).
+</Callout>
+
+---
+
+## Error handling
+
+| HTTP | Code | Trigger |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | Missing, invalid, or expired token |
+| `403` | `3001` | Non-superuser performing a write |
+| `403` | `3002` | Non-member reading |
+| `404` | `4004` | Team not found |
+| `404` | `6100` / `6101` | Model not found / the team is not authorized for that model |
+| `400` | `6102` | Duplicate authorization |
+| `422` | `1001` | Request validation failed (negative limits, empty `model_ids`, …) |
+
+## Related
+
+- [Models API](./models) — the platform model catalog and model types
+- [Teams API](./teams) — team members and roles
+- [Model providers](/reference/model-providers) — providers, base URLs, and capabilities
+- [Error Handling](./errors) — recover by HTTP status and business error code

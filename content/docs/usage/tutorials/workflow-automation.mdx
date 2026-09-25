@@ -12,7 +12,7 @@ icon: GraduationCap
 
 ## 最终结果
 
-已发布工作流拥有输入变量、分类分支、知识库检索、HTTP 请求、输出节点和运行追踪。
+已发布工作流拥有输入变量、分类分支、知识库检索、HTTP 工具调用、输出节点和运行追踪。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/tutorial-workflow-final.png" alt="工单分流工作流成品" />
@@ -40,12 +40,12 @@ icon: GraduationCap
 
 ## 步骤 3：检索和调用 HTTP API
 
-<Callout type="info">工具与 HTTP 节点应只接收必要参数，敏感凭据使用工具凭据注入。</Callout>
+<Callout type="info">工具节点只接收必要参数，敏感凭据使用工具凭据注入。</Callout>
 
 1. 添加**知识库检索**，查询使用 `{message}`，Top K 使用 `5`。
-2. 添加**HTTP 请求**，选择 `POST`，URL 使用测试端点。
-3. 在请求体中映射 `customer_id`、分类结果和知识库摘要。
-4. 设置超时 `30` 秒并测试失败分支。
+2. `http_request` 节点只存在于执行器层，编辑器节点面板不提供，请在**能力** > **工具** > **创建工具** > **HTTP API** 创建一个 HTTP 工具：方法选择 `POST`，URL 填测试端点，**超时 (秒)** 保持默认 `30`。
+3. 回到工作流添加**工具**节点，选择刚创建的 HTTP 工具。
+4. 在参数配置中把 `customer_id`、分类结果和知识库摘要映射到工具的入参，并测试失败分支。
 
 ## 步骤 4：定义输出并调试
 

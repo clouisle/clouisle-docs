@@ -9,6 +9,10 @@ icon: Wrench
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/v1/tools` | 列出所有工具 |
+| GET | `/api/v1/tools/filters` | 获取筛选选项（类型、分类、状态、团队、创建者） |
+| GET | `/api/v1/tools/legacy?team_id={team_id}` | 旧版团队工具列表（按种类分组） |
+| GET | `/api/v1/tools/builtin` | 列出全部内置工具 |
+| GET | `/api/v1/tools/file-parsers?team_id={team_id}` | 列出可用于文件上传的解析器 |
 | GET | `/api/v1/tools/id/{tool_id}` | 通过 ID 获取工具详情 |
 | GET | `/api/v1/tools/name/{tool_name}?team_id={team_id}` | 通过名称获取工具详情 |
 | POST | `/api/v1/tools/test` | 单次测试工具（无独立执行端点） |
@@ -16,6 +20,13 @@ icon: Wrench
 | POST | `/api/v1/tools?team_id={team_id}` | 创建自定义工具 |
 | PUT | `/api/v1/tools/{tool_id}` | 更新工具配置 |
 | DELETE | `/api/v1/tools/{tool_id}` | 删除自定义工具 |
+| POST | `/api/v1/tools/{tool_id}/toggle` | 切换工具的启用状态 |
+| POST | `/api/v1/tools/{tool_id}/duplicate` | 复制工具（副本默认禁用） |
+| GET | `/api/v1/tools/config?team_id={team_id}` | 列出工具配置（凭证） |
+| GET | `/api/v1/tools/config/{tool_name}?team_id={team_id}` | 获取单个工具配置 |
+| POST | `/api/v1/tools/config?team_id={team_id}` | 创建工具配置 |
+| PUT | `/api/v1/tools/config/{tool_name}?team_id={team_id}` | 更新工具配置 |
+| DELETE | `/api/v1/tools/config/{tool_name}?team_id={team_id}` | 删除工具配置 |
 | POST | `/api/v1/tools/{tool_id}/share` | 将工具共享给其他团队 |
 | GET | `/api/v1/tools/{tool_id}/shares` | 查询工具的共享列表 |
 | DELETE | `/api/v1/tools/{tool_id}/share/{team_id}` | 取消对指定团队的共享 |
@@ -114,6 +125,68 @@ curl -X GET "https://your-domain.com/api/v1/tools?category=search" \
   "msg": "success"
 }
 ```
+
+## 工具筛选选项
+
+```
+GET /api/v1/tools/filters
+```
+
+需要 `tool:read`。返回当前用户可访问工具的筛选项，用于构建列表页的筛选下拉。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "types": [
+      { "value": "builtin", "label": "builtin" },
+      { "value": "custom", "label": "custom" },
+      { "value": "mcp", "label": "mcp" }
+    ],
+    "categories": [{ "value": "search", "label": "search" }],
+    "statuses": [
+      { "value": "enabled", "label": "enabled" },
+      { "value": "disabled", "label": "disabled" }
+    ],
+    "teams": [{ "value": "team-123", "label": "Engineering" }],
+    "creators": [{ "value": "alice", "label": "alice" }]
+  },
+  "msg": "success"
+}
+```
+
+`categories` 为全部已定义的工具分类并集上可访问工具中出现的自定义分类；`teams` 为当前用户可访问的团队；`creators` 为可访问工具的去重创建者名。
+
+## 旧版团队工具列表
+
+```
+GET /api/v1/tools/legacy?team_id={team_id}
+```
+
+旧版兼容端点，返回按种类分组（`builtin` / `custom` / `mcp`）的团队工具。新集成应优先使用 `GET /api/v1/tools`（见上文"列出工具"）。
+
+| 参数 | 类型 | 必填 | 默认值 | 描述 |
+| --- | --- | --- | --- | --- |
+| `team_id` | string | 是 | - | 团队 UUID |
+| `include_shared` | boolean | 否 | `true` | 是否包含其他团队共享给该团队的工具 |
+
+`builtin` 始终返回完整内置工具清单；`custom` 与 `mcp` 返回该团队自己的工具（排除其他成员的私有工具），并在 `include_shared=true` 时合并共享进来的工具。
+
+## 内置工具
+
+```
+GET /api/v1/tools/builtin
+```
+
+返回全部内置工具（含沙箱工具 `artifact`、`bash`、`edit`、`read`、`write`）。内置工具没有数据库记录，因此这些对象的 `id` 为 `null`，`custom_type` 为 `null`。
+
+## 文件解析器
+
+```
+GET /api/v1/tools/file-parsers?team_id={team_id}
+```
+
+返回可用于文件上传解析的工具：内置解析器（如 `markitdown`）加上该团队启用的、`category=file` 的自定义工具。需要 `tool:read` 与团队成员身份。
 
 ## 获取工具详情
 
@@ -365,13 +438,17 @@ curl -X POST "https://your-domain.com/api/v1/tools/execute-code" \
 | `icon` | string | 否 | 图标（emoji 或 URL，最大 100 字符） |
 | `category` | string | 否 | 工具分类（默认 `other`） |
 | `type` | string | 否 | 工具类型：`builtin`、`custom`、`mcp`（默认 `custom`） |
-| `custom_type` | string | 否 | 自定义工具类型：`http`、`code`、`mcp`（仅 `type=custom` 时有效） |
+| `custom_type` | string | 否 | 自定义工具类型：`http`、`code`、`database`（仅 `type=custom` 时有效） |
+| `visibility` | string | 否 | 工具可见性：`private` 或 `team`（默认 `private`） |
 | `parameters` | array | 否 | 参数定义（name、type、description、required、enum、default） |
 | `http_config` | object | 否 | HTTP 配置（method、url、headers、query_params、body_template、content_type、form_fields、timeout、response_path） |
-| `code_config` | object | 否 | 代码配置（language、code、command、python_packages、js_packages、artifacts、limits） |
+| `code_config` | object | 否 | 代码配置（language、code、command、python_packages、js_packages、python_package_index_url、node_package_registry_url、artifacts、limits） |
+| `database_config` | object | 否 | 数据库配置（db_type、host、port、database、username、password、ssl、url、db、auth_source、timeout、max_limit） |
 | `mcp_config` | object | 否 | MCP Server 配置（transport、command、args、env、url、headers） |
 | `credentials` | object | 否 | 工具凭证 |
 | `is_enabled` | boolean | 否 | 启用状态（默认 true） |
+
+`name` 必须匹配 `^[a-zA-Z][a-zA-Z0-9_]*$`（字母开头，只含字母、数字、下划线），否则返回 `1001 tool_name_invalid_format`；同团队内重名返回 `5001 tool_name_exists`。
 
 ### 请求示例
 
@@ -510,6 +587,45 @@ curl -X DELETE "https://your-domain.com/api/v1/tools/tool-789" \
 }
 ```
 
+## 启用 / 停用工具
+
+```
+POST /api/v1/tools/{tool_id}/toggle
+```
+
+翻转工具的启用状态，无请求体。只有数据库存储的工具（`custom`、`mcp`）可切换；内置工具始终启用。调用者需为工具创建者或团队管理员，并具备 `tool:update`。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/tools/tool-789/toggle" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：** 返回更新后的 `ToolDetailOut`，`is_enabled` 为翻转后的值，`msg` 为 `"Tool updated successfully"`。
+
+## 复制工具
+
+```
+POST /api/v1/tools/{tool_id}/duplicate
+```
+
+在工具所属团队内复制一份。需要 `tool:create` 权限与工具所属团队的**管理员**角色。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/tools/tool-789/duplicate" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+副本规则：
+
+- 可见性固定为 `private`，`is_enabled` 固定为 `false`（复制后需手动启用）。
+- 名称追加 `_copy`；若已存在则依次尝试 `_copy_1`、`_copy_2`……直到唯一。
+- 显示名称追加 ` (Copy)`。
+- 复制 `code_config`、`database_config`、`mcp_config` 与 `credentials`。
+
+<Callout type="warn">
+  复制会连同 `credentials` 一起复制，因此副本会继承原工具的凭证。复制后请及时轮换或删除不需要的凭据。
+</Callout>
+
 ## 跨团队共享工具
 
 将自定义工具或 MCP 工具共享给同一工作区中的其他团队。共享需要「工具所属团队的管理员」权限；不能共享给工具自己所属的团队。
@@ -555,6 +671,51 @@ GET /api/v1/tools/shared-with-me?team_id={team_id}
 ```
 DELETE /api/v1/tools/{tool_id}/share/{team_id}
 ```
+
+## 工具配置（凭证）
+
+工具配置用于为内置工具或数据库工具存储凭证（API Key、Token 等），可以全局（仅超级管理员）或按团队存储。
+
+```
+GET    /api/v1/tools/config?team_id={team_id}
+GET    /api/v1/tools/config/{tool_name}?team_id={team_id}
+POST   /api/v1/tools/config?team_id={team_id}
+PUT    /api/v1/tools/config/{tool_name}?team_id={team_id}
+DELETE /api/v1/tools/config/{tool_name}?team_id={team_id}
+```
+
+| 参数 | 位置 | 必填 | 描述 |
+| --- | --- | --- | --- |
+| `team_id` | 查询参数 | 否 | 团队 UUID；省略时操作全局配置（仅超级管理员） |
+| `tool_name` | 路径参数 | 是（get/put/delete） | 工具名，例如 `web_search` |
+
+创建请求体：
+
+```json
+{
+  "tool_name": "web_search",
+  "credentials": {
+    "TAVILY_API_KEY": "tvly-..."
+  }
+}
+```
+
+更新请求体只需 `credentials`：
+
+```json
+{
+  "credentials": {
+    "TAVILY_API_KEY": "tvly-updated"
+  }
+}
+```
+
+权限与行为：
+
+- 带 `team_id` 时，创建/更新/删除需要团队**管理员**角色，读取只需团队成员身份。
+- 不带 `team_id` 时，读取与写入都仅限超级管理员。
+- 读取某个已知内置工具名但尚无记录的团队配置时，会自动创建一份空配置；未知工具名返回 `404`。
+- 删除成功时 `data` 为 `null`。
 
 ## MCP 与数据库工具诊断
 
@@ -632,8 +793,9 @@ POST /api/v1/tools/database/test-connection
 | `4004` | Team not found | 目标团队不存在 |
 | `3000` | Permission denied | 权限不足（共享需要团队管理员） |
 | `3003` | Team admin required | 需要工具所属团队的管理员角色 |
-| `5001` | Already exists | 重复共享或工具名已占用 |
-| `1001` | Validation failed | 请求数据无效 |
+| `5001` | Already exists | 团队内已存在同名工具 |
+| `5104` | Duplicate name | 工具已共享给该团队，或该工具配置已存在 |
+| `1001` | Validation failed | 请求数据无效（含工具名格式非法） |
 | `1002` | Bad request | 共享给工具自身所属团队、数据库连接测试失败等 |
 
 > **注意：** 当前无每端点限流实现，这些端点未配置限流中间件。代码 `6300`-`6306` 保留给 SSO 错误，工具 API 未使用。

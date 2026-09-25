@@ -37,7 +37,34 @@ curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
 
 ## Cron
 
-The UI allows configuring by interval, daily, weekly, monthly, or custom Cron ("minute hour day month weekday"). **Cron scheduling is not implemented yet** (no corresponding Celery scheduled task in the backend; the UI only saves the configuration), so published workflows are not executed automatically on a Cron schedule. Scheduled triggers are on the Roadmap.
+In **Workflow Settings** > **Trigger**, select **Scheduled Task**; the UI configures an interval, daily, weekly, monthly, or a custom Cron schedule. The frequency is converted into a standard cron expression (`minute hour day month weekday`, e.g. `0 9 * * 1-5` for weekdays at 9 AM), with interval presets of 5/10/15/30 minutes and 1/2/3/6/12 hours.
+
+<Callout type="warn" title="Saving the configuration does not make it run">
+  The backend **does** implement the scheduling logic: `workflow.check_scheduled` (`backend/app/services/workflow/tasks.py`) selects published workflows with `trigger_type=cron`, uses `croniter` to test whether the current minute matches the expression, and fires a run with empty inputs `{}` attributed to the workflow creator.
+
+  But no supplied deployment schedules it, for three separate reasons that all have to be solved:
+
+  1. **Not in the `include` list**: the `celery_app` `include` list in `backend/app/core/celery.py` does not contain `app.services.workflow.tasks`, so the task is not registered with the worker by default.
+  2. **Not in the Beat schedule**: the `beat_schedule` in the same file only holds usage resets, API-key/password expiry checks, sandbox session cleanup, and the lost-AgentRun sweep — there is no `workflow.check_scheduled`. The supplied Beat container (the `beat` service in Compose/Helm/K8s, command `python main.py beat`) runs only that table.
+  3. **Key mismatch**: the scheduling task reads `trigger_config["cron"]`, while the **Workflow Settings** form writes `trigger_config["cron_expression"]`. Even once scheduled, an expression saved through the UI is never matched.
+
+  No `task_routes` pattern matches the task either, so it lands on the `default` queue — confirm a worker consumes that queue, or set `options.queue` on the Beat entry.
+</Callout>
+
+### Enabling Cron in a custom deployment
+
+1. Add `app.services.workflow.tasks` to the `celery_app` `include` list, or import the module when the worker starts.
+2. Add a `beat_schedule` entry (once a minute is the intended cadence):
+
+```python title="app/core/celery.py"
+celery_app.conf.beat_schedule["workflow-check-scheduled"] = {
+    "task": "workflow.check_scheduled",
+    "schedule": crontab(minute="*"),
+}
+```
+
+3. Align the expression key: rename the UI-written `trigger_config.cron_expression` to `cron`, or write the expression under the `cron` key through the API.
+4. Confirm a worker that consumes the `default` queue is running, otherwise nothing picks up the dispatched task.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-trigger-settings.png" alt="Workflow trigger settings" />
@@ -46,4 +73,4 @@ The UI allows configuring by interval, daily, weekly, monthly, or custom Cron ("
 
 ## Status and Cancellation
 
-Run statuses include `pending`, `running`, `success`, `failed`, `cancelled`, and `timeout`. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted. See the [Workflow API](/api/workflow) for streaming run events.
+Run statuses include `pending`, `running`, `waiting`, `success`, `failed`, `cancelled`, and `timeout`; `waiting` means the run stopped at a Pause node awaiting approval or extra variables. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted. See the [Workflow API](/api/workflow) for streaming run events.

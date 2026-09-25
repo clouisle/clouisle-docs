@@ -1,34 +1,147 @@
 ---
 title: 检索与质量调优
-description: 在检索实验室比较向量、全文、混合与重排序效果
+description: 在检索实验室比较向量、全文、混合与重排序效果，并按阶段诊断失败
 icon: SearchCheck
 ---
 
-**命中测试**（检索实验室）用于在不直接修改生产配置的前提下比较检索结果。它展示召回、融合、重排序和最终排名的阶段信息。
+**命中测试**（检索实验室）在不改动生产配置的前提下运行真实检索，并展示召回、融合、重排序、最终排名各阶段的中间结果。用它验证分块改动、模式切换或权重调整是否真的改善了召回。入口：知识库详情 → **命中测试**（需要 `kb:test` 权限）。
 
-## 运行查询
+## 检索模式
 
-1. 打开知识库详情，选择**命中测试**。
-2. 输入 `1-1000` 字符查询。
-3. 选择检索方式：向量、全文或混合。
-4. 设置 Top K（`1-20`，默认 `5`）、稠密阈值（`0-1`，默认 `0`）、权重和 `rrf_k`（`1-1000`，默认 `60`）。
-5. 按需覆盖重排序和候选池大小（`1-100`）。
+| 模式 | 通道 | 请求级默认 | 知识库设置默认 | 适用 |
+| --- | --- | --- | --- | --- |
+| `vector` | 向量（语义） | — | `null` | 语义相近但用词不同的问法；需要嵌入模型 |
+| `fulltext` | 全文（关键词，BM25 类） | — | `null` | 专有名词、编号、错误码等精确串 |
+| `hybrid` | 两路并发 + RRF 融合 | `hybrid` | `null` | 通用推荐 |
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/retrieval-lab-results.png" alt="检索实验室结果" />
-  <figcaption>检索实验室结果</figcaption>
-</figure>
+注意默认值有两层：**检索请求**不传 `search_mode` 时按 `hybrid` 执行；而**知识库设置**里的 `search_mode` 默认是空的（`null`），只有你显式设置后才会成为该知识库 Agent/工作流检索的默认模式。字段定义见[知识库设置参考](/reference/knowledge-settings)。
+
+<Callout type="warn" title="混合检索可能被回退为纯向量">
+  `hybrid` 受灰度开关控制：如果站点关闭了混合模式（`retrieval_hybrid_mode = disabled`、`RETRIEVAL_HYBRID_KILL_SWITCH`，或该团队未落在灰度比例内），检索会**静默降级为纯向量检索**，响应不会带有单独的降级标记。若发现「选了混合但全文关键词没被召回」，先向管理员确认混合检索对该团队是否启用。
+</Callout>
+
+## 参数参考
+
+命中测试面板可覆盖以下参数（全部可选）：
+
+| 参数 | 界面默认 | 范围 | 说明 |
+| --- | --- | --- | --- |
+| 查询 `query` | — | `1-1000` 字符 | 原样匹配，不支持布尔运算符、通配符或字段语法 |
+| 检索方式 `search_mode` | `hybrid` | `vector` / `fulltext` / `hybrid` | 见上表 |
+| 最大结果数 `top_k` | `5` | `1-20` | 返回条数（知识库设置里允许 `1-100`） |
+| 稠密分数阈值 `score_threshold` | `0` | `0-1` | 过滤低于该相似度的向量召回结果 |
+| 稠密权重 `dense_weight` | `1.0` | `>=0` | 混合时向量通道的 RRF 权重 |
+| 词法权重 `lexical_weight` | `1.0` | `>=0` | 混合时全文通道的 RRF 权重 |
+| `rrf_k` | `60` | `1-1000` | RRF 排名常数，越大越平滑 |
+| 重排序 `rerank_enabled` | `true` | 布尔 | 覆盖知识库设置 |
+| 重排序候选池 `rerank_candidate_k` | `10` | `1-100` | 送入重排序的候选数量，界面会取 `max(top_k, 候选池)` |
+| 重排序分数阈值 `rerank_score_threshold` | 空（不启用） | `0-1` | 过滤低于该重排分数的结果 |
+| 文档过滤器 `filter_doc_ids` | 空 | 文档 ID 列表 | 目前唯一的检索过滤器 |
+
+<Callout type="info" title="重排序需要绑定模型">
+  知识库未绑定 `rerank` 模型时，界面不会向服务端发送重排序参数，此时 `rerank_enabled` 无效果。绑定模型后，KB 设置中的 `rerank_enabled`（默认 `true`）与 `rerank_candidate_k`（默认 `10`）会自动生效，请求参数只在你显式填写时覆盖它们。
+</Callout>
+
+## 混合检索如何融合
+
+两路召回后按加权倒数排名融合（RRF）合并，公式为：
+
+```text
+score = Σ 权重 × 1 / (rrf_k + 排名)
+```
+
+- 权重只影响对应通道：`dense_weight` 作用于向量通道，`lexical_weight` 作用于全文通道，设为 `0` 等于关闭该通道。
+- 混合模式下，两个权重**不能同时为 `0`**，否则请求被拒绝（界面也会禁用搜索按钮）。
+- `rrf_k` 越小，头部排名的优势越明显；越大，排名差异被抹平。
 
 ## A/B 对比
 
-A/B 对比最多提交 `10` 个配置，每个配置 ID 必须唯一。结果会保留每侧的成功或失败状态；一侧失败不会隐藏另一侧成功结果。
+打开 **A/B 对比** 可以并排运行同一查询的两套配置：
 
-## 读取诊断
+1. 分别配置 A、B 两侧（各自独立的模式、`top_k`、阈值、权重、重排序参数）。
+2. 提交后返回**每个配置独立的结果**：一侧失败不会隐藏另一侧的成功结果，失败侧会单独提示原因。
+3. 结果面板显示两侧的名次、重合结果数（`重合结果：N/总数`）与各阶段分数。
 
-诊断可能指出知识库未启用、缺少嵌入模型、超时或处理失败。阶段耗时分为 `recall`、`rerank`、`context` 与 `total`。混合分数使用加权倒数排名融合：`Σ 权重 × 1/(rrf_k + 排名)`。
+批量检索接口 `POST /api/v1/knowledge-bases/{kb_id}/search/batch` 一次最多接受 `10` 个配置，且每个配置的 `id` 必须唯一。
 
-## 应用预设
+<figure>
+  <img src="https://rustfs-endpoint.yhnotes.com/content/retrieval-lab-results.png" alt="检索实验室结果" />
+  <figcaption>检索实验室结果：A/B 排名、重合结果与阶段分数</figcaption>
+</figure>
 
-保存本地预设后选择**应用到生产**。应用前确认嵌入模型、索引维度和权重；至少一个混合检索权重必须大于 `0`。
+## 读取结果与诊断
 
-常见故障和恢复步骤见[知识库设置参考](/reference/knowledge-settings)。
+每条结果会标注各阶段取值，可用 `final_score_stage` 判断最终排序由哪个阶段决定：
+
+| 字段 | 含义 |
+| --- | --- |
+| `dense_score` / `dense_rank` | 向量通道的相似度与名次（`null` 表示该分块未被向量召回） |
+| `lexical_score` / `lexical_rank` | 全文通道的 BM25 类分数与名次（无固定上界） |
+| `fusion_score` / `fusion_rank` | RRF 融合分数与名次 |
+| `rerank_score` / `rerank_rank` / `rerank_reason` | 重排序模型的逐对打分（`0-1`）与说明 |
+| `final_score_stage` | 最终排序依据：`dense` / `lexical` / `fusion` / `rerank` |
+| `degradation_reasons` | 通道降级原因（例如全文召回失败但仍返回向量结果） |
+
+**阶段耗时** `timings` 拆分为 `recall`、`rerank`、`context`、`total`，可直接定位是召回慢还是重排序慢。
+
+**诊断** `diagnostics` 可能返回以下代码：
+
+| 代码 | 含义 | 处理方向 |
+| --- | --- | --- |
+| `inactive` | 知识库不是 `active` 状态 | 启用知识库 |
+| `missing_embedding_model` | 缺少嵌入模型（纯向量模式） | 为知识库绑定已授权的 `embedding` 模型 |
+| `timeout` | 召回阶段超时 | 降低 `top_k`、缩小范围或检查向量库负载 |
+| `failed` | 召回/融合失败 | 依据 `stage` 与错误分类定位（见下） |
+
+请求失败时响应带 `retrieval_error_category` 与 `stage`，用于区分处理方向：
+
+| 分类 | 典型原因 | 处理方向 |
+| --- | --- | --- |
+| `configuration_mismatch` | 嵌入维度与索引不一致 | 核对嵌入模型与维度；换过模型需重建索引 |
+| `provider_authentication` | 模型凭据无效 | 检查服务商密钥与访问权限 |
+| `quota_or_rate_limit` | 配额或限流 | 检查配额、稍后重试 |
+| `model_configuration` | 模型不存在/未启用/不兼容 | 选择或启用兼容模型 |
+| `lexical_unavailable` | 全文检索不可用 | 检查 PostgreSQL 与 `pg_search`，确认文档已完成处理 |
+| `provider_unavailable` | 服务商不可用 | 重试；持续失败则检查服务商状态 |
+| `unknown` | 其他 | 重试或查看服务端日志 |
+
+## 应用到生产
+
+命中测试面板的配置可以保存为**本地预设**（保存在浏览器本地，不跨设备同步），然后选择**应用到生产**把 A 侧配置写回知识库设置：
+
+```json
+{
+  "search_mode": "hybrid",
+  "top_k": 5,
+  "score_threshold": 0.0,
+  "dense_weight": 1.0,
+  "lexical_weight": 1.0,
+  "rrf_k": 60,
+  "rerank_enabled": true,
+  "rerank_candidate_k": 10,
+  "rerank_score_threshold": null
+}
+```
+
+应用前请确认：
+
+- 嵌入模型与索引维度未变化（否则先重建索引）。
+- 混合模式下至少一个权重大于 `0`。
+- 该知识库确实被 Agent/工作流引用——写回的是**知识库级**默认，Agent 关联上的 `retrieval_top_k`、`score_threshold`、`search_mode` 仍会覆盖它。
+
+<Callout type="info" title="未实现 / Roadmap">
+  相邻分块扩展（adjacent-chunk expansion）在检索服务中存在但**未通过公开检索接口暴露**：请求体不接受该参数，传入会被忽略。查询分析、检索历史、结果导出同样不可用。
+</Callout>
+
+## 故障排查
+
+| 症状 | 优先检查 |
+| --- | --- |
+| 混合检索只召回关键词结果 | 混合灰度是否对该团队启用；`degradation_reasons` 是否指出向量通道失败 |
+| 命中测试返回 0 条 | 文档是否为 `completed`；`score_threshold` 是否过高；换 `fulltext` 验证关键词是否存在 |
+| 报「维度不匹配」 | 是否更换过嵌入模型；`embedding_dimension` 与向量集合是否一致 |
+| 报全文不可用 | PostgreSQL 与 `pg_search`；文档是否完成全文索引 |
+| 重排序无效果 | 知识库是否绑定 `rerank` 模型；`rerank_enabled` 是否为 `true`；候选池是否小于 `top_k` |
+| 结果与生产不一致 | 命中测试用请求参数执行，生产检索还会叠加 Agent 关联的 `retrieval_top_k`/`search_mode` 与灰度开关 |
+
+常见故障和恢复步骤另见[知识库设置参考](/reference/knowledge-settings)；调参取舍见[知识库优化](/usage/best-practices/kb-optimization)。

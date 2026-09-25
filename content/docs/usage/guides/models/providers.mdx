@@ -1,33 +1,140 @@
 ---
-title: 配置模型供应商
-description: 注册对话、嵌入、重排序和媒体模型
+title: 供应商、模型类型与模型发现
+description: 查阅 23 个供应商标识、默认端点、各模型类型支持的供应商与远程模型发现规则
 icon: Network
 ---
 
-模型供应商配置位于管理后台的**模型**。管理员先创建全局模型，再在团队管理中授权。Clouisle 内置供应商标识包括 `openai`、`openai_responses`、`anthropic`、`google`、`azure_openai`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`runway`、`pika`、`luma`、`kling`、`stability`、`midjourney` 和 `custom`。
+Clouisle 通过统一的模型供应商抽象层接入多模态模型。**供应商不是可独立配置的实体**：没有带默认 API Key、超时或重试策略的全局供应商注册表，每个模型自带 `provider`、`base_url`、`api_key` 和可选的 `provider_display_name`。因此「配置供应商」实际等于「登记一个带供应商标识的模型」，注册流程见[注册模型与团队授权](./manage-models.mdx)。
 
-## 创建模型
+## 供应商标识与默认端点
 
-1. 选择**添加模型**。
-2. 选择供应商和模型类型。
-3. 填写显示名称（`1-100` 字符）与 `model_id`（`1-100` 字符）。
-4. 按供应商填写 `base_url` 和 API Key；本地供应商可以不填 API Key。
-5. 设置上下文长度、最大输出 Token、默认参数和能力标记。
-6. 选择**测试连接**，确认成功后保存。
+`ModelProvider` 共定义 **23 个**供应商标识。未填写自定义 `base_url` 时，运行时按下表解析请求地址。
 
-<figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/admin-model-create-dialog.png" alt="创建模型对话框" />
-  <figcaption>创建模型对话框</figcaption>
-</figure>
+| 供应商标识 (`provider`) | 显示名称 | 默认 API Base URL | 支持远程发现 |
+| --- | --- | --- | --- |
+| `openai` | OpenAI | `https://api.openai.com/v1` | 是 |
+| `openai_responses` | OpenAI Responses | `https://api.openai.com/v1` | 是 |
+| `anthropic` | Anthropic | `https://api.anthropic.com` | 是 |
+| `google` | Google AI | `https://generativelanguage.googleapis.com/v1beta` | 是 |
+| `azure_openai` | Azure OpenAI | 无（必须由管理员配置 Endpoint） | 否 |
+| `deepseek` | DeepSeek | `https://api.deepseek.com` | 是 |
+| `moonshot` | Moonshot | `https://api.moonshot.cn/v1` | 是 |
+| `zhipu` | Zhipu AI | `https://open.bigmodel.cn/api/paas/v4` | 是 |
+| `qwen` | Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 是 |
+| `baichuan` | Baichuan | `https://api.baichuan-ai.com/v1` | 是 |
+| `minimax` | MiniMax | `https://api.minimax.chat/v1` | 是 |
+| `volcengine` | Volcengine | `https://ark.cn-beijing.volces.com/api/v3` | 是 |
+| `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` | 是 |
+| `xai` | xAI (Grok) | `https://api.x.ai/v1` | 是 |
+| `ollama` | Ollama | `http://localhost:11434` | 是 |
+| `runway` | Runway | `https://api.dev.runwayml.com` | 否 |
+| `pika` | Pika | `https://api.pika.art/v1` | 否 |
+| `luma` | Luma AI | `https://api.lumalabs.ai/dream-machine/v1` | 否 |
+| `kling` | Kling | `https://api.klingai.com` | 否 |
+| `stability` | Stability AI | `https://api.stability.ai` | 否 |
+| `midjourney` | Midjourney | 无（需要自建代理） | 否 |
+| `typesafe` | TypeSafe AI | `https://api.typesafe.ai/v1` | 是 |
+| `custom` | OpenAI Compatible | 无（由接入方提供） | 是 |
 
-## 模型类型与能力
+端点解析优先级为：模型自填的 `base_url` → 模型类型专属默认端点 → 供应商默认端点。因此清空 `base_url` 不会报错，而是回落到上表；这也是「同一供应商下的 TTS 模型」与「对话模型」走不同地址的原因：
 
-模型类型包括：对话、嵌入、重排序、TTS、STT、音频生成、文生图和文生视频。能力标记由 `capabilities` JSON 保存，例如视觉、函数调用和流式输出。Agent 启用工具前，应确认所选对话模型支持函数调用。
+<Callout type="info">
+除上表外，存在三个**模型类型专属**默认端点，仅在模型未自填 `base_url` 时优先命中：
+- `volcengine` + `tts` → `https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse`
+- `volcengine` + `audio_generation` → `https://openspeech.bytedance.com/api/v3/tts/create`
+- `typesafe` + `decision` → `https://api.typesafe.ai/v1`
+</Callout>
 
-## 端点安全
+### `openai` 与 `openai_responses` 的区别
 
-站点设置的**模型端点白名单**按 Origin 精确匹配协议、主机名和端口，忽略路径。空列表会阻止所有模型端点。不要把供应商密钥写入文档、前端代码或 Git。
+两者默认 Base URL 相同（`https://api.openai.com/v1`），但请求协议不同：
 
-## 修改模型
+- `openai` 走标准 **Chat Completions**，是对话、嵌入与 TTS/STT 的常规选择。
+- `openai_responses` 走 OpenAI 的 **Responses API**（SDK 的 `client.responses.*`），目前用于**图片生成**链路（Responses hosted image tool，支持 `size`、`quality`、`background`、`output_format` 等 Responses 专属参数）。
 
-更新 API Key 时使用编辑表单并重新测试。API 返回只说明 `has_api_key`，不会回显密钥。更新 `model_id` 或类型应视为新模型配置，并重新检查已授权团队和知识库索引兼容性。
+<Callout type="warn">
+`openai_responses` 的 Responses API 行为只作用于图片生成。把 `chat` 类型模型配成 `openai_responses` 时，对话运行时按 OpenAI 兼容（Chat Completions）处理，不会获得 Responses API 语义；若上游只需要标准对话补全，直接选 `openai`。批量发现两者路径相同（`/v1/models`）。
+</Callout>
+
+## 模型类型
+
+`ModelType` 共 9 种，与供应商相互独立：
+
+| 模型类型 (`model_type`) | 说明 | 运行时支持的供应商 |
+| --- | --- | --- |
+| `chat` | 对话与文本补全（流式、函数调用） | `openai`、`anthropic`、`google`、`xai`、`azure_openai`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`ollama`、`custom`（其余标识按 OpenAI 兼容处理） |
+| `embedding` | 文本向量嵌入（RAG、记忆检索） | 15 个：`openai`、`openai_responses`、`azure_openai`、`google`、`deepseek`、`moonshot`、`zhipu`、`qwen`、`baichuan`、`minimax`、`volcengine`、`siliconflow`、`xai`、`ollama`、`custom` |
+| `rerank` | 检索结果重排序 | 任意（默认经对话模型的 LLM 重排序；`siliconflow` 或配置 `native_rerank: true` / `rerank_api: "native"` 时改调原生 `/rerank` 端点） |
+| `tts` | 文本转语音 | `openai`、`azure_openai`、`volcengine`、`minimax` |
+| `stt` | 语音转文本 | `openai`、`azure_openai` |
+| `audio_generation` | 提示词生成音频 | 仅 `volcengine` |
+| `text_to_image` | 文生图 | `openai`、`openai_responses`、`azure_openai`、`custom`、`siliconflow`、`google`、`runway`、`luma`、`stability`、`volcengine`、`minimax` |
+| `text_to_video` | 文生视频 | `runway`、`luma`、`kling`、`pika`、`siliconflow`、`volcengine`、`minimax`、`qwen` |
+| `decision` | 类型化决策（选择题/评分/是-否，非生成式） | **仅** `typesafe` |
+
+创建/更新模型时只会校验两类组合：`embedding` 必须属于上表 15 个供应商，`decision` 必须为 `typesafe`；其余类型选错供应商在保存时**不会**被拒绝：
+
+<Callout type="error">
+例如创建 `provider: anthropic` + `model_type: embedding`，或 `model_type: text_to_video` + `provider: stability`，接口会正常保存，但首次实际调用时抛出 `Unsupported provider for ...` / `UnsupportedOperationError`。知识库、媒体节点等资源因此可能在保存后才暴露配置错误，务必在注册后立即用**测试连接**验证。
+</Callout>
+
+<Callout type="info">
+`decision` 模型是 TypeSafe 专有协议：不是聊天补全，而是接收状态 + 类型化问题，返回带概率分布的答案，供工作流的**决策**节点使用。运行请求发往 `POST {API Base}/v1/systemone`。
+</Callout>
+
+## 远程模型发现
+
+**发现模型**在保存前列出供应商真正暴露的模型，避免手写错误的 `model_id`。调用 `POST /api/v1/admin/models/discover`，需要 `admin:model:create` 权限；凭据只在本次请求中使用，不会入库。
+
+发现支持 **16 个**供应商（即上表「支持远程发现」列）。每个供应商使用固定的列表路径与鉴权方式：
+
+| 供应商 | 发现路径 | 鉴权 |
+| --- | --- | --- |
+| `openai` / `openai_responses` / `moonshot` / `baichuan` / `minimax` / `siliconflow` / `xai` / `custom` | `/v1/models` | `Authorization: Bearer <key>` |
+| `anthropic` | `/v1/models` | `x-api-key: <key>` + `anthropic-version: 2023-06-01` |
+| `google` | `/v1beta/models` | 查询参数 `?key=<key>` |
+| `deepseek` | `/models` | `Authorization: Bearer <key>` |
+| `zhipu` | `/api/paas/v4/models` | `Authorization: Bearer <key>` |
+| `qwen` | `/compatible-mode/v1/models` | `Authorization: Bearer <key>` |
+| `volcengine` | `/api/v3/models` | `Authorization: Bearer <key>` |
+| `ollama` | `/api/tags` | 无鉴权头，也不需要 API Key |
+| `typesafe` | `/v1/models` | `Authorization: Bearer <key>` |
+
+`azure_openai`、`runway`、`pika`、`luma`、`kling`、`stability`、`midjourney` **不支持**发现，调用时返回结果 `success: false`，消息为「该供应商不支持模型发现」。除 `ollama` 外所有供应商都必须提供 API Key。
+
+### 发现请求的硬性前提
+
+- **Base URL 必须通过端点白名单**（`model_endpoint_not_allowlisted`），否则在发起请求前就被拒绝。
+- Base URL 必须是 `http(s)://host[:port]` 形式，不能带查询串、片段、用户名/密码、反斜杠或 `//` 开头路径；末尾 `/` 会被去掉。
+- 使用 15 秒超时、**禁止重定向**（`follow_redirects=false`），避免凭据被跨域转发。
+- 响应体上限 **2 MiB**，超过即判定失败；最多返回 **200** 个模型，`id`/`name` 超长或重复的条目会被跳过。
+- 识别 `data`（OpenAI 兼容）与 `models`（Google/Ollama）两种列表结构，`google` 会自动去掉 `models/` 前缀。
+- 结果包含 `id`、`name`、`context_length`、`max_output_tokens` 和 `capabilities`（`vision`、`function_call`、`streaming`、`json_mode`），可直接回填到创建表单。
+
+### TypeSafe 的路径重写
+
+`typesafe` 的发现路径会根据已配置的 base URL 路径**重新拼接**，以便走网关部署：
+
+- base URL 路径以 `/v1` 结尾：直接复用该路径。`https://gw.example.com/openai/v1` → 请求 `/openai/v1/models`。
+- base URL 路径非空但不以 `/v1` 结尾：在该路径后再拼 `/v1/models`。`https://gw.example.com/api` → 请求 `/api/v1/models`。
+- base URL 无路径：使用默认的 `/v1/models`。
+
+## 端点白名单
+
+站点设置 **模型端点白名单**（`model_endpoint_allowlist`）是模型出网的总闸门，发现、测试连接与运行时请求都受它约束。匹配规则：
+
+- 按 **Origin** 精确匹配 `scheme + host + port`，**忽略路径**；`https://gateway.example.com/anything` 与 `https://gateway.example.com` 视为同一 Origin。
+- 非默认端口参与匹配：`http://ollama.internal:11434` 与 `http://ollama.internal` 不同。
+- 系统预置 20 个官方 Origin（含 `https://api.typesafe.ai`、`https://openspeech.bytedance.com`、`http://localhost:11434`）；`midjourney` 因需要自建代理没有默认 Origin。
+- 白名单上限 200 条；**清空列表会阻止所有模型端点**。
+- 移除某个 Origin 会立即阻断后续的发现、测试与运行时请求，无需重启服务。
+
+<Callout type="warn">
+远程端点优先使用 HTTPS。HTTP 仅用于可信私有网络，否则 API Key 与模型流量会以明文传输。
+</Callout>
+
+## 相关页面
+
+- [注册模型与团队授权](./manage-models.mdx) — 登记模型、测试连接、授权团队并设置配额
+- [模型](/usage/concepts/model) — 两级模型结构与配额语义
+- [模型供应商参考](/reference/model-providers) — 字段定义与 Embedding 适配器细节

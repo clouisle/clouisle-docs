@@ -12,11 +12,12 @@ Embedding models are orchestrated centrally under `backend/app/llm/adapters/embe
 
 | Adapter Class | Matched Providers | Mechanism | Token Metering Strategy |
 | --- | --- | --- | --- |
-| **`OpenAICompatibleEmbeddingAdapter`** | `openai`, `openai_responses`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `custom` | Issues direct HTTP POST requests to the `/embeddings` endpoint of the resolved Base URL (standard OpenAI protocol) | Prefers `usage.total_tokens` returned by the upstream API; falls back to local `tiktoken` tokenization if omitted |
-| **`FallbackEmbeddingAdapter`** | `google`, `azure_openai`, and other providers | Invokes specialized LangChain wrappers (e.g. `GoogleGenerativeAIEmbeddings`, `AzureOpenAIEmbeddings`) via `aembed_documents` | Returns an empty `Usage` object; outer `team_embedding` counts tokens locally using `tiktoken` |
+| **`OpenAICompatibleEmbeddingAdapter`** | `openai`, `openai_responses`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `custom` | Issues direct HTTP POST requests to the `/embeddings` endpoint of the resolved Base URL (standard OpenAI protocol) | Reads the upstream `usage` (`prompt_tokens`, falling back to `total_tokens`); falls back to local `tiktoken` tokenization if omitted |
+| **`FallbackEmbeddingAdapter`** | `google`, `azure_openai` (all other providers are unsupported for embedding and are rejected at creation time) | Invokes specialized LangChain wrappers (e.g. `GoogleGenerativeAIEmbeddings`, `AzureOpenAIEmbeddings`) via `aembed_documents` | Returns an empty `Usage` object; outer `team_embedding` counts tokens locally using `tiktoken` |
 
-<Callout type="warn" title="Anthropic Limitation">
-Anthropic does not offer a standalone text embedding API. In Clouisle, attempting to use an Anthropic model with `model_type: embedding` will raise `ValueError: Unsupported provider for embedding: anthropic` at runtime.
+<Callout type="warn" title="Unsupported providers">
+`model_type: embedding` is only valid within `EMBEDDING_SUPPORTED_PROVIDERS` (the 15 providers covered by the two paths above); creating an embedding model for `anthropic`, `typesafe`, `runway`, `pika`, `luma`, `kling`, `stability`, `midjourney`, etc. is rejected up front (`model_type_not_supported`).
+Anthropic does not offer a standalone text embedding API; even if validation is bypassed, the runtime raises `ValueError: Unsupported provider for embedding: anthropic`.
 </Callout>
 
 ### Fault Tolerance & Fallback
@@ -52,7 +53,7 @@ Different embedding models yield vectors with different dimensionalities (e.g., 
 - **Dimension Lock**: `set_kb_embedding_dimension(kb_id, dimension)` commits the measured dimension permanently into the `knowledge_bases` table.
 
 ### 2. Immutability Constraints
-- **Locked Model**: Once a Knowledge Base is created, its `embedding_model_id` is **permanently immutable**. Updates via `PATCH /knowledge-bases/{id}` reject or ignore any attempts to alter `embedding_model_id`.
+- **Locked Model**: Once a Knowledge Base is created, its `embedding_model_id` is **permanently immutable**. An update via `PATCH /knowledge-bases/{id}` that changes `embedding_model_id` is **rejected** with a validation error (`embedding_model_locked_after_kb_creation`).
 - **Dimension Enforcement**: Any subsequent chunks undergo validation via `_validate_embeddings`. If the returned dimension disagrees with the locked `embedding_dimension`, the system aborts indexing with a `DimensionMismatchError`.
 
 ---

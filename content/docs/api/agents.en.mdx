@@ -17,13 +17,24 @@ The Agent API provides agent lifecycle management, chat interaction, and statist
 | DELETE | `/api/v1/agents/{agent_id}` | Permanently delete an agent |
 | POST | `/api/v1/agents/{agent_id}/publish` | Publish an agent |
 | POST | `/api/v1/agents/{agent_id}/unpublish` | Unpublish an agent |
-| GET | `/api/v1/agents/{agent_id}/public` | Get public agent basic info, authentication optional |
+| POST | `/api/v1/agents/{agent_id}/duplicate` | Duplicate an agent (the copy is always `private` + `draft`) |
+| GET | `/api/v1/agents/{agent_id}/media/video-status` | Query an async video generation task |
+| GET | `/api/v1/agents/{agent_id}/public` | Get the public agent info used by the chat page |
 | POST | `/api/v1/agents/{agent_id}/chat` | Non-streaming chat |
 | POST | `/api/v1/agents/{agent_id}/chat/stream` | SSE streaming chat |
+| POST | `/api/v1/agents/{agent_id}/chat/runs` | Queue a durable run (`202 Accepted`) |
+| GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream` | Subscribe to a run's event stream (`after_sequence` resume) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | Cooperatively stop a run |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/regenerate` | Regenerate |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/edit/stream` | Edit a user message and create a branch |
 | GET | `/api/v1/agents/{agent_id}/messages/{message_id}/versions` | Query message versions |
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | Switch version |
+| GET | `/api/v1/agents/{agent_id}/conversations` | List the caller's conversations for one agent |
+| GET | `/api/v1/agents/conversations/my` | List all of the caller's conversations |
+| GET | `/api/v1/agents/conversations/{conversation_id}` | Get a conversation and its messages |
+| PATCH | `/api/v1/agents/conversations/{conversation_id}` | Rename a conversation |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}` | Delete a conversation |
+| DELETE | `/api/v1/agents/conversations/{conversation_id}/messages/{message_id}` | Delete a single message |
 | GET | `/api/v1/agents/{agent_id}/stats` | Query agent statistics overview |
 | GET | `/api/v1/agents/{agent_id}/stats/trends` | Query trend data |
 | GET | `/api/v1/agents/{agent_id}/stats/tool-usage` | Query tool usage statistics |
@@ -42,6 +53,8 @@ All endpoints require an authenticated JWT user session. Chat endpoints addition
 | `agent:delete` | Delete agents |
 | `agent:publish` | Publish or unpublish agents |
 | `agent:chat` | Chat with agents |
+| `conversation:read` | View conversations and their messages |
+| `conversation:delete` | Delete conversations and conversation messages |
 
 ---
 
@@ -311,7 +324,7 @@ Create a new AI agent. The agent is in `draft` status by default and must be [pu
 | `variables` | array | No | Chat input variable definitions |
 | `opening_message` | string | No | Opening message shown in chat |
 | `suggested_questions` | array | No | Suggested questions |
-| `visibility` | string | No | `private` or `team` (default `team`) |
+| `visibility` | string | No | `private` or `team` (default `private`; the legacy value `public` is treated as `team`) |
 
 ### Request Example
 
@@ -580,6 +593,165 @@ curl -X POST "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-4466
 
 ---
 
+## Duplicate Agent
+
+```
+POST /api/v1/agents/{agent_id}/duplicate
+```
+
+Duplicate an existing agent within the same team, copying:
+
+- **Prompts**: system prompt, opening message, suggested questions, `powered_by_text`
+- **Configuration**: tools, attachments, memory, context compression, `rag_mode`, variables, iteration limit
+- **Media generation**: image and video generation settings (both configs have `allow_model_override` stripped for security)
+- **Knowledge bases**: every knowledge base association and its retrieval settings
+
+Requires access to the agent plus the team's `agent:create` permission.
+
+<Callout type="info">
+  The copy is always created with `visibility: private` and `status: draft`, and its name gets a " (Copy)" suffix. Publish it again before it can be used for chat. **Tool credentials (`tools_credentials`) are not copied** — tools in the copy need their keys reconfigured before they can call external services.
+</Callout>
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agent_id` | string | Yes | Agent UUID to duplicate |
+
+### Success Response (200 OK)
+
+Returns the newly created `AgentOut` (`status` is `draft`):
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "new-agent-uuid",
+    "name": "Customer Support Agent (Copy)",
+    "status": "draft",
+    "visibility": "private"
+  },
+  "msg": "Agent duplicated successfully"
+}
+```
+
+---
+
+## Get Video Generation Status
+
+```
+GET /api/v1/agents/{agent_id}/media/video-status?task_id={task_id}
+```
+
+Poll an asynchronous video generation task started by an agent; requires `agent:read` and access to the agent. The agent must have video generation enabled (`enable_video_generation`), otherwise the call returns `400` (code `1002`, `video_generation_not_enabled_for_agent`).
+
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `task_id` | string | Yes | Video generation task ID |
+
+The response uses the same `media.video` shape as the chat `media_result` event, so clients can decide whether to keep polling:
+
+```json
+{
+  "code": 0,
+  "data": {
+    "kind": "media.video",
+    "success": true,
+    "prompt": "",
+    "model": "veo-3",
+    "model_ref": "video-model-uuid",
+    "task_id": "video-task-uuid",
+    "status": "succeeded",
+    "progress": 100,
+    "video": {
+      "url": "/api/v1/upload/files/generated-videos/2026/09/9a8b7c6d5e4f_55667788.mp4",
+      "asset_ref": "a1b2",
+      "format": "mp4"
+    },
+    "estimated_time": null,
+    "requires_polling": false,
+    "poll_interval_ms": 3000,
+    "poll_timeout_s": 120,
+    "error": null
+  },
+  "msg": "success"
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `status` | Normalized task status; `success` is `true` only when the task has not failed and `error` is `null`. |
+| `progress` | Task progress percentage (`null` when the provider does not report one). |
+| `video` | The finished video object (`url`, `asset_ref`, `format`), or `null` while the task is still running. |
+| `requires_polling` | `true` while the task is queued/running — keep polling every `poll_interval_ms`. |
+| `poll_interval_ms` / `poll_timeout_s` | Taken from the agent's `video_generation_config`; default `3000` / `120`. |
+
+Fetch the protected video URL with the active JWT or API key.
+
+---
+
+## Get Public Agent Info
+
+```
+GET /api/v1/agents/{agent_id}/public
+```
+
+Returns the public chat-page view: name, description, icon, opening message, suggested questions, variable definitions, and the attachment switch. The route is implemented in `chat.py` but mounted under `/api/v1/agents`, and it does **not** require `agent:read`.
+
+### Path Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| `agent_id` | string | Yes | Agent UUID |
+
+### Authentication behaviour
+
+The route declares an optional-auth dependency, but the lookup still requires an authenticated identity (an unauthenticated caller gets `401 not_authenticated`). Once authenticated, visibility is:
+
+- `private`: the creator, a superuser, or — for creator-less legacy rows — any member of the agent's team.
+- `team` (including the legacy value `public`): any member of the agent's team; superusers bypass the check.
+
+### Success Response (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Customer Support Agent",
+    "description": "Helps customers with common questions",
+    "icon": "🤖",
+    "avatar_url": "https://example.com/avatar.png",
+    "opening_message": "Hi! How can I help you today?",
+    "suggested_questions": ["What are your business hours?"],
+    "powered_by_text": null,
+    "variables": [],
+    "enable_attachments": false,
+    "attachment_config": null,
+    "hide_tool_calls": false,
+    "hide_message_actions": false,
+    "hide_reasoning": false,
+    "created_by": {
+      "id": "user-001",
+      "username": "alice",
+      "avatar_url": null
+    }
+  },
+  "msg": "success"
+}
+```
+
+Unlike `GET /api/v1/agents/{agent_id}`, this response never exposes the model, system prompt, tool configuration, or statistics fields.
+
+| Error | Code | Description |
+| --- | --- | --- |
+| `403 Forbidden` | `6201` | The caller cannot see this agent |
+| `404 Not Found` | `6200` | Agent does not exist |
+
+---
+
 ## Chat (Non-Streaming)
 
 ```
@@ -777,6 +949,122 @@ Switch to a specified version as the currently active message.
 
 ---
 
+## Agent Conversations
+
+These conversation endpoints are registered on the agents router, so the conversation segment resolves to `/api/v1/agents/conversations/...`. **Every** route is scoped to the authenticated user (`Conversation.user`): another user's conversation is treated as not found (`404`, code `6210`).
+
+<Callout type="info">
+  A separate team/admin-oriented set of routes lives at `/api/v1/conversations` (`GET` list, `GET` detail, single/batch delete, statistics) — see [Conversations API](./conversations). This section covers only the caller's own conversations.
+</Callout>
+
+### List Conversations for an Agent
+
+```
+GET /api/v1/agents/{agent_id}/conversations
+```
+
+Returns the caller's own conversations for one agent. Requires `conversation:read` and access to the agent (`check_agent_access`).
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `search` | string | No | - | Match title or conversation ID (contains) |
+| `created_after` | string (ISO 8601) | No | - | Only conversations created at or after this time |
+| `created_before` | string (ISO 8601) | No | - | Only conversations created at or before this time |
+| `sort_by` | string | No | `updated_at` | Sort field: `created_at`, `updated_at`, `message_count` (any other value falls back to `updated_at`) |
+| `page` | integer | No | 1 | Page number (min 1) |
+| `page_size` | integer | No | 20 | Items per page (1-100) |
+
+Results are ordered by the sort field **descending** and returned as a `PageData[ConversationListOut]` envelope (`items`, `total`, `page`, `page_size`), with `agent_name`/`agent_icon` filled in from the agent.
+
+### List My Conversations
+
+```
+GET /api/v1/agents/conversations/my
+```
+
+Returns all of the caller's conversations across agents. Requires `conversation:read`.
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `agent_id` | string | No | - | Filter by agent UUID |
+| `page` | integer | No | 1 | Page number |
+| `page_size` | integer | No | 20 | Items per page |
+
+The response is again a `PageData[ConversationListOut]` envelope; `agent_name` and `agent_icon` are `null` when the agent has been deleted.
+
+### Get Conversation
+
+```
+GET /api/v1/agents/conversations/{conversation_id}
+```
+
+Returns the conversation together with its visible messages, each carrying `version_count`. Requires `conversation:read`, and only the owner can read it.
+
+The response data is a `ConversationWithMessages`: the `ConversationOut` fields (`id`, `agent_id`, `agent_name`, `agent_icon`, `title`, `variables`, `message_count`, `token_usage`, `created_at`, `updated_at`) plus `messages` (a `MessageOut[]`; the message shape is documented in the [Chat API](./chat)).
+
+### Update Conversation
+
+```
+PATCH /api/v1/agents/conversations/{conversation_id}
+```
+
+Rename a conversation. Requires `conversation:read`, and only the owner can update it.
+
+```json
+{
+  "title": "Updated Conversation Title"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `title` | string | No | New title (1-200 chars) |
+
+Omitting `title` leaves the conversation unchanged; the success response has `msg_key` `conversation_updated`.
+
+### Delete Conversation
+
+```
+DELETE /api/v1/agents/conversations/{conversation_id}
+```
+
+Permanently delete a conversation (messages cascade). Requires `conversation:delete`, and only the owner can delete it. The agent's `conversation_count` and `message_count` are decremented first.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "conv-123"
+  },
+  "msg": "Conversation deleted successfully"
+}
+```
+
+### Delete a Single Message
+
+```
+DELETE /api/v1/agents/conversations/{conversation_id}/messages/{message_id}
+```
+
+Delete one message from a conversation. Requires `conversation:delete`, and the message must belong to the caller's conversation. The conversation's `message_count` and `token_usage` are updated in the **same row-locked transaction** that removes the message, so concurrent deletes cannot drift the counters.
+
+| Error | Code | Description |
+| --- | --- | --- |
+| `404 Not Found` | `6210` | Conversation does not exist or is not owned by the caller |
+| `404 Not Found` | `6211` | Message does not exist or does not belong to that conversation |
+
+```json
+{
+  "code": 0,
+  "data": {
+    "id": "msg-456"
+  },
+  "msg": "Message deleted successfully"
+}
+```
+
+---
+
 ## Agent Statistics
 
 ```
@@ -943,7 +1231,7 @@ Both supplemental statistics endpoints require the `/api/v1` prefix, a valid JWT
 <Callout type="warn">
   Period boundary behaviour: for the overview and tool-usage endpoints any value other than `24h`, `7d`, or `30d` is treated as `all`; the trends endpoint treats anything other than `24h` or `7d` as `30d`.
 
-  Access control: superusers are allowed; a `private` agent is readable only by its creator (creator-less legacy agents fall back to team scope); non-private agents require team access. Denied requests return `403`, missing resources `404`.
+  Access control: the statistics endpoints call `check_agent_access(..., require_write=True)` — superusers are allowed; a `private` agent is readable only by its creator (creator-less legacy agents fall back to team scope and additionally require a team admin); `team`/`public` agents require team access, and a non-creator must be a team admin. In other words, agent statistics are an **admin/monitoring** view; an ordinary team member cannot read them. Denied requests return `403`, missing resources `404`.
 </Callout>
 
 ---

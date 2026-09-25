@@ -1,0 +1,360 @@
+---
+title: 通知 API
+description: 读取用户站内通知收件箱，以及管理员发布与删除通知
+icon: Bell
+---
+
+通知 API 包含两组端点：面向所有登录用户的**站内通知收件箱**（`/api/v1/notifications`，列出可见通知、未读数、标记已读），以及管理员用来**发布、检索与删除**通知的 `/api/v1/admin/notifications`。通知按 `scope`（`global` / `team` / `user`）决定可见范围，已读状态是**每用户独立**的。
+
+## 端点总览
+
+| 方法 | 路径 | 用途 | 权限 |
+| --- | --- | --- | --- |
+| GET | `/api/v1/notifications` | 列出当前用户可见的通知 | 登录用户 |
+| GET | `/api/v1/notifications/unread-count` | 查询当前用户未读数 | 登录用户 |
+| POST | `/api/v1/notifications/read` | 标记指定通知或全部可见通知为已读 | 登录用户 |
+| GET | `/api/v1/admin/notifications` | 管理端检索通知（跨 scope） | 全局管理员，或团队管理员（须指定团队） |
+| POST | `/api/v1/admin/notifications` | 创建并投递通知 | `admin:notification:create` |
+| DELETE | `/api/v1/admin/notifications/{notification_id}` | 删除通知 | `admin:notification:delete` |
+
+所有端点都需要 `Authorization: Bearer <token>`。
+
+<Callout type="info" title="前置条件">
+  站内收件箱端点只要求登录（`get_current_active_user`），没有权限码。
+
+  管理端点中，`GET` 不做权限码校验，而是按**范围**鉴权：调用者需具备全局管理员访问权（`is_superuser`，或任一角色的权限码为 `admin:dashboard:access` / `*`），否则必须传入自己担任 OWNER/ADMIN 的 `team_id`。`POST` 需要 `admin:notification:create`，`DELETE` 需要 `admin:notification:delete`。
+
+  外部投递渠道（邮件、钉钉、企业微信、飞书、Webhook、Slack）必须在 [设置 API](./settings) 中先启用并配置，否则创建请求会被拒绝。
+</Callout>
+
+## 可见范围
+
+调用者能看到一条通知，当且仅当满足以下任一条件：
+
+- `scope` 为 `global`；
+- `scope` 为 `user` 且 `user_id` 等于调用者；
+- `scope` 为 `team` 且 `team_id` 属于调用者所在的团队。
+
+`expires_at` 已过期（早于当前时间）的通知会被**列表和未读数**排除；只有重启投递或排查问题时才需要 `include_expired=true`（管理端点）。
+
+## 通知对象
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string (UUID) | 通知 ID |
+| `scope` | string | `global`、`team` 或 `user` |
+| `team_id` | string (UUID) \| null | `team` 范围的目标团队 |
+| `user_id` | string (UUID) \| null | `user` 范围的目标用户 |
+| `type` | string | 通知类型键，最长 100 字符（自动通知使用 `team.member_added`、`workflow.run_failed`、`security.account_locked` 这类命名） |
+| `source` | string | `system`、`user` 或 `biz` |
+| `title` | string | 标题，最长 255 字符 |
+| `content` | string | 正文 |
+| `level` | string | `low`、`medium` 或 `high` |
+| `data` | object \| null | 附加数据载荷 |
+| `link_url` | string \| null | 点击后打开的站内链接，最长 500 字符 |
+| `status` | string | 固定为 `active` |
+| `expires_at` | string (ISO 8601) \| null | 过期时间 |
+| `created_at` | string (ISO 8601) | 创建时间 |
+| `updated_at` | string (ISO 8601) | 最后更新时间 |
+| `is_read` | boolean | 当前用户是否已读 |
+| `read_at` | string (ISO 8601) \| null | 当前用户的已读时间 |
+| `deliveries` | array | 各渠道投递记录 |
+
+### 投递记录（`deliveries[]`）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `channel` | string | `email`、`dingtalk`、`wechat`、`feishu`、`webhook` 或 `slack` |
+| `status` | string | `pending`、`sending`、`success` 或 `failed` |
+| `error_message` | string \| null | 失败原因（已本地化） |
+| `retry_count` | integer | 重试次数，默认 `0` |
+| `sent_at` | string (ISO 8601) \| null | 发送成功时间 |
+| `created_at` / `updated_at` | string (ISO 8601) | 记录创建与更新时间 |
+
+<Callout type="info">
+  用户端的列表接口不填充投递记录，`deliveries` 恒为 `[]`；只有管理端列表与创建响应会返回 `deliveries`。`is_read` / `read_at` 则相反——它们只出现在用户端，管理端列表恒为 `false` / `null`。
+</Callout>
+
+---
+
+## 列出通知
+
+```
+GET /api/v1/notifications
+```
+
+返回当前用户可见的通知，按 `created_at` 倒序排列。
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `scope` | string | 否 | - | 按范围过滤：`global`、`team`、`user` |
+| `type` | string | 否 | - | 按通知类型键过滤 |
+| `level` | string | 否 | - | 按级别过滤：`low`、`medium`、`high` |
+| `search` | string | 否 | - | 对 `title`、`content`、`type` 做不区分大小写的包含匹配 |
+| `unread_only` | boolean | 否 | `false` | 仅返回未读通知 |
+| `created_from` | string | 否 | - | `created_at` 下界 |
+| `created_to` | string | 否 | - | `created_at` 上界 |
+| `page` | integer | 否 | 1 | 页码，最小 1 |
+| `page_size` | integer | 否 | 20 | 每页条数，范围 1–100 |
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/notifications?unread_only=true&page=1&page_size=20" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        "scope": "team",
+        "team_id": "550e8400-e29b-41d4-a716-446655440000",
+        "user_id": null,
+        "type": "agent.published",
+        "source": "system",
+        "title": "Agent published",
+        "content": "Support Assistant is now available to the team.",
+        "level": "medium",
+        "data": {"agent_id": "1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d"},
+        "link_url": "/app/apps/1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d",
+        "status": "active",
+        "expires_at": null,
+        "created_at": "2026-09-26T08:15:00Z",
+        "updated_at": "2026-09-26T08:15:00Z",
+        "is_read": false,
+        "read_at": null,
+        "deliveries": []
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 20
+  },
+  "msg": "success"
+}
+```
+
+分页信封为 `data.items` / `data.total` / `data.page` / `data.page_size`。
+
+---
+
+## 查询未读数
+
+```
+GET /api/v1/notifications/unread-count
+```
+
+统计当前用户可见且未读的通知数量（同一套可见范围与过期过滤规则）。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {"total": 3},
+  "msg": "success"
+}
+```
+
+---
+
+## 标记已读
+
+```
+POST /api/v1/notifications/read
+```
+
+按 ID 标记指定通知，或使用 `mark_all` 把当前用户**全部可见通知**标记为已读。
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `notification_ids` | array of string (UUID) | 否 | 要标记为已读的通知 ID 列表 |
+| `mark_all` | boolean | 否 | 标记全部可见通知为已读，默认 `false` |
+
+`notification_ids` 与 `mark_all` 至少要提供一个，否则返回 `400` + `1002`（`validation_error`）。
+
+```json
+{
+  "notification_ids": ["9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"],
+  "mark_all": false
+}
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {"updated": 1},
+  "msg": "Notification read status updated"
+}
+```
+
+`data.updated` 是本次**新增**已读记录的数量；已读过的通知不会重复计数，也不会计入错误。
+
+<Callout type="info">
+  标记已读时使用 `include_expired=true` 的可见范围：即使通知已过期，只要曾经可见仍可标记为已读。已读记录按通知去重（`notification` + `user` 唯一），重复提交是安全的。
+</Callout>
+
+---
+
+## 管理端检索通知
+
+```
+GET /api/v1/admin/notifications
+```
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `scope` | repeatable string | 否 | - | 按一个或多个范围过滤 |
+| `team_id` | string (UUID) | 否 | - | 按团队过滤 |
+| `user_id` | string (UUID) | 否 | - | 按目标用户过滤 |
+| `type` | string | 否 | - | 按通知类型键过滤 |
+| `level` | repeatable string | 否 | - | 按一个或多个级别过滤 |
+| `search` | string | 否 | - | 对 `title`、`content`、`type` 做包含匹配 |
+| `include_expired` | boolean | 否 | `false` | 是否包含已过期通知 |
+| `page` | integer | 否 | 1 | 页码，最小 1 |
+| `page_size` | integer | 否 | 20 | 每页条数，范围 1–100 |
+
+返回与用户端相同的 `{items, total, page, page_size}` 信封，但：
+
+- `items[].is_read` 恒为 `false`、`read_at` 恒为 `null`（已读是每用户的状态，管理端不聚合）；
+- `items[].deliveries` 会填充各渠道投递记录。
+
+**鉴权规则：**
+
+| 调用者 | 行为 |
+| --- | --- |
+| 全局管理员 | 可查询任意范围；可省略 `team_id` |
+| 团队管理员（非全局） | **必须**传 `team_id`，且需为该团队的 OWNER 或 ADMIN；`scope` 含 `global` 时返回 `403`；不传 `team_id` 返回 `400` |
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `403` | `3001` | `insufficient_privileges`：非全局管理员请求 `global` 范围 |
+| `400` | `1002` | `notification_scope_requires_team`：非全局管理员未提供 `team_id` |
+| `403` | `3003` | `team_admin_required`：不是该团队的 OWNER/ADMIN |
+| `404` | `4004` | `team_not_found` |
+
+---
+
+## 创建并投递通知
+
+```
+POST /api/v1/admin/notifications
+```
+
+需要 `admin:notification:create` 权限。
+
+### 请求体
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `scope` | string | 是 | `global`、`team` 或 `user` |
+| `team_id` | string (UUID) | 条件必填 | `scope=team` 时必填 |
+| `user_id` | string (UUID) | 条件必填 | `scope=user` 时的目标用户 |
+| `user_ids` | array of string (UUID) | 条件必填 | `scope=user` 时批量发送给多个用户 |
+| `type` | string | 是 | 通知类型键，1–100 字符 |
+| `source` | string | 否 | `system`、`user`、`biz`，默认 `system` |
+| `title` | string | 是 | 标题，1–255 字符 |
+| `content` | string | 是 | 正文 |
+| `level` | string | 否 | `low`、`medium`、`high`，默认 `medium` |
+| `data` | object | 否 | 附加数据载荷 |
+| `link_url` | string | 否 | 站内链接 |
+| `expires_at` | string (ISO 8601) | 否 | 过期时间 |
+| `notify_channels` | array of string | 否 | 外部投递渠道，默认不投递 |
+
+**范围鉴权：**
+
+| `scope` | 要求 |
+| --- | --- |
+| `global` | 必须是超级管理员，否则 `403` + `3001` |
+| `team` | 必须提供 `team_id`（否则 `400` + `1002`），且调用者须为该团队 OWNER/ADMIN |
+| `user` | 必须提供 `user_id` 或 `user_ids`（否则 `400` + `1002`）；`user_ids` 中任一用户不存在返回 `404` + `4001` |
+
+`user_ids` 批量模式会为每个用户各创建一条通知，响应只返回**第一条**通知对象（`msg` 为 `Notifications created successfully`）。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/notifications" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "team",
+    "team_id": "550e8400-e29b-41d4-a716-446655440000",
+    "type": "maintenance_notice",
+    "source": "system",
+    "title": "Scheduled maintenance",
+    "content": "The platform will be unavailable on Sunday 02:00-04:00 UTC.",
+    "level": "high",
+    "link_url": "/status",
+    "notify_channels": ["email", "webhook"]
+  }'
+```
+
+**成功响应（200 OK）：** `data` 为创建的通知对象，`deliveries` 包含本次新建的投递记录（状态为 `pending`，由后台任务异步发送并更新）。
+
+<Callout type="warn" title="外部渠道必须先配置">
+  `notify_channels` 中的每个渠道都会在创建前校验其启用状态与必需配置，任一不满足即返回 `400`：
+  `smtp_not_enabled` / `smtp_not_configured`、`dingtalk_not_enabled` / `dingtalk_not_configured`、`wechat_not_enabled` / `wechat_not_configured`、`feishu_not_enabled` / `feishu_not_configured`、`webhook_not_enabled` / `webhook_not_configured`、`slack_not_enabled` / `slack_not_configured`。渠道配置见 [设置 API](./settings)。
+</Callout>
+
+---
+
+## 删除通知
+
+```
+DELETE /api/v1/admin/notifications/{notification_id}
+```
+
+需要 `admin:notification:delete` 权限。删除前会写入一条审计记录。
+
+**鉴权规则：** `global` 与 `user` 范围的通知只有全局管理员可删；`team` 范围的通知要求调用者是该团队 OWNER/ADMIN（非全局管理员删除 `team` 通知时 `team_id` 由通知自身决定，不接受请求参数覆盖）。
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {"id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"},
+  "msg": "Notification deleted successfully"
+}
+```
+
+**错误：**
+
+| HTTP | 错误码 | 说明 |
+| --- | --- | --- |
+| `404` | `4000` | `notification_not_found` |
+| `403` | `3001` | `insufficient_privileges`：非全局管理员删除 `global` / `user` 通知 |
+| `400` | `1002` | `notification_scope_requires_team`：`team` 通知缺少 `team_id` |
+| `403` | `3003` | `team_admin_required` |
+
+---
+
+## 错误处理
+
+| HTTP | 错误码 | 触发场景 |
+| --- | --- | --- |
+| `401` | `2000` / `2001` / `2002` | 缺少令牌、令牌无效或已过期 |
+| `400` | `1002` | `validation_error`（`read` 未提供任何参数）、`notification_scope_requires_team`、渠道未配置 |
+| `403` | `3000` / `3001` | 缺少权限码，或范围超出调用者权限 |
+| `403` | `3003` | 非该团队 OWNER/ADMIN |
+| `404` | `4001` / `4004` / `4000` | 用户 / 团队 / 通知不存在 |
+| `422` | `1001` | 请求校验失败：未知 `scope`/`level`、`page` < 1、`page_size` 超出 1–100 |
+
+## 相关文档
+
+- [通知设置](/usage/guides/administration/notifications) — 管理后台的通知与投递渠道配置
+- [设置 API](./settings) — 通知渠道（SMTP、钉钉、企业微信、飞书、Webhook、Slack）的启用与测试
+- [错误处理](./errors) — 按 HTTP 状态与业务错误码恢复

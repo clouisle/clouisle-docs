@@ -1,35 +1,103 @@
 ---
 title: Chunking and Document Processing
-description: Preview chunks, process pending documents, and safely apply new chunking strategies
+description: Preview chunks, process pending documents, and apply a new chunking strategy without losing manual edits
 icon: Split
 ---
 
-Chunking determines the granularity of knowledge base recall. Preview first, then process; do not increase the chunk size or overlap directly without validating the results.
+Chunking sets the granularity of knowledge base recall: chunks that are too large mix irrelevant text into the recalled context and eat the context budget, while chunks that are too small carry incomplete meaning and cannot answer a question on their own. So **preview first, then process** — do not scale the chunk size or overlap up without validating the outcome.
+
+## Chunking is measured in characters, not tokens
+
+`chunk_size` and `chunk_overlap` are both measured in **characters**. Token counts are only an estimate of `characters ÷ 4` shown in the UI (labelled tokens) so you can reason about context budget; they never take part in splitting. The ratio differs a lot between Chinese and English text, so leave headroom when tuning by token count.
+
+| Parameter | Default | Minimum | Suggested UI maximum | Notes |
+| --- | --- | --- | --- | --- |
+| Chunk size `chunk_size` | `1000` characters | `100` | `2000` | Target length of one chunk |
+| Chunk overlap `chunk_overlap` | `100` characters | `0` | `500` | Context kept from the previous chunk |
+| Custom separator `separator` | empty | — | — | Escape sequences allowed, see below |
+| Text cleaning `clean_text` | on | — | — | Turn off to preserve the original formatting |
+
+## Markdown and plain text take different split paths
+
+The system first decides whether the text contains Markdown structure (headings, code fences, tables, and lists are the main signals), then picks a splitting strategy. A single entry point, `chunk_text(text, chunk_size, chunk_overlap, separators, is_markdown)`, chooses between the two:
+
+- **Markdown mode**: splits by structural block. Small tables stay intact, oversized tables split row by row with the header repeated, list items are never broken apart, and unclosed code fences are closed automatically. Chunks also carry `section` metadata (a breadcrumb such as `Chapter 1 > Section 2`) and `chunk_type` (`table`/`code`/`list`/`text`) so you can trace a chunk back to its source.
+- **Plain-text mode**: uses a recursive character splitter that tries separators in priority order: paragraph blank line, newline, Chinese full stop `。`, Chinese exclamation `！`, Chinese question mark `？`, English sentence ends `. `, `! `, `? `, Chinese semicolon `；`, English semicolon `; `, Chinese comma `，`, English comma `, `, space, single character.
+
+<Callout type="info" title="Why overlap is applied at exact character level">
+  The splitter runs with `overlap = 0`, and only then is the last **exact N characters** of the previous chunk prepended to the current chunk. The built-in overlap works at split-unit level, and Chinese sentences are often longer than the requested overlap, which produced far more overlap than asked for. Exact character overlap also guarantees that Chinese content gets the overlap length you specified.
+</Callout>
+
+### A custom separator is a hard split boundary
+
+Set `separator` to something like `\n\n` or `---` and the system first splits the text on that separator, then splits each piece further. Even text that would have fit in a single chunk is broken at the separator — that is what distinguishes it from the default separators, which only kick in when a piece must be shortened.
+
+Typed escape sequences `\n`, `\r`, `\t`, and `\\` are decoded into a real newline, tab, or backslash, so you can literally type `\n\n`.
 
 ## Preview
 
-Select **Preview Chunks** in the document actions, then set the chunk size, overlap, custom separators, and text cleaning. The preview shows the chunk count, character count, Token count, and overlap length without writing to the production index.
+Select **Preview Chunks** in the document actions (or enter the batch preview page from pending documents) and set the chunk size, overlap, custom separator, and **text cleaning**. A preview really reads and parses the document but writes nothing to the index.
 
-## Processing
+The preview returns totals (chunks / total tokens / total characters) plus each chunk's `chunk_index`, content, `token_count`, `char_count`, and `overlap_length`; the overlap prefix is highlighted in yellow so you can check that overlap lands where you expect. The preview page also lets you edit or delete individual chunks.
 
-Select **Quick Process** or **Start Processing** for pending documents. The default chunk size is `1000` characters and the overlap is `100` characters; the chunk size must be at least `100` and the overlap at least `0`. When the background task finishes, embeddings are generated and document statistics are updated.
+<Callout type="warn" title="Text cleaning collapses blank lines">
+  **Text cleaning** is on by default: it collapses consecutive blank lines into a single newline (`\n\n` → `\n`), squeezes repeated spaces, and trims each line. For Markdown that relies on blank lines to separate paragraphs this changes chunk boundaries. If your document's structure depends on blank lines, turn text cleaning off in the preview and compare.
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-chunk-preview.png" alt="Chunk preview" />
-  <figcaption>Chunk preview</figcaption>
+  <figcaption>Chunk preview: totals, chunk list, and overlap highlighting</figcaption>
 </figure>
 
-## Re-chunking
+## Processing
 
-Processed documents require **Re-chunk**. The system deletes the original chunks and their embeddings, then generates new chunks and vectors. While re-chunking, the document cannot be considered retrievable; all manual edits are lost.
+There are two ways to start processing a `pending` document, and they differ in whether your reviewed chunk content is used:
 
-## Editing Chunks
+| Action | Behaviour | When to use |
+| --- | --- | --- |
+| **Start Processing** (preview page) | Submits **the chunk content currently in the preview as-is**, then generates embeddings and the lexical index server-side | You have inspected or edited the preview chunks |
+| **Quick Process** | Re-extracts and re-chunks using document metadata or the knowledge base settings | Content is clean and the defaults are trusted |
 
-Select **Edit Chunks** to modify content, append chunks, or delete chunks. Chunk content cannot be empty. Saving after edits updates the chunk's embedding; if embedding fails, use **Retry This Segment**.
+Processing is a background task: extract text → clean → chunk → embed → build the lexical index. On completion the document becomes `completed`, `chunk_count`/`token_count` are written, and the knowledge base totals are updated.
 
-## Handling Failures
+The effective source of chunk settings, in priority order, is **document-level settings (submitted with preview/process) > knowledge base settings > built-in defaults `1000`/`100`**.
 
-- Text extraction failed: check whether the file is corrupted, encrypted, or contains only images.
-- Embedding failed: check the embedding model credentials, quota, and vector dimensions.
-- Full-text retrieval unavailable: check PostgreSQL and `pg_search`.
-- Large batch backlog: check the Worker queue and API logs.
+## Reprocessing and re-chunking
+
+Both replace existing chunks, but the entry points differ:
+
+- **Reprocess** (UI): chunk settings on a processed document are read-only and the UI points you to **Reprocess**. It cancels any running task, deletes the old chunks and their vectors, resets the counters, and re-runs the flow through the preview page with the new settings. **Every manually edited chunk is lost.**
+- **Re-chunk** (API/admin UI): `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` submits new `chunk_size`/`chunk_overlap`/`separator` directly, with the same semantics as reprocessing; it is rejected while the document is `processing` (`document_processing`).
+
+<Callout type="error" title="Check before you reprocess">
+  Reprocessing cannot be undone: old chunks, old vectors, and all manual edits are replaced. While processing, the document cannot be treated as fully retrievable; large batches occupy the Worker queues, so process in waves.
+</Callout>
+
+## Editing chunks
+
+On the document detail page or the preview page you can change chunk content, insert a chunk after an existing one, or delete a chunk:
+
+- Chunk content **cannot be empty**.
+- Saving **strips HTML tags** (XSS prevention), so pasted raw HTML such as `<div>` keeps only its text; Markdown syntax (`**bold**`, tables, fenced code) is unaffected.
+- Saving recomputes that chunk's token count (`characters ÷ 4`) and corrects the document and knowledge base token totals.
+- Saving regenerates the chunk embedding and updates the lexical index; if either step fails the content is rolled back and `vector_update_failed` is reported.
+- Use **Retry This Segment** for a single failed chunk embedding, and **Retry Failed Chunks** for a whole document.
+
+## Handling failures
+
+| Symptom | Likely cause | What to do |
+| --- | --- | --- |
+| Text extraction failed | Corrupted or encrypted file, image-only file (no OCR), or unsupported format | Convert or re-export the file and upload again |
+| Zero chunks | Extraction produced nothing, or only whitespace | Confirm the file contains extractable text |
+| Some or all embeddings failed | Embedding model credentials, quota, or dimension mismatch | Check model authorization and `embedding_dimension`, then **Retry Failed Chunks** |
+| Full-text recall unavailable | PostgreSQL / `pg_search` problem | Check the database and extension, and that documents are `completed` |
+| Task never finishes | Worker not running, or queue backlog | Inspect Worker queues and API logs |
+
+**Retry Failed Chunks** is only available when the document status is `error` and failed chunks actually exist; otherwise the API answers `document_not_in_error_state` or `no_failed_chunks`.
+
+## Related pages
+
+- [Import Documents](./import-documents.mdx) — upload, URL import, and status transitions
+- [Browsing Documents & Metadata](./browse-documents.mdx) — chunk metadata and document fields
+- [Retrieval & Quality Tuning](./retrieval.mdx) — prove a chunking change works with the retrieval lab
+- [Knowledge Base Optimization](/en/usage/best-practices/kb-optimization) — guidance on chunk granularity

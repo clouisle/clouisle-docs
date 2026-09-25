@@ -4,47 +4,298 @@ description: Recover API calls by HTTP status and business error codes
 icon: CircleAlert
 ---
 
-The API response structure is fixed as:
+Every response uses the same envelope for success and failure:
 
 ```json
 {"code": 0, "data": {}, "msg": "success"}
 ```
 
-On failure, `code` is non-zero and `data` may be empty; the HTTP status should still be checked first.
+On failure, `code` is non-zero and `data` may be `null` or carry structured detail (the size limit that was exceeded, the remaining login attempts, and so on). `msg` is localized to the request language — **never** branch on `msg` text, always branch on `code`.
+
+<Callout type="info">
+  `code` values come from the backend `ResponseCode` enum (`backend/app/schemas/response.py`), which is the single authoritative source for every list on this page. The HTTP status is only a transport-level hint.
+</Callout>
 
 ## HTTP Status Mapping
 
-The HTTP status and the business `code` are not 1:1; branch on the `code` in the response body:
+HTTP status and business `code` are not 1:1. The same `code` can appear with different HTTP statuses (`2003` is `403` when a JWT cannot be decoded but `400` for a wrong password), so use the HTTP status for coarse classification and the body `code` for precise branching.
 
 | Source | HTTP | Business code |
 | --- | --- | --- |
 | `BusinessError` (default) | `400` | its own `code` (e.g. `5002` for username exists) |
 | Validation errors (Pydantic) | `422` | `1001` |
-| JWT authentication failure | `403` | `2003` |
-| API Key expired / invalid | `401` | `2002` / `2001` |
-| No authentication provided | `401` | `2000` |
-| Permission denied | `403` | `3000` / `3001` |
-| Generic `HTTPException` 400/401/403/404 | matching status | `1000` / `2000` / `3000` / `4000` |
+| No credentials provided | `401` | `2000` |
+| Invalid / revoked JWT, or single-session eviction | `401` | `2001` |
+| Expired API key | `401` | `2002` |
+| Inactive or pending user (auth dependency) | `401` | `2004` |
+| JWT cannot be decoded or has expired | `403` | `2003` |
+| Permission denied | `403` | `3000` / `3001` / `3002` / `3003` / `3004` |
+| Resource not found | `404` | `4000`–`4005`, the `6000` family, `6200`/`6210`/`6211` |
+| Model quota exceeded | `429` | `6103` |
+| Internal server error | `500` | `1003` |
+| Generic `HTTPException` | its status | `1000` / `2000` / `3000` / `4000` |
+
+<Callout type="warn">
+  Only `6103` (model quota) reliably returns HTTP `429`. `5400` (email quota) and `5312` (TOTP attempt throttling) both return HTTP `400`. Never infer rate limiting from the HTTP status; read `code`.
+</Callout>
+
+## Business Code Reference
+
+The tables below cover every error code defined by the current version. Unused numbers inside a range are reserved — do not implement branches for them.
+
+The HTTP column lists the status the backend actually raises today. `400` means no explicit status was set, which is the `BusinessError` default. A few codes use different statuses on different endpoints (`1004`, `3001`, the `6000` family, `6100`); the table shows the most common value and the response is authoritative.
+
+<Callout type="info">
+  Codes marked “reserved” are defined in the enum but have no raise site anywhere in the backend. Do not build integrations that depend on seeing them.
+</Callout>
+
+### General errors (1000-1999)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `1000` | `UNKNOWN_ERROR` | Unclassified error | `400` (`500` on the LLM processing path) |
+| `1001` | `VALIDATION_ERROR` | Request validation failed | `422` (Pydantic); `400` when raised manually |
+| `1002` | `BAD_REQUEST` | Invalid request format or parameters | `400` (`409` for a few conflict cases) |
+| `1003` | `INTERNAL_ERROR` | Internal server error | `500` |
+| `1004` | `FORBIDDEN` | Generic forbidden operation | `403` |
+
+For `1001`, `data.errors` is a **dictionary of field name to message array**, not an array:
+
+```json
+{
+  "code": 1001,
+  "data": {
+    "errors": {
+      "email": ["Invalid email address"],
+      "password": ["String should have at least 8 characters"]
+    }
+  },
+  "msg": "Validation error"
+}
+```
+
+### Authentication errors (2000-2999)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `2000` | `UNAUTHORIZED` | No credentials provided | `401` |
+| `2001` | `INVALID_TOKEN` | JWT revoked/expired, or the API key is invalid or inactive | `401` |
+| `2002` | `TOKEN_EXPIRED` | API key has expired (expired JWTs report `2003`) | `401` |
+| `2003` | `INVALID_CREDENTIALS` | Wrong username/password, or the JWT cannot be decoded / has expired | `403` (JWT); `400` (wrong password) |
+| `2004` | `INACTIVE_USER` | User is deactivated or pending approval | `401` |
+
+`2001` also covers the superseded token in single-session mode (`msg_key` is `session_expired_new_login`) and blacklisted tokens.
+
+### Permission errors (3000-3999)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `3000` | `PERMISSION_DENIED` | No access to this resource or operation | `403` |
+| `3001` | `INSUFFICIENT_PRIVILEGES` | Superuser privileges required | `403` |
+| `3002` | `NOT_TEAM_MEMBER` | Not a member of the target team | `403` (`404` for `POST /teams/{team_id}/leave`) |
+| `3003` | `TEAM_ADMIN_REQUIRED` | Team owner or admin role required | `403` |
+| `3004` | `TEAM_OWNER_REQUIRED` | Team owner role required | `403` |
+
+`3000` is also what an API key receives when its resource binding does not match (`msg_key` is `api_key_no_agent_access` / `api_key_no_workflow_access`); see the [API Keys API](./api-keys).
+
+### Resource errors (4000-4999)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `4000` | `NOT_FOUND` | Generic resource not found | `404` |
+| `4001` | `USER_NOT_FOUND` | User not found | `404` |
+| `4002` | `ROLE_NOT_FOUND` | Role not found | `404` |
+| `4003` | `PERMISSION_NOT_FOUND` | Permission not found | `404` |
+| `4004` | `TEAM_NOT_FOUND` | Team not found | `404` |
+| `4005` | `TEAM_MEMBER_NOT_FOUND` | Team membership not found | `404` |
+
+### Registration and accounts (5000-5099)
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `5000` | `REGISTRATION_DISABLED` | Open registration is disabled |
+| `5001` | `ALREADY_EXISTS` | Resource already exists (generic) |
+| `5002` | `USERNAME_EXISTS` | Username already exists |
+| `5003` | `EMAIL_EXISTS` | Email already exists |
+| `5004` | `EMAIL_NOT_VERIFIED` | Email must be verified before signing in |
+| `5005` | `VERIFICATION_CODE_INVALID` | Verification code or reset token is invalid |
+| `5006` | `VERIFICATION_CODE_EXPIRED` | Verification code or email token has expired |
+| `5007` | `EMAIL_SEND_FAILED` | Email could not be sent (usually SMTP is not configured) |
+| `5008` | `EMAIL_SEND_TOO_FREQUENT` | Emails requested too often (60-second cooldown) |
+
+This range always returns HTTP `400`. `5007` may carry `data` and `5008` carries `data.remaining_seconds` for a precise message.
+
+### Duplicate conflicts (5100-5199)
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `5100` | `ROLE_NAME_EXISTS` | Role name already exists |
+| `5101` | `PERMISSION_CODE_EXISTS` | Permission code already exists |
+| `5102` | `TEAM_NAME_EXISTS` | Team name already exists |
+| `5103` | `ALREADY_TEAM_MEMBER` | User is already a team member |
+| `5104` | `DUPLICATE_NAME` | Duplicate name (generic) |
+
+This range always returns HTTP `400`. Retrying cannot succeed — rename the resource or switch to the update endpoint.
+
+### Forbidden operations (5200-5299)
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `5200` | `CANNOT_DELETE_SYSTEM_ROLE` | System roles cannot be deleted |
+| `5201` | `CANNOT_DELETE_SUPERUSER` | Superusers cannot be deleted |
+| `5202` | `CANNOT_DELETE_SYSTEM_PERMISSION` | System permissions cannot be deleted |
+| `5203` | `CANNOT_UPDATE_SYSTEM_PERMISSION` | System permissions cannot be modified |
+| `5204` | `CANNOT_MODIFY_SYSTEM_ROLE` | System roles cannot be modified |
+| `5205` | `CANNOT_DELETE_DEFAULT_TEAM` | The default team cannot be deleted |
+| `5206` | `CANNOT_ADD_AS_OWNER` | A member cannot be added directly as owner |
+| `5207` | `CANNOT_CHANGE_OWNER_ROLE` | The owner's role cannot be changed |
+| `5208` | `CANNOT_PROMOTE_TO_OWNER` | A member cannot be promoted directly to owner |
+| `5209` | `CANNOT_REMOVE_OWNER` | The owner cannot be removed |
+| `5210` | `OWNER_CANNOT_LEAVE` | The owner must transfer ownership before leaving |
+| `5211` | `ROLE_IN_USE` | The role is still assigned to users |
+| `5212` | `USER_ALREADY_ACTIVE` | User is already active |
+| `5213` | `USER_ALREADY_INACTIVE` | User is already inactive |
+| `5214` | `CANNOT_DEACTIVATE_SUPERUSER` | Superusers cannot be deactivated |
+
+This range always returns HTTP `400`. To change ownership, use the transfer-ownership endpoint described in the [Teams API](./teams).
+
+### Login security (5300-5399)
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `5300` | `ACCOUNT_LOCKED` | Account locked after repeated login failures (5 attempts, 15 minutes by default) |
+| `5301` | `TOO_MANY_LOGIN_ATTEMPTS` | Too many login attempts (reserved) |
+| `5302` | `CAPTCHA_REQUIRED` | Human verification is required |
+| `5303` | `CAPTCHA_INVALID` | Human verification failed or the proof expired |
+| `5304` | `PASSWORD_EXPIRED` | Password has expired (reserved) |
+| `5305` | `FORCE_PASSWORD_CHANGE_REQUIRED` | Password change is required (reserved) |
+| `5306` | `PASSWORD_MIN_AGE_NOT_MET` | Minimum password age not reached; cannot change yet |
+| `5307` | `PASSWORD_RECENTLY_USED` | New password matches a recent password (reserved) |
+| `5310` | `TOTP_REQUIRED` | Two-factor authentication required (reserved) |
+| `5311` | `TOTP_INVALID` | TOTP code or backup code is incorrect |
+| `5312` | `TOTP_RATE_LIMITED` | Too many failed TOTP attempts, temporarily throttled (HTTP `400`) |
+| `5313` | `TOTP_NOT_ENABLED` | Two-factor authentication is not enabled for this account |
+| `5314` | `TOTP_ALREADY_ENABLED` | Two-factor authentication is already enabled |
+| `5315` | `TOTP_SETUP_EXPIRED` | The TOTP enrollment session expired |
+| `5316` | `TOTP_SETUP_REQUIRED` | The deployment requires enrollment first (reserved) |
+
+<Callout type="info">
+  An expired password or an admin-forced password change is **not** an error: login still returns `code: 0` with `force_password_change: true` and a `reason` in `data`. A deployment-wide TOTP requirement returns `requires_totp_setup: true`. See the [Authentication & Login API](./auth).
+</Callout>
+
+### Rate limiting (5400-5499)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `5400` | `RATE_LIMITED` | Email quota exhausted or a provider rate limit mapped to this code | `400` |
+
+`5400` carries the dimension that was exceeded, for example `{"limit": 100, "period": "hour"}` for bulk email or `{"requested": 3, "remaining": 1}`.
+
+### Knowledge base (6000-6099)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `6000` | `KB_NOT_FOUND` | Knowledge base not found | `404` |
+| `6001` | `KB_NAME_EXISTS` | Knowledge base name already exists | `400` |
+| `6002` | `DOCUMENT_NOT_FOUND` | Document not found | `404` |
+| `6003` | `INVALID_DOCUMENT_TYPE` | Document type is not supported | `400` |
+| `6004` | `DOCUMENT_PROCESSING_FAILED` | Document processing failed (reserved) | — |
+| `6005` | `CHUNK_NOT_FOUND` | Chunk not found | `404` |
+| `6006` | `DOCUMENT_PROCESSING` | Document is still processing; the operation is not available yet | `400` |
+| `6007` | `KB_ACCESS_DENIED` | No access to this knowledge base | `403` |
+
+`6007` mirrors `6201` for Agents: the resource exists but the current user or API key is outside its access scope. Surface a permission request instead of retrying.
+
+### Models (6100-6199)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `6100` | `MODEL_NOT_FOUND` | Model not found | `404` |
+| `6101` | `TEAM_MODEL_NOT_FOUND` | Team model authorization not found | `404` |
+| `6102` | `TEAM_MODEL_EXISTS` | The model is already authorized for this team | `400` |
+| `6103` | `MODEL_QUOTA_EXCEEDED` | Team model quota (tokens or requests) exceeded | `429` |
+| `6104` | `MODEL_NOT_AUTHORIZED` | The team is not authorized for this model | `400` |
+| `6105` | `MODEL_VISION_NOT_SUPPORTED` | The model does not support vision input (reserved) | — |
+| `6106` | `MODEL_DISABLED` | The model, or the team authorization, is disabled | `400` |
+
+`6103` is the only code that reliably returns HTTP `429`. `6104` and `6106` both mean “unavailable right now”, but `6104` requires adding a team model authorization while `6106` only requires re-enabling `is_enabled` on an existing one.
+
+### Agents and conversations (6200-6299)
+
+| Code | Constant | Meaning | HTTP |
+| --- | --- | --- | --- |
+| `6200` | `AGENT_NOT_FOUND` | Agent not found | `404` |
+| `6201` | `AGENT_ACCESS_DENIED` | No access to this Agent | `403` |
+| `6202` | `AGENT_NOT_PUBLISHED` | Agent is not published (reserved) | — |
+| `6210` | `CONVERSATION_NOT_FOUND` | Conversation not found or not owned by the caller | `404` |
+| `6211` | `MESSAGE_NOT_FOUND` | Message not found | `404` |
+
+<Callout type="warn">
+  The backend does not check Agent publish status, so `6202` is reserved and never raised. Do not branch on it: unauthorized access returns `6201`/`3000`, and an unusable model returns `6104`/`6106`.
+</Callout>
+
+### SSO (6300-6399)
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `6300` | `SSO_PROVIDER_NOT_FOUND` | SSO provider is missing or disabled |
+| `6301` | `SSO_SESSION_EXPIRED` | SSO login session expired (reserved) |
+| `6302` | `SSO_REGISTRATION_DISABLED` | SSO auto-registration is disabled |
+| `6303` | `SSO_AUTHENTICATION_FAILED` | SSO authentication failed (reserved) |
+| `6304` | `SSO_INVALID_CONFIGURATION` | SSO configuration is incomplete or invalid |
+| `6305` | `SSO_PROVIDER_NAME_EXISTS` | Provider name already exists |
+| `6306` | `PASSWORD_LOGIN_DISABLED` | The deployment enforces SSO and disabled password login |
+
+This range always returns HTTP `400`. `6306` appears on the login endpoint, so it tells the caller to switch to SSO rather than retry.
 
 ## Handling Table
 
-| HTTP/Business scope | How to handle |
+| HTTP / business scope | How to handle |
 | --- | --- |
-| 401, `2000-2002` | Log in again, refresh the JWT, or replace the expired/invalid API Key |
-| 403, `3000-3004` | Check permissions, team membership, administrator/owner requirements, and API Key resource scope |
-| 404, `4000-4005` | Confirm the resource ID and current team |
-| 400, `1001-1004` | Fix JSON, required fields, types, or business validation |
-| `5000-5099` | Follow the registration, account creation, or verification flow |
-| `5100-5214` | Do not auto-retry; handle name conflicts, system resources, or ownership constraints |
-| `5300-5316` | Follow the account lockout, verification code, password, or TOTP prompts |
-| `5400` | Back off and retry, lower concurrency |
-| `6000-6099` | Check knowledge base, document processing, chunking, and indexing |
-| `6103`/`6104` | Check model quota and team authorization |
-| `6202` | Publish the Agent first |
-| `6300-6306` | Check SSO provider, callback, approval, and password login switches |
+| `401`, `2000`-`2002`, `2004` | Log in again, refresh the JWT, or replace the expired/invalid/inactive API key; `2004` needs an administrator to restore the account |
+| `403`, `3000`-`3004` | Check roles, team membership, owner/admin requirements, and the API key's Agent/Workflow bindings |
+| `404`, `4000`-`4005`, `6000`/`6002`/`6005`/`6200`/`6210`/`6211` | Confirm the resource ID, owning team, and current team context |
+| `400`, `1001`-`1004` | Fix the JSON, required fields, types, or business validation; for `1001` read `data.errors` field by field |
+| `5000`-`5008` | Walk the user through registration, account creation, or email verification |
+| `5100`-`5214` | Do not auto-retry: rename, change the flow, or switch to an update/transfer endpoint |
+| `5300`-`5316` | Follow the lockout, captcha, password policy, or TOTP prompt |
+| `5400` | Back off and retry; for bulk email, reduce the recipient count |
+| `6000`-`6007` | Check knowledge base permissions, document type, processing status, and chunk IDs |
+| `6100`-`6106` | Check team model authorization, quota usage, and enabled state |
+| `6103` (HTTP `429`) | Back off, lower concurrency, or wait for the quota window to reset |
+| `6200`/`6201` | Confirm the Agent ID and access scope (team visibility or API key binding) |
+| `6300`-`6306` | Check the SSO provider configuration, callback, auto-registration switch, and whether password login is disabled |
 
 ## Retryable and Non-Retryable
 
-Network timeouts, temporarily unavailable providers, `5400` rate limiting, and some background task failures can use exponential backoff. Request validation, permissions, missing resources, expired API Keys, unauthorized models, and workflow definition errors should not be blindly retried.
+Network timeouts, `503`/`504`, temporarily unavailable providers, `5400` and `6103` throttling, and some background task failures can be retried with exponential backoff.
 
-After an Agent SSE `error`, keep the received text and `message_id`; when a workflow SSE disconnects, resume with `stream_url` and the sequence number, and do not re-trigger external side effects.
+Do not blindly retry:
+
+- `1001`-`1004` — the request itself is invalid; a retry returns the same result.
+- `3000`-`3004`, `6007`, `6201` — permission problems; fix the authorization first.
+- `2001`, `2002`, `2004` — credential or account state problems.
+- `4000`-`4005` — the resource does not exist; verify the ID and context.
+- `5100`-`5214` — constraint conflicts; the request must change.
+- `6104`, `6106` — model authorization or enabled state.
+- `6306` — this deployment has disabled password login.
+
+<Callout type="success">
+  Idempotent reads are always safe to retry. Before retrying a `POST` (sending a message, running a workflow, creating a resource), query the current state first to avoid duplicate writes or duplicated external side effects.
+</Callout>
+
+## SSE Error Handling
+
+Streaming endpoints cannot change the HTTP status once the response headers are sent, so mid-stream failures arrive as error events inside the stream:
+
+- After an Agent stream `error` event, keep the text received so far and the `message_id`, then decide whether to retry or surface it. The message may already be persisted, so check conversation messages before retrying to avoid duplicate questions.
+- After a workflow stream disconnects, resume with `stream_url` and the last received event sequence number instead of calling `POST /workflows/{workflow_id}/run` again.
+
+The full event list for both streams is in [Streaming Events](./streaming).
+
+## Related Documentation
+
+- [Authentication & Login API](./auth) — where `2000`-`2004`, `5300`-`5316`, and `6306` come from
+- [API Keys API](./api-keys) — `2001`, `2002`, `3000`, and API key binding limits
+- [Teams API](./teams) — `3002`-`3004`, `4004`, `4005`, `5102`, `5103`, and `5206`-`5210`
+- [Users API](./users) — `5002`, `5003`, `5212`-`5214`, and password lifecycle errors

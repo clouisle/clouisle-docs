@@ -4,33 +4,100 @@ description: 创建最小权限 API Key 并发送第一个 Agent 请求
 icon: Rocket
 ---
 
+本页用最短路径跑通一次真实调用：创建一个只绑定目标 Agent 的 API Key，然后通过 SSE 收到模型回复。
+
 ## 前置条件
 
-需要已部署的 Clouisle API 地址、一个已发布 Agent，以及对该 Agent 可用的 API Key。API Key 默认每分钟 `1000` 次请求，留空过期时间表示永不过期；完整密钥只显示一次。
+- 一个已部署的 Clouisle 地址，API 基础路径为 `https://<你的域名>/api/v1`
+- 一个**团队**，以及团队内一个已创建好的 Agent（Agent 必须属于某个团队）
+- 该 Agent 的 **Agent ID**（UUID），可从 Agent 详情页 URL `/app/apps/<agent_id>` 获取
+- 一种凭据：**API Key**（推荐用于服务端集成）或 **JWT**（代表某个用户会话）
+
+<Callout type="info">
+  API Key 与 JWT 都能调用同一个聊天端点，区别在权限来源：API Key 继承**创建者用户**的身份并受 `agent_ids` / `workflow_ids` 绑定约束；JWT 直接使用当前用户的团队可见性。二者都用 `Authorization: Bearer <凭据>`。
+</Callout>
 
 ## 创建 API Key
 
-1. 前往**API 密钥** > **创建密钥**。
-2. 设置名称、`chat` 作用域、可选过期时间和速率限制。
-3. 可选地只绑定目标 Agent；空绑定列表表示允许访问全部已发布 Agent。
-4. 创建后立即复制完整 Key，并写入本地环境变量：
+1. 以要代表其身份的用户登录，前往**API 密钥** > **创建密钥**。
+2. 填写名称，并视需要设置过期时间（留空表示永不过期）。
+3. 在 Agent 绑定处选中目标 Agent；**空绑定表示不限制**，即该 Key 可访问创建者能访问的全部 Agent。
+4. 创建后立即复制完整 Key，写入本地环境变量——完整密钥形如 `clou_` + 64 位十六进制（共 **69** 个字符），**只在创建响应中出现一次**。
 
 ```bash
 export CLOUISLE_API_KEY='clou_replace_me'
 export CLOUISLE_API_BASE='https://your-clouisle.example.com/api/v1'
+export AGENT_ID='0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e'
+```
+
+<Callout type="warn">
+  创建 Key 时的 `scopes` 与 `rate_limit` 会被保存，但当前版本**不做强制校验**：真正生效的是「Key 是否激活、是否过期、所属用户是否启用、Agent/Workflow 绑定是否匹配」。最小权限请靠**资源绑定**实现，见 [API Keys API](./api-keys)。
+</Callout>
+
+没有 JWT？用密码登录换取会话令牌，详见 [认证与用户登录 API](./auth)：
+
+```bash
+curl -X POST "$CLOUISLE_API_BASE/login/access-token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=you@example.com&password=YourPassword"
 ```
 
 ## 发送第一个请求
 
+流式对话端点（推荐，能逐字渲染）：
+
 ```bash
-curl -N "$CLOUISLE_API_BASE/agents/<agent_id>/chat/stream" \
+curl -N "$CLOUISLE_API_BASE/agents/$AGENT_ID/chat/stream" \
   -H "Authorization: Bearer $CLOUISLE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"message":"你好，请介绍你的职责","conversation_id":null,"variables":{}}'
 ```
 
-响应为 `text/event-stream`。读取 `message_start` 得到 `conversation_id`，后续消息传回该 ID 即可保持上下文。
+非流式版本把路径改为 `/agents/$AGENT_ID/chat`，响应为普通 JSON（`data.conversation_id` + `data.message.content`）。
+
+请求体字段（`message` 上限 32000 字符，与 `file_urls` / `images` 至少提供一个）：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `message` | string | 是（无附件时） | 用户消息；仅发附件时可为空字符串 |
+| `conversation_id` | string (UUID) \| null | 否 | 传入既有会话 ID 以延续上下文 |
+| `variables` | object | 否 | Agent 变量值 |
+| `file_urls` | array | 否 | 上传接口返回的文件元数据，见 [文件上传 API](./file-uploads) |
+| `images` | array | 否 | 视觉输入图片 |
+
+## 读取流式响应
+
+响应为 `text/event-stream`，逐条事件推送：
+
+1. `message_start`：包含 `conversation_id` 与 `message_id`，记下会话 ID。
+2. `content_delta`：正文增量（推理模型还会有 `reasoning_delta`、工具调用会有 `tool_call`/`tool_result`）。
+3. `message_end`：本轮结束，含 Token 用量与耗时。
+
+把 `conversation_id` 回传到下一次请求即可保持上下文。完整事件清单见 [流式事件](./streaming)。
 
 ## 验收
 
-收到 `content_delta` 和 `message_end`，且 `message_end` 包含 Token 用量与耗时。若返回 `6202`，Agent 尚未发布；若返回 `3000`，检查 API Key 作用域和资源绑定。
+- 收到 `message_start`、若干 `content_delta`，以及带用量统计的 `message_end`。
+- 第二次请求带上第一次返回的 `conversation_id`，Agent 能引用之前的对话内容。
+
+## 常见失败
+
+| HTTP | code | 原因与处理 |
+| --- | --- | --- |
+| `401` | `2001` | Key 无效、已删除或已停用；核对是否复制完整（69 字符） |
+| `401` | `2002` | Key 已过期，重新创建 |
+| `401` | `2004` | Key 所属用户被停用或待审批 |
+| `403` | `3000` | 该 Key 绑定了 Agent 列表但不包含目标 Agent；把目标 Agent 加入绑定或改用不限制绑定的 Key |
+| `404` | `6200` | Agent ID 不存在或不属于可见范围 |
+| `403` | `6201` | 已认证但无权访问该 Agent |
+| `400` | `6104` | 团队未获得该 Agent 所用模型的授权，需要在团队模型授权中新增 |
+| `429` | `6103` | 团队模型配额超限，退避或等待配额重置 |
+
+完整的错误码清单与重试建议见 [API 错误与重试](./errors)。
+
+## 下一步
+
+- [Agent 聊天 API](./chat)：多轮对话、附件、变量、重新生成与消息版本。
+- [工作流执行 API](./workflow)：运行工作流、Webhook 触发与节点事件订阅。
+- [文件上传 API](./file-uploads)：先上传文件再把 `file_urls` 传给聊天端点。
+- [Teams API](./teams) 与 [Team Models API](./team-models)：团队与模型授权，决定 Agent 实际能用哪些模型。

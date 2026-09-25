@@ -27,6 +27,8 @@ Knowledge base resource endpoints have a base path of `/api/v1/knowledge-bases`.
 | POST | `/knowledge-bases/{kb_id}/documents/upload` | Upload a file |
 | POST | `/knowledge-bases/{kb_id}/documents/url` | Import a URL |
 | GET | `/knowledge-bases/{kb_id}/documents/{doc_id}` | Document details |
+| GET | `/knowledge-bases/{kb_id}/documents/{doc_id}/download` | Download the original document |
+| GET | `/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}` | Fetch media extracted from a document |
 | PUT | `/knowledge-bases/{kb_id}/documents/{doc_id}` | Update document metadata |
 | DELETE | `/knowledge-bases/{kb_id}/documents/{doc_id}` | Delete document |
 | POST | `/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process document |
@@ -57,16 +59,30 @@ Query parameters:
 | --- | --- | --- | --- | --- |
 | `page` | integer | No | 1 | Page number |
 | `page_size` | integer | No | 20 | Items per page |
-| `team_id` | string | No | - | Filter by team ID |
+| `team_id` | string | No | - | Filter by team ID (requires team membership) |
 | `status` | array | No | - | Filter by status: `active`, `processing`, `error`, `archived` (repeatable) |
 | `search` | string | No | - | Search by name or description |
+| `own_only` | boolean | No | `false` | Only return KBs created by the current user (non-superusers) |
+| `include_shared` | boolean | No | `true` | Also include KBs shared with the caller's teams; ignored when `own_only=true` |
+
+`include_shared` only adds KBs whose visibility is `team` or `public` and that have been shared with the caller's teams; with `own_only=true` no shared KBs are merged in. Because the default is `true`, "list knowledge bases" returns both owned and shared KBs — use `is_owned` to tell them apart.
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/knowledge-bases?page=1&page_size=20" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-Each KB object in `data.items` contains `id`, `name`, `description`, `icon`, `team`, `created_by`, `status`, `embedding_model`, `rerank_model`, `embedding_dimension`, `document_count`, `total_chunks`, `total_tokens`, `created_at`. Response is wrapped in `items`/`total`/`page`/`page_size` pagination structure.
+Each KB object in `data.items` contains `id`, `name`, `description`, `icon`, `team`, `created_by`, `status`, `visibility`, `embedding_model_id`, `embedding_model`, `rerank_model_id`, `rerank_model`, `embedding_dimension`, `document_count`, `total_chunks`, `total_tokens`, `created_at`, plus share metadata:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `visibility` | string | `private`, `team`, or `public` |
+| `is_owned` | boolean | Whether the KB belongs to the caller's team; `false` for shared KBs |
+| `owner_team_id` / `owner_team_name` | string | Owning team ID / name |
+| `share_permission` | string \| null | Permission granted to a shared KB (currently `read_only`); `null` for owned KBs |
+| `shared_with_count` | integer | Number of teams the KB is shared with (non-zero only for owned KBs) |
+
+The response is wrapped in the `items`/`total`/`page`/`page_size` pagination structure.
 
 ### Get Knowledge Base Details
 
@@ -178,6 +194,20 @@ GET /api/v1/knowledge-bases/{kb_id}/documents/{document_id}
 ```
 
 Returns full document info including `uploaded_by`, `processed_at`, etc.
+
+### Download and Document Media
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/download
+```
+
+Returns the original file's binary content (with `Content-Disposition`; the filename matches the document name).
+
+```
+GET /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}
+```
+
+Returns media extracted during document parsing (such as images embedded in docx or Markdown). The body is binary with a type-appropriate `Content-Type` (for example `image/png` or `image/jpeg`). `{filename}` must be one of the filenames produced by that document's parsing. Both endpoints require `kb:read`.
 
 ### Update Document
 
@@ -319,10 +349,10 @@ Request body is an array of retrieval configs, each executed independently and r
 
 ## Cross-Team Sharing
 
-Share a knowledge base with other teams in the workspace with read-only access.
+Share a knowledge base with other teams in the organization with read-only access. Sharing grants **read** access only: listing, details, document listing, chunk reads, and search work for the receiving teams, but no write endpoint (updating/deleting a KB, uploading/processing/deleting documents, creating/updating/deleting chunks) is opened up by a share — writes still require the caller to be a member of the owning team (and usually an `owner`/`admin` role).
 
 <Callout type="info">
-  Creating or modifying a share requires `owner` or `admin` role within the knowledge base's owner team; otherwise the request returns `403` with `TEAM_ADMIN_REQUIRED`. Superusers and admin-scoped platform calls bypass this team-role requirement.
+  Creating or modifying a share requires the `owner` or `admin` role within the knowledge base's owner team; otherwise the request returns `403` with `TEAM_ADMIN_REQUIRED`. Superusers and admin-scoped platform calls bypass this team-role requirement. Listing shares only requires membership in that team.
 </Callout>
 
 ### Share Knowledge Base
@@ -338,7 +368,16 @@ POST /api/v1/knowledge-bases/{kb_id}/share
 }
 ```
 
-Returns a `KnowledgeBaseShareOut` record with `id`, `knowledge_base_id`, `knowledge_base_name`, `shared_with_team_id`, `shared_with_team_name`, `permission` (currently always `read_only`), `shared_by_name`, and `shared_at`.
+Returns a `KnowledgeBaseShareOut` record with `id`, `knowledge_base_id`, `knowledge_base_name`, `shared_with_team_id`, `shared_with_team_name`, `permission` (currently always `read_only`), `shared_by_id`, `shared_by_name`, and `shared_at`.
+
+These cases are rejected:
+
+| Case | HTTP | Description |
+| --- | --- | --- |
+| KB visibility is `private` | `400` | Private KBs cannot be shared (`private_kb_cannot_be_shared`) |
+| The target team is the owning team | `400` | A KB cannot be shared with its own team (`kb_cannot_share_to_own_team`) |
+| The team already has the share | `400` | Duplicate share (`kb_already_shared`) |
+| The target team does not exist | `404` | `team_not_found` |
 
 ### List Knowledge Base Shares
 
@@ -346,11 +385,15 @@ Returns a `KnowledgeBaseShareOut` record with `id`, `knowledge_base_id`, `knowle
 GET /api/v1/knowledge-bases/{kb_id}/shares
 ```
 
+Returns `{ "shares": [...], "total": N }`, ordered by `shared_at` descending.
+
 ### Remove Knowledge Base Share
 
 ```
 DELETE /api/v1/knowledge-bases/{kb_id}/share/{team_id}
 ```
+
+Requires `kb:delete` and the `owner`/`admin` role in the owning team; on success `data` is `null`.
 
 ## Knowledge Base Statistics
 

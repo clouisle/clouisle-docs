@@ -1,50 +1,53 @@
 ---
 title: Authentication & Login API
-description: User registration, click captcha, password login, TOTP 2FA, password recovery, and email verification endpoints
+description: User registration, click captcha, password login, TOTP 2FA, password reset, and email verification
 icon: KeyRound
 ---
 
-The Authentication and Login API provides account registration, human verification captcha challenges, OAuth2-compatible password login, two-factor authentication (TOTP) workflows, password recovery, and email verification. The base path is `/api/v1`.
+The authentication endpoints cover account registration, click-based human verification, OAuth2-compatible password login, TOTP two-factor challenges and verification, password reset, and email verification. The base path is `/api/v1`.
+
+<Callout type="info">
+  TOTP **enrollment and removal** live on the separate `/api/v1/totp/*` endpoints (see the [TOTP API](./totp)), and SSO on `/api/v1/sso/*` (see the [SSO API](./sso)). This page focuses on the login chain itself and how it uses those two.
+</Callout>
 
 ## Endpoints Overview
 
 | Method | Path | Purpose | Auth |
 | --- | --- | --- | --- |
-| GET | `/api/v1/captcha` | Generate a click-based human verification challenge | Public |
-| POST | `/api/v1/captcha/click` | Submit click pointer trace to obtain a single-use proof token | Public |
-| POST | `/api/v1/login/access-token` | Authenticate with username/email and password for JWT Access Token | Public |
-| POST | `/api/v1/login/verify-totp` | Exchange temporary token and TOTP code for an access token | Public (with `temp_token`) |
-| POST | `/api/v1/logout` | Invalidate current session and blacklist token | Bearer JWT |
-| POST | `/api/v1/register` | Register a new user account (open registration) | Public |
-| POST | `/api/v1/send-verification` | Send verification email for registration or binding | Public |
-| POST | `/api/v1/verify-email` | Verify email address using a 6-digit code | Public |
-| GET | `/api/v1/verify` | Verify email address using an email token link | Public |
-| POST | `/api/v1/resend-verification` | Resend verification email | Public |
-| POST | `/api/v1/forgot-password` | Request password reset code or link | Public |
-| POST | `/api/v1/reset-password` | Reset password using code or token | Public |
-| GET | `/api/v1/sso/providers` | List enabled public SSO providers | Public |
-| GET | `/api/v1/sso/login/{provider_name}` | Initiate SSO login flow | Public |
-| GET | `/api/v1/sso/callback/{provider_name}` | Handle SSO callback from identity provider | Public |
-| DELETE | `/api/v1/sso/connections/{connection_id}` | Disconnect an SSO provider connection | Bearer JWT |
-| POST | `/api/v1/totp/setup` | Generate TOTP secret and QR code | Bearer JWT |
-| POST | `/api/v1/totp/enable` | Verify code and enable two-factor authentication | Bearer JWT |
-| POST | `/api/v1/totp/disable` | Verify password and code to disable 2FA | Bearer JWT |
-| POST | `/api/v1/totp/regenerate-backup-codes` | Regenerate 10 backup recovery codes | Bearer JWT |
-| GET | `/api/v1/totp/status` | Get current user's 2FA status | Bearer JWT |
+| GET | `/api/v1/captcha` | Get a click-based human verification challenge | Public |
+| POST | `/api/v1/captcha/click` | Submit the click trace for a single-use proof token | Public |
+| POST | `/api/v1/login/access-token` | Sign in with username/email and password | Public |
+| POST | `/api/v1/login/verify-totp` | Exchange a temp token plus a TOTP code for an access token | Public (needs `temp_token`) |
+| POST | `/api/v1/logout` | Log out and blacklist the token | Bearer JWT |
+| POST | `/api/v1/register` | Register a new account | Public |
+| POST | `/api/v1/send-verification` | Send an email verification code/link | Public |
+| POST | `/api/v1/verify-email` | Verify an email with a 6-digit code | Public |
+| GET | `/api/v1/verify` | Verify an email with the token from the email link | Public |
+| POST | `/api/v1/resend-verification` | Resend the registration verification email | Public |
+| POST | `/api/v1/forgot-password` | Request a password reset email | Public |
+| POST | `/api/v1/reset-password` | Set a new password using a code or token | Public |
 
----
+## Tokens and Sessions
+
+A successful login returns a JWT to send as `Authorization: Bearer <token>`.
+
+| Property | Value |
+| --- | --- |
+| Lifetime | Site setting `session_timeout_days`, default **30 days** (the in-code fallback is 7 days when the setting row is missing) |
+| Refresh | No refresh token; sign in again once it expires |
+| Logout | `POST /api/v1/logout` blacklists the token, effective immediately |
+| Single-session mode | With `single_session = true`, a new login invalidates the previous token, which then gets HTTP `401` / `2001` |
+| Logout without a token | HTTP `401` / `2000` |
 
 ## Human Verification (Captcha)
 
-When human verification is enabled in site settings, registration, login, and password recovery require valid captcha proof.
+When `enable_captcha` is on (default `false`), **registration, password login, and password recovery** must carry a captcha proof.
 
-### 1. Get Challenge
+### 1. Get a challenge
 
 ```http
 GET /api/v1/captcha
 ```
-
-#### Response (200 OK)
 
 ```json
 {
@@ -59,7 +62,9 @@ GET /api/v1/captcha
 }
 ```
 
-### 2. Complete Click Interaction
+`challenge` is a JSON string you must parse yourself, and `expires_in` is `300` seconds.
+
+### 2. Submit the click for a proof token
 
 ```http
 POST /api/v1/captcha/click
@@ -71,13 +76,19 @@ Content-Type: application/json
   "clicked_option": "red_circle",
   "elapsed_ms": 1340,
   "pointer": [
-    {"x": 105.5, "y": 80.2, "t": 1200},
-    {"x": 108.0, "y": 82.0, "t": 1340}
+    {"x": 105.5, "y": 80.2, "t": 1200, "event": "move"},
+    {"x": 108.0, "y": 82.0, "t": 1340, "event": "move"}
   ]
 }
 ```
 
-#### Response (200 OK)
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `captcha_id` | string | Yes | The ID returned by the challenge |
+| `challenge` | string | Yes | Echo the challenge string verbatim |
+| `clicked_option` | string | Yes | Identifier of the option the user selected |
+| `elapsed_ms` | integer | Yes | Milliseconds between rendering and the click |
+| `pointer` | array | No | Pointer trace points with `x`, `y`, `t`, and an optional `event` (default `move`); an empty array is accepted |
 
 ```json
 {
@@ -90,53 +101,102 @@ Content-Type: application/json
 }
 ```
 
----
+The proof is single-use: the same `captcha_id` + `captcha_token` cannot be exchanged for a second login.
 
-## Password Login & Two-Factor Authentication
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `5302` | Human verification required but `captcha_id` / `captcha_token` missing |
+| `400` | `5303` | Proof invalid, already used, or expired; or the submitted trace failed validation |
 
-### 1. Submit Credentials
+## Password Login and Two-Factor Authentication
 
-Uses OAuth2 form encoding (`application/x-www-form-urlencoded`):
+### 1. Submit credentials
+
+Standard OAuth2 form encoding (`application/x-www-form-urlencoded`, **not** JSON):
 
 ```http
 POST /api/v1/login/access-token
 Content-Type: application/x-www-form-urlencoded
 
-username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-91fa-4ff8-9125-5e3681428256&captcha_token=proof-token-string
+username=alice@example.com&password=SecurePassword123!&captcha_id=c62040db-...&captcha_token=proof-token-string
 ```
 
-- `username` accepts either username or email address.
-- When captcha is enabled, pass `captcha_id` and `captcha_token`.
+| Form field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `username` | string | Yes | Username or email; the backend field is `identifier`, received through an alias |
+| `password` | string | Yes | Password |
+| `captcha_id` | string | Required when captcha is on | Challenge ID |
+| `captcha_token` | string | Required when captcha is on | Click proof |
+| `captcha_answer` | string | No | Legacy-client compatibility: used as the proof fallback when `captcha_token` is empty |
 
-#### Direct Login Success (200 OK)
+The pre-login check order decides which error you see:
+
+1. Password login disabled by the deployment (`sso_enabled = true` with `sso_allow_password_login = false`) → `400` / `6306`.
+2. Account locked → `400` / `5300`, with `data.lockout_seconds` for the remaining wait.
+3. Wrong password → `400` / `2003`, with `data.remaining_attempts`; reaching `max_login_attempts` (default `5`) locks the account for `lockout_duration_minutes` (default `15`) and returns `5300`.
+4. Inactive or pending account → `400` / `2004` (a `pending` `approval_status` reports pending approval).
+5. TOTP enabled → returns `requires_totp` (below).
+6. Deployment requires TOTP (`require_totp = true`) but the user has not enrolled → returns `requires_totp_setup`.
+7. Email verification on (`email_verification` defaults to `true`) and the user unverified (superusers excepted) → `400` / `5004` with `data.email`.
+
+#### Direct login success (200 OK)
+
+```json
+{
+  "code": 0,
+  "data": { "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "token_type": "bearer" },
+  "msg": "Login successful"
+}
+```
+
+#### Two-factor challenge
+
+When TOTP is enabled the server does not issue a full token; it returns a temp token valid for **5 minutes**:
+
+```json
+{
+  "code": 0,
+  "data": { "requires_totp": true, "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+  "msg": "totp_required"
+}
+```
+
+#### Enrollment required first
+
+When the deployment sets `require_totp` and the account has not enrolled, the server returns a temp token valid for **30 minutes** so the client can call `/api/v1/totp/setup` first:
+
+```json
+{
+  "code": 0,
+  "data": { "requires_totp_setup": true, "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+  "msg": "totp_setup_required"
+}
+```
+
+<Callout type="info">
+  All three are **successful responses** (`code: 0`), not errors. Clients must branch on the flags in `data` (`requires_totp` / `requires_totp_setup` / `force_password_change`) to decide the next screen.
+</Callout>
+
+#### Forced password change
+
+When the password has expired or an administrator forced a change, a full token is still issued but flagged:
 
 ```json
 {
   "code": 0,
   "data": {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "bearer"
+    "token_type": "bearer",
+    "force_password_change": true,
+    "reason": "expired"
   },
-  "msg": "login_successful"
+  "msg": "Login successful. You must change your password before continuing."
 }
 ```
 
-#### Two-Factor Authentication Required (2FA Challenge)
+`reason` is `expired` (password expired) or `force` (administrator-forced). Send the user to `POST /api/v1/users/me/change-password`.
 
-When TOTP is enabled on the account, the server issues a 5-minute temporary token `temp_token`:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "requires_totp": true,
-    "temp_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-  },
-  "msg": "totp_required"
-}
-```
-
-### 2. Verify TOTP Code to Complete Login
+### 2. Verify the TOTP code and finish signing in
 
 ```http
 POST /api/v1/login/verify-totp
@@ -145,28 +205,48 @@ Content-Type: application/x-www-form-urlencoded
 temp_token=temp-jwt-token-string&code=123456&is_backup_code=false
 ```
 
-| Parameter | Type | Required | Description |
-| --- | --- | --- | --- |
-| `temp_token` | string | Yes | Temporary 5-minute JWT issued during password login |
-| `code` | string | Yes | 6-digit authenticator code or 8-digit backup code |
-| `is_backup_code` | boolean | No | Set to `true` when submitting a backup recovery code, default `false` |
+| Form field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `temp_token` | string | Yes | — | The temp JWT from the previous step |
+| `code` | string | Yes | — | The 6-digit authenticator code, or a backup recovery code when `is_backup_code=true` |
+| `is_backup_code` | boolean | No | `false` | Whether to validate `code` as a backup recovery code |
 
-Returns the standard `access_token` on success.
+Every field is a **form field**; sending a JSON body returns `422`.
 
-### 3. Logout
+On success the forced-password-change rules are applied exactly as in login, and the response is:
+
+```json
+{
+  "code": 0,
+  "data": { "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "token_type": "bearer" },
+  "msg": "Two-factor authentication verified successfully"
+}
+```
+
+Failure paths:
+
+| HTTP | Code | Scenario |
+| --- | --- | --- |
+| `400` | `2001` | Temp token invalid or tampered with |
+| `400` | `2002` | Temp token expired (`totp_setup_expired`) |
+| `400` | `5313` | TOTP is not enabled for this account (or the secret is missing) |
+| `400` | `5312` | Too many consecutive failures, temporarily throttled; `data.seconds` is the remaining wait |
+| `400` | `5311` | The TOTP code or backup code is incorrect |
+
+A backup recovery code is consumed on first successful use, and the remaining count is written to the audit log.
+
+### 3. Log out
 
 ```http
 POST /api/v1/logout
 Authorization: Bearer YOUR_TOKEN
 ```
 
-Blacklists the active token and terminates the session.
-
----
+Blacklists the current token; the response has `data: null` and `msg` set to `Logout successful`. The client must sign in again afterwards.
 
 ## Registration and Email Verification
 
-### 1. Register Account
+### 1. Register a new account
 
 ```http
 POST /api/v1/register
@@ -176,158 +256,188 @@ Content-Type: application/json
   "username": "bob",
   "email": "bob@example.com",
   "password": "StrongPassword123!",
+  "locale": "en",
   "terms_accepted": true,
-  "captcha_id": "captcha-uuid",
-  "captcha_token": "proof-token"
+  "captcha_id": "c62040db-...",
+  "captcha_token": "proof-token-string"
 }
 ```
 
-The first registered account automatically receives the Super Admin role.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `username` | string | Yes | Unique username |
+| `email` | string | Yes | Unique email |
+| `password` | string | Yes | Password, validated against the password policy |
+| `locale` | string | No | UI language |
+| `terms_accepted` | boolean | Required when the deployment asks for it | Must be `true` when `require_terms_acceptance_on_register` is on, otherwise `1001` |
+| `captcha_id` / `captcha_token` | string | Required when captcha is on | See the captcha section |
 
-### 2. Send Verification Email
+The outcome depends on site settings; `msg` and the account state change with them:
+
+| Scenario | `approval_status` | `is_active` | `email_verified` | `msg` |
+| --- | --- | --- | --- | --- |
+| The very first user | `approved` | `true` | `true` | `Registration successful. You are the first user and have been promoted to Super Admin!` |
+| `require_approval = true` (default) | `pending` | `false` | Follows the email-verification setting | `Registration successful. Your account is pending admin approval.` |
+| `require_approval = false` with `email_verification = true` (default) | `approved` | `true` | `false` | `Registration successful. Please verify your email to activate your account.` |
+| Both disabled | `approved` | `true` | `true` | `Registration successful` |
+
+<Callout type="warn">
+  `require_approval` defaults to `true`, so **registration is not immediately usable by default**: the account needs an administrator approval (or completed email verification) before login, and otherwise login returns `2004` (pending) or `5004` (email unverified). The **first** user of the deployment skips all of that — active immediately, no email verification, and automatically granted the Super Admin role; later users get the default role and default team.
+</Callout>
+
+Failure paths: duplicate username `5002`; duplicate email `5003`; password outside the policy `1001` (`data.errors.password` lists the reasons); open registration disabled `5000`; missing or failed captcha `5302`/`5303`.
+
+### 2. Send a verification email
 
 ```http
 POST /api/v1/send-verification
 Content-Type: application/json
 
-{
-  "email": "bob@example.com",
-  "purpose": "register"
-}
+{ "email": "bob@example.com", "purpose": "register" }
 ```
 
-`purpose` accepts `register` or `reset_password` (60-second cooldown per target).
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `email` | string | Yes | — | Recipient address |
+| `purpose` | string | No | `register` | Either `register` or `reset_password` |
 
-### 3. Verify Email Code
+Behavior differs by purpose:
+
+- `purpose = register`: the user for that email must exist and be unverified; a missing user returns `400` / `4000` and an already-verified user returns `400` / `1001`.
+- `purpose = reset_password`: always returns success to prevent enumeration; an email is sent when the user exists.
+
+There is a **60-second** cooldown per email address and purpose; a repeat inside it returns `400` / `5008` with `data.remaining_seconds`. When SMTP is disabled the response is `400` / `5007`. Emails are sent by a background task, so the response only means “queued”.
+
+### 3. Verify the email with the 6-digit code
 
 ```http
 POST /api/v1/verify-email
 Content-Type: application/json
 
-{
-  "email": "bob@example.com",
-  "code": "839201",
-  "purpose": "register"
-}
+{ "email": "bob@example.com", "code": "839201", "purpose": "register" }
 ```
 
-### 4. Verify via Link Token
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `email` | string | Yes | — |
+| `code` | string | Yes | — |
+| `purpose` | string | No | `register` |
+
+With `purpose = register` the user's `email_verified` is set to `true`.
+
+```json
+{ "code": 0, "data": { "verified": true, "email": "bob@example.com" }, "msg": "Email verified successfully" }
+```
+
+An incorrect or already-consumed code returns `400` / `5005`.
+
+### 4. Verify the email through the email link
 
 ```http
 GET /api/v1/verify?token=email-verification-token-string
 ```
 
----
+`token` is a **query parameter**. An invalid or expired token returns `400` / `5006`; otherwise the response matches the code-based flow.
 
-## Password Recovery
+### 5. Resend the registration verification email
 
-### 1. Request Reset
+```http
+POST /api/v1/resend-verification
+Content-Type: application/json
+
+{ "email": "bob@example.com" }
+```
+
+Unlike `send-verification` with the `register` purpose, this endpoint also returns success for an **unknown** address (anti-enumeration), but an already-verified address returns `400` / `1001`. The same 60-second cooldown (`5008`) and SMTP switch (`5007`) apply.
+
+## Password Recovery and Reset
+
+### 1. Start password recovery
 
 ```http
 POST /api/v1/forgot-password
 Content-Type: application/json
 
-{
-  "email": "alice@example.com"
-}
+{ "email": "alice@example.com" }
 ```
 
-Always returns success to prevent user email enumeration.
+To prevent email enumeration the endpoint **always returns success regardless of whether the address exists** (`msg` is `If the email exists, a password reset link has been sent`). Two cases still leak: SMTP disabled returns `400` / `5007`, and a repeat inside the 60-second cooldown returns `400` / `5008`. That is a deliberate availability-over-privacy tradeoff — plan for it.
 
-### 2. Reset Password
+### 2. Confirm the reset
 
-With 6-digit code:
+Two mutually exclusive methods; provide at least one (neither gives `422`):
 
 ```http
 POST /api/v1/reset-password
 Content-Type: application/json
 
-{
-  "email": "alice@example.com",
-  "code": "839201",
-  "new_password": "NewStrongPassword456!"
-}
+{ "email": "alice@example.com", "code": "839201", "new_password": "NewStrongPassword456!" }
 ```
-
-Or with link token:
 
 ```http
 POST /api/v1/reset-password
 Content-Type: application/json
 
-{
-  "token": "reset-token-string",
-  "new_password": "NewStrongPassword456!"
-}
+{ "token": "reset-token-string", "new_password": "NewStrongPassword456!" }
 ```
 
----
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `email` + `code` | string | One of the two | 6-digit code method; the purpose is always `reset_password` |
+| `token` | string | One of the two | Email-link token method |
+| `new_password` | string | Yes | New password, validated against the policy |
 
-## Two-Factor Authentication (TOTP)
+A successful reset also clears the account's consecutive failure count and lockout time (`failed_login_attempts`, `locked_until`), so a locked-out user can recover immediately by resetting the password.
 
-### 1. Setup
+Failure paths: invalid code/token `400` / `5005`; user not found `400` / `4000`; new password outside the policy `400` / `1001`.
 
-```http
-POST /api/v1/totp/setup
-Authorization: Bearer YOUR_TOKEN
-```
+## Where TOTP and SSO Continue
 
-Returns base64 QR code and 10 emergency backup codes.
+The login flow only issues and verifies challenges; everything else lives on other pages:
 
-### 2. Enable
+| Need | Endpoints | Details |
+| --- | --- | --- |
+| Enroll TOTP, generate backup codes, check status, disable | `POST /api/v1/totp/setup`, `/enable`, `/disable`, `/regenerate-backup-codes`, `GET /api/v1/totp/status` | [TOTP API](./totp) |
+| List public SSO providers, start SSO login, handle the callback | `GET /api/v1/sso/providers`, `/sso/login/{provider_name}`, `/sso/callback/{provider_name}` | [SSO API](./sso) |
+| Disconnect your own SSO connection | `DELETE /api/v1/sso/connections/{connection_id}` | [SSO API](./sso) |
 
-```http
-POST /api/v1/totp/enable
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
-{
-  "code": "123456"
-}
-```
-
-### 3. Disable
-
-```http
-POST /api/v1/totp/disable
-Authorization: Bearer YOUR_TOKEN
-Content-Type: application/json
-
-{
-  "password": "CurrentPassword123!",
-  "code": "123456",
-  "is_backup_code": false
-}
-```
-
-### 4. Status
-
-```http
-GET /api/v1/totp/status
-Authorization: Bearer YOUR_TOKEN
-```
-
----
+<Callout type="warn">
+  Once a deployment enables SSO and disables password login (`sso_allow_password_login = false`), `POST /api/v1/login/access-token` returns `400` / `6306` outright. Clients should call `GET /api/v1/sso/providers` first and decide whether to render the password form at all.
+</Callout>
 
 ## Error Codes
 
-| Code | Identifier | Description |
-| --- | --- | --- |
-| `2000` | UNAUTHORIZED | Authentication missing or invalid |
-| `2001` | INVALID_TOKEN | Temporary or reset token invalid |
-| `2002` | TOKEN_EXPIRED | Token has expired |
-| `2003` | INVALID_CREDENTIALS | Incorrect username or password |
-| `2004` | INACTIVE_USER | User deactivated or pending approval |
-| `5000` | REGISTRATION_DISABLED | Open registration is disabled |
-| `5004` | EMAIL_NOT_VERIFIED | Email verification required prior to login |
-| `5005` | VERIFICATION_CODE_INVALID | Verification code is incorrect |
-| `5006` | VERIFICATION_CODE_EXPIRED | Verification code has expired |
-| `5008` | EMAIL_SEND_TOO_FREQUENT | Email rate limited (60-second cooldown) |
-| `5300` | ACCOUNT_LOCKED | Account locked due to repeated failed logins |
-| `5302` | CAPTCHA_REQUIRED | Captcha verification is required |
-| `5303` | CAPTCHA_INVALID | Captcha proof failed or expired |
-| `5310` | TOTP_REQUIRED | Two-factor authentication code required |
-| `5311` | TOTP_INVALID | Invalid TOTP code or backup code |
-| `5312` | TOTP_RATE_LIMITED | Too many failed TOTP attempts |
-| `5314` | TOTP_ALREADY_ENABLED | 2FA is already enabled on this account |
-| `6306` | PASSWORD_LOGIN_DISABLED | Password login disabled; SSO is enforced |
+| HTTP | Code | Constant | Scenario |
+| --- | --- | --- | --- |
+| `401` | `2000` | `UNAUTHORIZED` | Logout without a token |
+| `400` | `2001` | `INVALID_TOKEN` | `temp_token` invalid or tampered with |
+| `400` | `2002` | `TOKEN_EXPIRED` | Temp token expired (`totp_setup_expired`) |
+| `400` | `2003` | `INVALID_CREDENTIALS` | Wrong username or password |
+| `400` | `2004` | `INACTIVE_USER` | Account deactivated or pending approval |
+| `400` | `5000` | `REGISTRATION_DISABLED` | Open registration is disabled |
+| `400` | `5002` | `USERNAME_EXISTS` | Username already taken |
+| `400` | `5003` | `EMAIL_EXISTS` | Email already taken |
+| `400` | `5004` | `EMAIL_NOT_VERIFIED` | Email verification required before login |
+| `400` | `5005` | `VERIFICATION_CODE_INVALID` | Verification code or reset token invalid |
+| `400` | `5006` | `VERIFICATION_CODE_EXPIRED` | Verification code or email token expired |
+| `400` | `5007` | `EMAIL_SEND_FAILED` | SMTP not configured, email cannot be sent |
+| `400` | `5008` | `EMAIL_SEND_TOO_FREQUENT` | Repeat within the 60-second cooldown |
+| `400` | `5300` | `ACCOUNT_LOCKED` | Locked after too many failures; `data.lockout_seconds` is the remaining wait |
+| `400` | `5302` | `CAPTCHA_REQUIRED` | Captcha proof required |
+| `400` | `5303` | `CAPTCHA_INVALID` | Captcha proof invalid or already used |
+| `400` | `5311` | `TOTP_INVALID` | TOTP code or backup code incorrect |
+| `400` | `5312` | `TOTP_RATE_LIMITED` | TOTP failures throttled; `data.seconds` is the remaining wait |
+| `400` | `5313` | `TOTP_NOT_ENABLED` | TOTP is not enabled for this account |
+| `400` | `5315` | `TOTP_SETUP_EXPIRED` | Enrollment session expired |
+| `400` | `6306` | `PASSWORD_LOGIN_DISABLED` | Deployment enforces SSO and disabled password login |
+
+<Callout type="info">
+  Security errors such as `5300`, `5400`, and `5312` all use HTTP `400` (only model quota `6103` uses `429`). Always branch on the body `code`; see [API Errors and Retries](./errors).
+</Callout>
+
+## Related Documentation
+
+- [TOTP API](./totp) — enrollment, backup codes, and status for two-factor authentication
+- [SSO API](./sso) — provider configuration, login redirect, and callbacks
+- [Users API](./users) — change password, password status, and account deletion
+- [API Quick Start](./get-started) — call an Agent directly with an API key

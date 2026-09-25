@@ -1,259 +1,269 @@
 ---
 title: Create a Knowledge Base
-description: Build a searchable document collection for a team and choose indexing models
+description: Build a searchable document collection for a team and choose the indexing models
 icon: Database
 ---
 
-A knowledge base must belong to a team. The embedding model selected at creation determines the vector dimensions; do not switch embedding models after documents are first processed. If you must switch, rebuild the index.
+A knowledge base must belong to a team. Two decisions are hard to reverse: the **embedding model fixes the vector dimension** (it cannot be changed once documents are processed), and **visibility decides who can read it without a share**. The name must be unique within the team.
 
-## Creating a Knowledge Base
+<Callout type="info" title="Prerequisites">
+  1) You are a member of the target team with the `kb:create` permission; 2) the team is authorized for an `embedding` model (an unauthorized model is rejected at creation, and without one the knowledge base cannot be searched); 3) authorize a `rerank` model too if you want reranking. See [Managing Models](../models/manage-models.mdx) for authorization and provider setup.
+</Callout>
 
-1. Navigate to **Knowledge Bases**, select **Create Knowledge Base**.
-2. Fill in basic information:
-   - **Name**: `1-100` characters, displayed in the knowledge base list.
-   - **Description**: Up to `500` characters, describing the KB's purpose and content scope.
-   - **Team**: Select the team that owns this knowledge base.
+## Permissions and visibility
+
+| Action | Permission | Team role requirement |
+| --- | --- | --- |
+| View knowledge base / documents / chunks | `kb:read` | Within the visibility rules |
+| Hit testing (retrieval) | `kb:test` | Read access |
+| Create a knowledge base | `kb:create` | Team member |
+| Edit settings, upload/process/delete documents, edit chunks | `kb:update` | The creator, or a team owner/admin |
+| Delete a knowledge base | `kb:delete` | Team owner/admin |
+| Share with another team | `kb:update` | Owning team owner/admin |
+| Revoke a share | `kb:delete` | Owning team owner/admin |
+
+Visibility is set in the create/edit dialog:
+
+| Visibility | Who can read | Notes |
+| --- | --- | --- |
+| `private` | The creator only | Other team members cannot see it; **cannot be shared with other teams** |
+| `team` | All members of the team | Writing still requires the creator or a team admin |
+| `public` | Reserved value | Not offered in the UI, kept for compatibility |
+
+Cross-team access is only ever granted through a share and is always read-only — see “Cross-team sharing (read-only)” below.
+
+## Creating a knowledge base
+
+1. Go to **Knowledge Bases** and select **Create Knowledge Base**.
+2. Fill in the basics:
+   - **Name**: `1-100` characters, **unique within the team**; a duplicate returns `kb_name_exists`.
+   - **Description**: up to `500` characters describing purpose and scope.
+   - **Team**: the current team (the admin dashboard form can target another team).
 3. Select models:
-   - **Embedding Model**: Choose a team-authorized `embedding` model, or use the platform default. `embedding_model_id` cannot be changed after creation.
-   - **Rerank Model**: Optional, select a `rerank` model to improve retrieval precision.
-4. Configure chunking and retrieval settings:
-   - **Chunk Size**: Characters per chunk, default `1000`, minimum `100`.
-   - **Chunk Overlap**: Overlapping characters between adjacent chunks, default `100`, minimum `0`.
-   - **Separator**: Custom text separator (optional).
-   - **Search Mode**: `vector`, `fulltext`, or `hybrid` (default `hybrid`).
-   - **Rerank**: Enable reranking to optimize retrieval results.
-5. Click **Create Knowledge Base**.
-6. Open the knowledge base details and confirm the status is **Enabled**.
+   - **Embedding Model**: an `embedding` model authorized for the team. `embedding_model_id` cannot be changed after creation.
+   - **Rerank Model**: optional; once bound, recall results can be re-scored during retrieval.
+4. Configure chunking and reranking:
+   - **Chunk Size** `chunk_size`: default `1000` characters, minimum `100` (UI suggests a maximum of `2000`).
+   - **Chunk Overlap** `chunk_overlap`: default `100` characters, minimum `0` (UI suggests a maximum of `500`).
+   - **Custom Separator**: escape sequences such as `\n\n` are allowed and act as a hard split boundary.
+   - **Enable Reranking**: on by default; **Rerank Candidate Pool** defaults to `10` (`1-100`); **Rerank Score Threshold** defaults to empty (`0-1`).
+5. Choose **visibility** (`private` or `team`).
+6. Click **Create Knowledge Base** and open the detail page; confirm the status is **Active**.
+
+When editing an existing knowledge base the dialog also offers an **Enable Knowledge Base** switch (turning it off sets `archived`, and archived knowledge bases are not searched).
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-base-create-dialog.png" alt="Create Knowledge Base dialog" />
-  <figcaption>Create Knowledge Base dialog</figcaption>
+  <figcaption>Create Knowledge Base dialog: models, chunking, reranking, and visibility</figcaption>
 </figure>
 
-<Callout type="error">
-  Document processing and retrieval fail when the embedding model does not exist, is not authorized, or its vector dimensions do not match the existing index. First confirm authorization in the [models guide](../models/manage-models.mdx).
+<Callout type="error" title="The embedding model cannot be replaced">
+  Stored vectors are bound to the embedding model chosen at creation. Updating `embedding_model_id` is rejected outright (`embedding_model_locked_after_kb_creation`), while the **rerank model can be swapped at any time** (team authorization is checked on change). To use another embedding model, create a new knowledge base and process its documents with the new model.
 </Callout>
 
-## Embedding and Rerank Models
+## Models and vector dimensions
 
-Embedding models are regular platform models with `model_type = embedding` (for example OpenAI `text-embedding-3-small` or compatible local models), granted to teams via model authorization. A KB references one embedding model (`embedding_model_id`) and optionally a rerank model (`rerank_model_id`).
+### Embedding model
 
-### Embedding Model Lock
+A platform model with `model_type = embedding`. It appears in the create form only after being granted to the team through model authorization. A knowledge base references exactly one embedding model; without an available model, neither document processing nor retrieval can run.
 
-The embedding model is fixed when the knowledge base is created because stored vectors depend on that model. The admin edit form does not allow changing `embedding_model_id` after creation; attempting to update it is rejected. To use another embedding model, create a new knowledge base and process its documents with the new model.
+### Vector dimensions
 
-## Document Management
+`embedding_dimension` is written and frozen when **the first batch of documents finishes vectorization**. From then on:
 
-Document management includes upload, processing, reprocessing, and deletion. For detailed operations, see [Import Documents](./import-documents.mdx) and [Chunking & Document Processing](./chunking.mdx).
+- documents with a matching dimension are indexed normally;
+- vectors with a mismatched dimension raise a dimension mismatch error, and retrieval reports the `configuration_mismatch` category so you can verify the model and index dimension;
+- changing the embedding model never rebuilds the index automatically — create a new knowledge base or run a full reprocessing flow.
 
-### Upload Documents
+## Chunking and retrieval settings
 
-- **Single Upload**: Select knowledge base → **Upload Document** → Choose files → **Upload**. Upload completes via `POST /api/v1/knowledge-bases/{kb_id}/documents/upload` (multipart). After upload, document status is `pending`; extraction or embedding does not start automatically.
-- **Bulk Actions**: Select multiple documents in the table to **Quick Process** pending documents, **Retry Failed Chunks** for error documents, or **Delete** selected documents.
-- **Supported Formats**: PDF, DOC/DOCX, TXT, Markdown, HTML, CSV, XLS/XLSX, PPT/PPTX, JSON, URL.
+| Field | Default | Range | Where it applies |
+| --- | --- | --- | --- |
+| `chunk_size` | `1000` | `>=100` characters | Document processing (next process/reprocess) |
+| `chunk_overlap` | `100` | `>=0` characters | Document processing |
+| `separator` | empty | any string | Document processing, a hard split boundary |
+| `rerank_enabled` | `true` | boolean | Retrieval (needs a bound `rerank` model) |
+| `rerank_candidate_k` | `10` | `1-100` | Retrieval |
+| `rerank_score_threshold` | empty | `0-1` | Retrieval |
+| `search_mode` | empty (`null`) | `vector` / `fulltext` / `hybrid` | Default mode for Agent/workflow retrieval |
+| `top_k` | empty (`null`) | `1-100` | Agent/workflow retrieval |
+| `score_threshold` | empty (`null`) | `0-1` | Agent/workflow retrieval |
+| `dense_weight` / `lexical_weight` | empty (`null`) | `>=0` | Hybrid retrieval weights |
+| `rrf_k` | empty (`null`) | `1-1000` | Hybrid fusion constant |
+
+<Callout type="warn" title="KB settings and search requests are two separate sets of defaults">
+  The retrieval fields in the knowledge base settings default to **empty** and only apply once set explicitly, whereas a **search request** without parameters runs with `search_mode=hybrid`, `top_k=5`, `score_threshold=0`, and `rrf_k=60`. The hit-testing panel initializes from the knowledge base settings and **Apply to Production** writes the configuration back. In practice the setting mainly drives Agent/workflow retrieval, as described in [Retrieval & Quality Tuning](./retrieval.mdx).
+</Callout>
+
+For the character semantics of chunking, the Markdown versus plain-text difference, preview, and failure retries, see [Chunking and Document Processing](./chunking.mdx).
+
+## Cross-team sharing (read-only)
+
+Sharing gives **another team** read and retrieval access to a knowledge base, but **no editing rights**. It is the only form of cross-team access.
+
+### Steps
+
+1. In the **Knowledge Bases** list, hover a card, open the **⋯** menu, and choose **Share**.
+   - The entry is only shown for knowledge bases your own team owns, and only to team owners/admins.
+2. In the **Share** dialog, select a **team**.
+   - The list comes from the teams you belong to and automatically excludes the current team and teams already shared with.
+   - The **Permission Level** offers only **Read Only** and cannot be changed.
+3. Click **Share**. The entry appears with a read-only badge and a "Shared by …" note.
+4. To revoke, click the delete icon on that entry under **Shared With** and confirm; the knowledge base disappears from the receiving team's list immediately.
+
+### Rules and failure reasons
+
+| Rule | Result |
+| --- | --- |
+| A `private` knowledge base | Cannot be shared; returns `private_kb_cannot_be_shared` (400) |
+| Sharing with the owning team | Rejected with `kb_cannot_share_to_own_team` (400) |
+| Sharing with the same team twice | Rejected with `kb_already_shared` (400) |
+| What the receiving team sees | Only knowledge bases whose visibility is `team` or `public` |
+| Receiving-team permission | `read_only` only: view, retrieve, and associate with Agents/workflows; cannot change settings, upload, process, or delete documents |
+| Revoking a share that does not exist | Returns `kb_share_not_found` (404) |
+
+After sharing, both sides show a marker in their lists:
+
+- Receiver: a **From** + team name badge, and every write entry point is disabled on the detail page (`is_owned = false`).
+- Owner: a **Shared with N teams** badge, with N coming from `shared_with_count`.
+
+### Sharing through the API
+
+```bash
+# Share with another team (read_only is the only valid permission value)
+curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id": "TARGET_TEAM_UUID", "permission": "read_only"}'
+
+# List the teams it is shared with (owning-team members only)
+curl "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/shares" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# Revoke a share
+curl -X DELETE "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share/$TARGET_TEAM_ID" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+On the receiving side, `GET /api/v1/knowledge-bases` accepts `include_shared` (default `true`) and `own_only` (default `false`); set `include_shared=false` or `own_only=true` to see only your own teams' knowledge bases.
+
+## Document management
+
+Document management covers upload, processing, reprocessing, and deletion; the detailed steps are in [Import Documents](./import-documents.mdx) and [Chunking and Document Processing](./chunking.mdx).
+
+| Capability | Notes |
+| --- | --- |
+| Upload | `POST /api/v1/knowledge-bases/{kb_id}/documents/upload` (multipart); the document becomes `pending` and is not processed automatically |
+| URL import | After a safety check a `url` document is created and you confirm its chunks on the preview page |
+| Supported formats | PDF, DOC/DOCX, PPTX, TXT, Markdown, HTML, CSV, XLS/XLSX, JSON, URL (no `.ppt`, archives, or OCR) |
+| Bulk actions | Select several documents: **Quick Process** pending ones, **Retry Failed Chunks** on failed ones, or **Delete** |
+| Single-file limit | Site setting `kb_document_max_upload_size_mb`, default `50MB`, range `1-1024MB` |
 
 <Callout type="warn">
-  Uploading and processing documents are two separate stages. A document appearing in the list does not mean embedding is complete; only documents with **Completed** status are suitable for binding to an Agent.
+  Uploading and processing are two separate stages: a document appearing in the list does not mean it has been embedded. Only `completed` documents are retrievable, and only those are suitable for binding to an Agent.
 </Callout>
 
-### Document Processing Pipeline
+## Statistics
 
-```
-Upload → Extract Text → Clean → Chunk → Generate Embeddings → Index
-```
+The knowledge base detail page shows statistic cards at the top (documents, chunks, tokens, and per-status counts); **Hit Testing** in the dropdown opens the retrieval lab.
 
-**Processing Status:**
-- **Pending**: Uploaded, waiting for an administrator to start processing.
-- **Processing**: Currently extracting, chunking, embedding, or indexing.
-- **Completed**: Successfully indexed, available for retrieval.
-- **Error**: Processing error; inspect the error message and retry or reprocess.
+`GET /api/v1/knowledge-bases/{kb_id}/stats` returns:
 
-### Reprocess Documents
-
-- **Single Reprocess**: Select a completed or error document → **Reprocess** → Preview Chunks → **Process**.
-- **Retry Failed Chunks**: Select an error document → **Retry Failed Chunks**.
-- Bulk reprocessing uses the selection toolbar to quick-process pending documents or retry failed chunks.
-
-### Delete Documents
-
-- **Single Delete**: Select document → **Delete** → Confirm.
-- **Bulk Delete**: Select multiple documents → **Bulk Delete** → Confirm.
-
-## Retrieval Configuration
-
-Retrieval is configured per KB via KB settings. For detailed field descriptions, see [Knowledge Base Settings Reference](/en/reference/knowledge-settings). For retrieval comparison, see [Retrieval & Quality Tuning](./retrieval.mdx).
-
-### Retrieval Modes
-
-| Mode | Description |
-| --- | --- |
-| `vector` | Pure vector retrieval, based on semantic similarity |
-| `fulltext` | Full-text retrieval, based on keyword matching |
-| `hybrid` | Hybrid retrieval, fusing vector and full-text results (default) |
-
-### Hybrid Retrieval Parameters
-
-- **Dense Weight**: RRF weight for vector retrieval, default `1.0`.
-- **Lexical Weight**: RRF weight for full-text retrieval, default `1.0`.
-- **RRF K**: Reciprocal rank fusion parameter, default `60`, range `1-1000`.
-- At least one of dense weight or lexical weight must be greater than `0`.
-
-### Reranking
-
-- **Enable Reranking**: When enabled, reranks retrieval results to improve precision.
-- **Candidate Pool Size**: `1-100`, default `10`.
-- **Score Threshold**: Optional, `0-1`.
-
-### Test Retrieval
-
-1. Select knowledge base → **Hit Test**.
-2. Enter a `1-1000` character query.
-3. Select retrieval mode, Top K (`1-20`, default `5`), score threshold (`0-1`, default `0`), and weights.
-4. View matched chunks, relevance scores, and source documents.
-5. After saving a preset, you can **Apply to Production**.
-
-## Statistics and Monitoring
-
-### Knowledge Base Statistics
-
-`GET /api/v1/knowledge-bases/{kb_id}/stats` returns per-KB statistics:
-
-- Total documents
-- Total chunks
-- Total embeddings
-- Processing status counts
-- Embedding configuration and vector dimensions
-
-View via: Select knowledge base → **Statistics** tab.
+- `document_count` (recomputed from actual documents, not the cached value)
+- `total_chunks`, `total_tokens` (aggregated from documents and written back to the KB cache fields)
+- `documents_by_status`, `documents_by_type`
+- `embedding_dimension` and `embedding_stats`
 
 <Callout type="info">
-  Not implemented / Roadmap: Search query analytics (queries, response times, cache hit rate, top queries), storage usage trends, and statistics export are not available.
+  Not implemented / Roadmap: retrieval analytics (query volume, latency, cache hit rate, top queries), storage usage trends, and statistics export are unavailable.
 </Callout>
 
 ## Troubleshooting
 
-### Document Processing Failed
+### Document processing failed
 
-- **Symptoms**: Document status is "Failed", error message in logs.
-- **Solutions**:
-  1. Check if the file format is supported, the file is corrupted, or the file size exceeds the limit.
-  2. View processing logs: Knowledge Base → Documents → Select document → View processing logs.
-  3. Common errors:
-     - **Text extraction failed**: File corrupted or unsupported format.
-     - **Chunking failed**: Invalid chunk settings.
-     - **Embedding failed**: API key invalid or quota exceeded.
-     - **Indexing failed**: Qdrant connection issue.
-  4. Retry processing: Select failed document → **Retry** → Optionally adjust settings → Confirm.
+1. Confirm the format is supported, the file is not corrupted, and it is within the size limit.
+2. Open the document detail to read the error and identify whether extraction, chunking, or embedding failed.
+3. Common causes and fixes:
 
-### Search Not Working
+| Cause | Fix |
+| --- | --- |
+| Extraction failed (corrupted, encrypted, image-only) | Convert the format or remove the password and upload again |
+| Zero chunks | Confirm the file contains extractable text, or turn text cleaning off and retry |
+| Embedding failed (credentials, quota, dimension) | Verify model authorization and `embedding_dimension`, then retry failed chunks |
+| Indexing failed (vector store unavailable) | Check Qdrant and the Worker logs |
 
-- **Symptoms**: Search returns no results, relevant documents not found, search errors.
-- **Solutions**:
-  1. Check if documents are indexed, check for indexing errors.
-  2. Use **Hit Test** to verify search results and scores.
-  3. Check search settings: score threshold not too high, Top K value, try different search modes.
-  4. Check if the Qdrant service is healthy and reachable.
-  5. Reindex if needed.
+### No results or irrelevant results
 
-### High Embedding Costs
+1. Confirm the documents are `completed`.
+2. Use **Hit Testing** to verify scores: with zero results, lower `score_threshold` first, then switch search mode.
+3. Check whether an Agent overrides the knowledge base settings (`retrieval_top_k`, `score_threshold`, and `search_mode` on the association).
+4. Check that the vector store and `pg_search` are healthy; reprocess documents if needed.
 
-- **Symptoms**: Unexpected high costs, cost alerts triggered.
-- **Solutions**:
-  1. Review embedding usage in KB statistics, identify high-usage KBs.
-  2. Optimize chunking: increase chunk size, reduce overlap, filter unnecessary content.
-  3. Use cheaper models (e.g., `text-embedding-3-small`).
-  4. Remove or reprocess unnecessary documents.
+### Cost or performance anomalies
+
+- High cost: avoid unnecessary reprocessing, tune chunking (larger chunks, less overlap), switch to a cheaper embedding model, and delete redundant documents.
+- Slow retrieval: lower `top_k`, disable reranking for simple queries, narrow the document scope, and check vector store resources.
 
 <Callout type="info">
-  Not implemented / Roadmap: Per-KB document limits, daily embedding quotas, and cost alerts are not available.
+  Not implemented / Roadmap: per-knowledge-base document limits, daily embedding quotas, and cost alerts are all unavailable.
 </Callout>
 
-### Slow Search Performance
+## Best practices
 
-- **Symptoms**: Search takes too long, timeouts.
-- **Solutions**:
-  1. Review search performance in statistics, identify slow queries.
-  2. Optimize search: reduce Top K, disable reranking for simple queries, use filters.
-  3. Check Qdrant resource usage (CPU/memory) and indexes.
-  4. Increase resources or add replicas at the infrastructure level.
+- ✅ Name knowledge bases by content scope; avoid names like "Docs" or "Materials" that carry no information.
+- ✅ Get one representative document working with the defaults (`1000`/`100`), then compare adjustments with hit testing.
+- ✅ Clean up stale documents regularly; duplicate content competes with itself in the ranking.
+- ✅ Keep private knowledge bases for personal drafts; use `team` visibility for anything the team shares.
+- ❌ Do not expect to "add metadata" to improve retrieval — `metadata` is generated by the processing pipeline and has no editing entry point.
+- ❌ Do not replace the embedding model in production, and do not scale chunk size up without validating retrieval first.
 
-## Best Practices
+## API access
 
-### Document Management
-
-- ✅ Use descriptive document names, organize documents with categories and tags.
-- ✅ Add metadata for better search, remove outdated documents regularly.
-- ✅ Monitor processing status after upload, test search results.
-- ❌ Do not upload duplicate documents, do not use unclear file names.
-- ❌ Do not ignore processing errors, do not forget to test search.
-
-### Chunking Strategy
-
-- ✅ Choose appropriate chunk size for content type: use semantic chunking for narrative content, fixed chunking for structured data.
-- ✅ Test different strategies, monitor chunk quality, adjust based on search performance.
-- ❌ Do not use the same strategy for all content, chunks should not be too large or too small.
-- ❌ Do not ignore chunk overlap, do not skip testing.
-
-### Search Optimization
-
-- ✅ Use hybrid search for best results, enable reranking for accuracy.
-- ✅ Set appropriate score thresholds, monitor search performance, collect user feedback.
-- ❌ Do not rely only on vector search, do not set thresholds too high.
-- ❌ Do not ignore performance metrics and user feedback.
-
-## Bulk Operations
-
-The Documents table supports selection-based actions:
-
-- **Quick Process**: Process selected pending documents.
-- **Retry Failed Chunks**: Retry selected error documents.
-- **Delete**: Delete selected documents.
-
-ZIP/multi-file bulk upload and bulk metadata updates are not supported. Upload files individually, then use the preview/editor or the selection toolbar to process them.
-
-<Callout type="info">
-  Not implemented / Roadmap: Knowledge base import/export (JSON/CSV, with or without embeddings) is not available.
-</Callout>
-
-## API Access
-
-Manage knowledge bases via API. See [Knowledge Bases API](/en/api-reference/endpoints/knowledge-bases) for details.
-
-**Common Operations:**
+Manage knowledge bases through the API; the endpoint list is in the [Knowledge Base API](/en/api/knowledge). Knowledge base endpoints accept only a signed-in user's JWT session (`Authorization: Bearer <ACCESS_TOKEN>`) and **do not accept a `clou_` API key**.
 
 ```python
-# List KBs — filters: team_id, search, status, own_only
-kbs = api.get("/api/v1/knowledge-bases", params={"team_id": "team-123"})
+# List knowledge bases — supports team_id, search, status, own_only, include_shared
+kbs = api.get("/api/v1/knowledge-bases", params={"team_id": "team-123", "include_shared": True})
 
-# Create KB for team
+# Create a knowledge base for a team
 kb = api.post("/api/v1/knowledge-bases", json={
     "name": "Product Docs",
     "team_id": "team-123",
     "embedding_model_id": "model-456",
-    "settings": {"chunk_size": 1000, "chunk_overlap": 100, "search_mode": "hybrid"}
+    "visibility": "team",
+    "settings": {"chunk_size": 1000, "chunk_overlap": 100, "rerank_enabled": True}
 })
 
-# Upload document
+# Upload a document
 with open("document.pdf", "rb") as f:
     doc = api.post(
         f"/api/v1/knowledge-bases/{kb_id}/documents/upload",
         files={"file": f}
     )
 
-# Search KB
+# Search a knowledge base
 results = api.post(f"/api/v1/knowledge-bases/{kb_id}/search", json={
     "query": "How to reset password?",
     "top_k": 5
 })
 ```
 
-**Document Processing API:**
+**Document processing API:**
 
-| Endpoint | Description |
+| Endpoint | Notes |
 | --- | --- |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process a pending document |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | Process with specified chunk settings |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | Reprocess a document |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | Re-chunk a document |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | Retry failed chunks |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | Retry single chunk embedding |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process` | Process a pending document (chunk settings optional) |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | Submit the chunks confirmed in the preview |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | Delete old chunks and process again |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | Re-chunk with new chunk settings |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | Retry embedding for failed chunks only |
+| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | Retry a single chunk embedding |
+
+## Related pages
+
+- [Import Documents](./import-documents.mdx) — upload, URL import, and failure retries
+- [Chunking and Document Processing](./chunking.mdx) — preview, process, and edit chunks
+- [Browsing Documents & Metadata](./browse-documents.mdx) — sharing badges and system fields
+- [Retrieval & Quality Tuning](./retrieval.mdx) — the retrieval lab and diagnostics
+- [Knowledge Base settings reference](/en/reference/knowledge-settings) — every field and limit

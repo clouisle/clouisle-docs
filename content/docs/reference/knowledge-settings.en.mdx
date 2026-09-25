@@ -15,6 +15,8 @@ Knowledge Base settings affect both document processing and runtime retrieval. A
 
 When a Knowledge Base is created, `embedding_dimension` is empty; the system writes the measured dimension after vectorizing the first batch of document chunks. Afterwards, updating `embedding_model_id` is rejected, and submitting vectors with a mismatched dimension raises `DimensionMismatchError`. For provider coverage and Qdrant multi-dimension collection mapping, see [Embedding Adapters & Vector Dimensions](/reference/embedding-adapters).
 
+A Knowledge Base's `visibility` defaults to `private` (visible only to the creator) and can be set to `team` (visible to team members); `public` is retained for compatibility only.
+
 ## Chunking & Rerank
 
 | Field | Type | Default | Limit |
@@ -22,6 +24,7 @@ When a Knowledge Base is created, `embedding_dimension` is empty; the system wri
 | `chunk_size` | integer | `1000` | `>=100` characters |
 | `chunk_overlap` | integer | `100` | `>=0` characters |
 | `separator` | string/null | `null` | Custom text separator |
+| `rerank_model_id` | UUID/null | `null` | Team-authorized rerank model ID; used together with `rerank_enabled` |
 | `rerank_enabled` | boolean | `true` | Whether rerank is enabled |
 | `rerank_candidate_k` | integer | `10` | `1-100` |
 | `rerank_score_threshold` | number/null | `null` | `0-1` |
@@ -38,6 +41,10 @@ When a Knowledge Base is created, `embedding_dimension` is empty; the system wri
 | `rrf_k` | integer/null | `null` (settings); request default `60` | `1-1000` |
 
 Hybrid retrieval requires at least one of dense weight or lexical weight to be greater than `0`. Query length is `1-1000` characters; batch comparison supports at most `10` configurations and IDs must be unique.
+
+<Callout type="info" title="expand_adjacent is an internal option">
+The retrieval layer also has an `expand_adjacent` switch (default `false`): when enabled, it pulls in the chunks adjacent to a matched chunk (index ±1) within the same document to round out the context. It is an **internal request parameter of the retrieval service** and is **not currently exposed via the public search API**, so it cannot be configured in Knowledge Base settings or in a search request; the public search endpoint does not accept the field.
+</Callout>
 
 ## Documents & Statuses
 
