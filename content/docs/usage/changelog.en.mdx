@@ -19,12 +19,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 #### Chat and File Previews
 - Added a unified artifact list with file counts, expandable results, authenticated downloads, and shared previews for common document, media, and code formats.
 - Added DOCX thumbnails, page synchronization, responsive fit-to-width, and zoom controls; added read-only PDF and spreadsheet preview controls.
+- Added the Agent **Hide Artifact List** setting, off by default, to hide the generated files list below assistant messages in chat.
 
 #### Memory and RAG
 - Added optional background memory extraction controls in the admin `memory` site-settings category, including model selection, debounce cooldown, and pending-turn trigger limits.
 - Added the bounded `get_memory_subgraph` Agent tool for relationship-aware memory retrieval.
 
 ### Changed
+
+#### Agent Studio
+
+- On phones, the Agent preview opens in a full-screen, drawer-like overlay instead of compressing the editor and chat side by side.
 
 #### Assets and Media
 - Persisted generated images and videos as scoped Assets and exposed conversation/workflow-scoped media references for model use.

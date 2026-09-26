@@ -6,10 +6,12 @@ icon: Bot
 
 import { TypeTable } from 'fumadocs-ui/components/type-table';
 
-Clouisle provides a dedicated **Agent Studio** workspace (`/app/apps/{agent_id}`) featuring a two-column responsive interface:
-- **Left Column (Orchestration Editor)**: Collapsible cards for model selection, system prompt editing, dynamic variables, knowledge bases, tool bindings, chat behavior flags, and advanced runtime parameters.
-- **Right Column (Live Preview Panel)**: A persistent, fully functional chat sandbox that lets you immediately interact with and test your draft agent configuration without leaving the page or publishing changes.
-- **Top Toolbar**: Quick access to agent metadata (name, icon, status), publication controls (`Draft` vs `Published`), the Embed widget drawer, and the Agent Settings drawer.
+On desktop, Agent Studio (`/app/apps/{agent_id}`) uses a two-column layout for orchestration and live preview:
+- **Orchestration Editor**: Configure the model, system prompt, variables, knowledge bases, tools, and runtime settings.
+- **Live Preview Panel**: Test draft-agent conversations without leaving the page or publishing changes.
+- **Top Toolbar**: Access Agent metadata, publication status (`Draft` or `Published`), Embed, and Agent Settings.
+
+On phones, the side-by-side preview is hidden so the editor stays full-width. Select **Preview** in the toolbar to open the chat in a full-screen, drawer-like overlay; close it to return to editing.
 
 <Callout type="info">
   The current team must have an enabled `chat` model authorized. Creating requires `agent:create`; publishing requires `agent:publish`.
@@ -141,6 +143,8 @@ For full configuration options, see [Attachments and Media](./media) and [Memory
 2. In **Debug & Preview**, send questions that cover both normal and failure paths.
 3. When tools are present, verify tool parameters, failure prompts, and max-iteration termination behavior.
 4. Select **Publish**.
+
+To hide the generated files list below assistant messages, turn on **Hide Artifact List** in **Agent Settings**. It is off by default; enabling it hides the list without deleting the generated files.
 
 ## Monitoring and Statistics
 
