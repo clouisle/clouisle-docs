@@ -41,60 +41,39 @@ Available commands:
 | Command | Description |
 | --- | --- |
 | `npm run dev` | Start the development server |
-| `npm run build` | Production build (`next build`) — Node/server output only |
-| `npm run build:cf` | Cloudflare Workers build (`opennextjs-cloudflare build` + cache population) |
-| `npm run start` | Start the production build |
-| `npm run deploy` | `build:cf` followed by `wrangler deploy --minify` |
+| `npm run build` | Production static export (`next build`, output in `out/`) |
+| `npm run start` | Start the Next.js production server locally |
+| `npm run deploy` | `npm run build` followed by `wrangler deploy --minify` |
 | `npm run types:check` | Next.js typegen + TypeScript type checking |
 | `npm run lint` | ESLint |
 
 ## Deploy (Cloudflare Workers)
 
-`wrangler.jsonc` points the Worker entry point at `.open-next/worker.js`, which is produced by OpenNext — **not** by `next build`. A plain `next build` followed by `npx wrangler versions upload` fails with:
+The site uses Next.js static export (`output: 'export'`). `next build` writes the complete site to `out/`; `wrangler.jsonc` serves those assets through Cloudflare Workers Static Assets and runs the small `worker/index.ts` router only for routes that need it (such as locale fallback and feedback). There is no OpenNext build or cache-population step.
 
-```
-✘ [ERROR] The entry-point file at ".open-next/worker.js" was not found.
+```bash
+bun install --frozen-lockfile
+bun run build
+bunx wrangler deploy --minify
 ```
 
-Cloudflare Workers Build settings must therefore be:
+Cloudflare Workers Build settings:
 
 | Setting | Value |
 | --- | --- |
-| Build command | `npm run build:cf` — or leave empty to use the repo's `wrangler.jsonc` `build.command` |
-| Deploy command | `npx wrangler versions upload` (preview) / `npx wrangler deploy` (production) |
+| Build command | `bun run build` |
+| Deploy command | `bunx wrangler deploy --minify` |
 
-The build is also declared in `wrangler.jsonc`:
+The Wrangler configuration also declares `npm run build` as its build command. When using a dashboard-managed build, make sure its build command produces the `out/` directory before deployment. Do not use `bun opennextjs-cloudflare build`; the OpenNext dependency and build script were removed when the site moved to static export.
 
-```jsonc
-"build": {
-  "command": "npm run build:cf",
-}
-```
-
-`wrangler` runs that command itself before uploading, so a missing dashboard build command (or one that runs only `next build`) can no longer break the deploy:
+Local verification:
 
 ```bash
-rm -rf .open-next
-npx wrangler versions upload --dry-run --outdir /tmp/cf-dry
-# [custom build] Running: npm run build:cf
-# [custom build] Worker saved in `.open-next/worker.js` 🚀
-# [custom build] Successfully populated static assets cache
-# Total Upload: 56324.74 KiB / gzip: 7845.52 KiB   → exit 0
+bun run build
+bunx wrangler deploy --dry-run --minify
 ```
 
-`build:cf` runs two steps, and both are required:
-
-1. `opennextjs-cloudflare build` — emits `.open-next/worker.js`, `.open-next/assets/**` and the prerendered pages under `.open-next/cache/**`.
-2. `opennextjs-cloudflare populateCache remote` — copies the prerendered entries into `.open-next/assets/cdn-cgi/_next_cache/**`. The site uses `staticAssetsIncrementalCache` (see `open-next.config.ts`), so the ~236 pre-rendered pages and the `/llms*` exports are served straight from the ASSETS binding; without this step the upload succeeds but every page falls back to on-request rendering.
-
-Both artifacts are gitignored (`.open-next/`), so the deploy must always run after a build in the same workspace — never upload from a clean checkout.
-
-Local verification of the whole chain:
-
-```bash
-npm run build:cf
-npx wrangler versions upload --dry-run --outdir /tmp/cf-dry   # validates entry point + assets without uploading
-```
+The dry run validates the Worker entry point and static assets without uploading.
 
 ## Writing Docs
 
