@@ -59,7 +59,7 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 
 ### `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` 到底是开还是关？
 
-代码默认是 `false`（让不支持的开发机也能启动），但官方 `sandbox-worker` 镜像的 `ENV`、`deploy/.env.example`、K8s ConfigMap 和 Helm values 都显式设为 `true`。所以走官方部署就是开启的；自己拼镜像或自己写 manifest 时不要漏掉这个变量，否则沙箱会在没有文件系统隔离的情况下执行代码。
+代码默认就是 `true`（`config.py`），官方镜像/Compose/Helm/K8s 同样设为 `true`。自己拼镜像或自己写 manifest 时不要漏掉这个变量，否则沙箱会在没有文件系统隔离的情况下执行代码。
 
 ## 安全
 

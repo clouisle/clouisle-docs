@@ -94,7 +94,7 @@ If your organization has configured SSO, you can log in with corporate credentia
 - With email matching on (`sso_match_by_email`, enabled by default) and an existing account for that email, the SSO connection is linked to that account.
 - Otherwise, when auto-creation is allowed, a new account is created. New accounts have **no local password**, count as email-verified, and enter pending-approval state according to configuration.
 
-OAuth2/OIDC, SAML 2.0, and CAS are supported. See [SSO Configuration](./sso.mdx) for setup and troubleshooting.
+OAuth2/OIDC, SAML 2.0, CAS, and Feishu are supported (Feishu sign-in appears only when an administrator explicitly enables it on the Feishu integration). See [SSO Configuration](./sso.mdx) for setup and troubleshooting.
 
 <Callout type="warn">
   Turning off `sso_allow_password_login` switches the site to SSO-only. Before doing so, make sure at least one Super Admin has an SSO connection bound — otherwise nobody may be able to reach the admin console.

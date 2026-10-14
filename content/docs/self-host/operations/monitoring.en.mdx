@@ -50,27 +50,23 @@ WHERE NOT i.indisvalid;
 For index creation, cleanup, and verification steps, see [Database Maintenance and Index Tuning](./database-maintenance.mdx).
 
 ## Observability console
-
-The built-in observability console lives under **Monitoring** > **Observability** (route `/dashboard/observability`) and is backed by `GET /api/v1/admin/observability/*`, which requires the `admin:dashboard:access` permission. There is **no** Prometheus-style `/metrics` endpoint and no built-in Prometheus, Grafana, Datadog, or ELK integration; external monitoring must collect logs and poll the health endpoint plus this API.
-
-The endpoints fall into two groups with different parameter semantics:
-
++
+The built-in observability console lives under **Monitoring** > **Observability** (route `/dashboard/observability`) and is backed by the APIs under `GET /api/v1/admin/observability`. Read endpoints require the `admin:dashboard:access` permission; alert acknowledgement, silence, and rule updates require `admin:observability:manage`. There is **no** Prometheus-style `/metrics` endpoint and no built-in Prometheus, Grafana, Datadog, or ELK integration; external monitoring must collect logs and poll the health endpoint plus this API.
++
 | Endpoint | Parameters | Notes |
-| --- | --- | --- |
-| `/overview`, `/agents`, `/agent/{agent_id}`, `/workflows`, `/workflow/{workflow_id}`, `/throughput`, `/tokens` | `time_range` | Usage statistics; accepts `7d`/`30d`/`90d`/`all`, default `30d`, and an invalid value falls back to `30d` |
-| `/timeouts` | `time_range` + `source` (`all`/`agent`/`workflow`) + `page`/`page_size` | Paged timeout event list |
-| `/agents`, `/workflows`, `/timeouts` | `page` (≥1), `page_size` (1–100, default 20), `sort_by`, `sort_order` | Paging and sorting |
-| `/throughput` | `granularity` (`hour`/`day`) | Defaults to `hour` for `7d` and `day` otherwise |
-| `/system/health`, `/system/trend`, `/system/workers` | none | **Current snapshots**; they take no `time_range` |
-| `/system/slow-queries` | `threshold_ms` (default `1000`, ≥1), `page` (≥1), `page_size` (1–100, default 20) | Reads `pg_stat_statements` |
-
-`/system/workers` returns the Celery-side queue and worker state: `status`, `worker_count`, `active_tasks`, `reserved_tasks`, `scheduled_tasks`, plus the `pending` length of **all five queues** (`default`, `knowledge`, `workflow`, `agent`, `sandbox`) and a per-task pending breakdown. `/system/health` returns CPU, memory, disk, database, Redis, and that worker snapshot, and appends the result to a Redis snapshot list that `/system/trend` reads back. Every observability payload is cached for `30` seconds.
-
-<Callout type="info">
-  `/system/slow-queries` depends on the `pg_stat_statements` extension. When it returns `available: false`, read the `reason` field: `shared_preload_libraries` does not include it, the database user lacks permission, or the extension was never created. The supplied PostgreSQL image preloads it and sets `track=all`.
-</Callout>
-
-The basic health check `GET /api/v1/health` requires no authentication and is meant for container healthchecks and external liveness probes; it returns only `{"status": "healthy"}` with no dependency detail.
++| --- | --- | --- |
++| `GET /summary` | `period` (`15m`/`1h`/`24h`/`7d`, default `1h`), `team_id` | Compact run rollups and trends; percentiles and success rates are `null` when samples are insufficient |
++| `GET /runs` | `period`, `team_id`, `source` (`all`/`agent`/`workflow`), `status`, `error_category`, `run_id`, `cursor`, `limit` (1–50, default `25`) | Summary-only keyset-paginated list; details come from `GET /runs/{agent|workflow}/{run_id}` |
++| `GET /dependencies` | `period`, `team_id` | Model, tool, and retrieval aggregates when supported by recorded telemetry |
++| `GET /queues` | none | Bounded current queue and worker snapshot |
++| `GET /infrastructure` | none | Bounded infrastructure snapshot, dependency health, and safe `pg_stat_statements` query display |
++| `GET /alerts`, `GET /alerts/rules` | Alert list takes `status` (`active`/`resolved`/`all`), `cursor`, `limit` (1–50, default `25`); rule list returns all rules | — |
++| `POST /alerts/{id}/acknowledge`, `POST /alerts/{id}/silence` | Silence requires `duration_seconds` (60–604800 seconds) | Both require `admin:observability:manage` |
++| `PUT /alerts/rules/{id}` | Body updates threshold, silence duration, and recovery window | Requires `admin:observability:manage` |
++
++Run summaries are retained for 30 days and record only allowlisted fields: timing, status, model name, token counts, resource and team identifiers, and error codes. Prompts, message bodies, tool arguments and results, credentials, and tracebacks are never stored; historical runs without submission timestamps are not backfilled. Alert rules are evaluated on alert reads, and the retention task uses the existing `default` Celery queue.
++
++The basic health check `GET /api/v1/health` requires no authentication and is meant for container healthchecks and external liveness probes; it returns only `{"status": "healthy"}` with no dependency detail. The dependency-aware infrastructure snapshot is `GET /api/v1/admin/observability/infrastructure` (requires `admin:dashboard:access`): missing probes are reported as `unknown`, and unavailable statistics are not shown as zero.
 
 ## Product Metrics
 

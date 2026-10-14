@@ -70,7 +70,7 @@ SSO 自动创建由站点设置控制（**Site Settings** → **SSO/Security**�
 - 时间：`created_at`、`last_login`
 - 密码状态：`force_password_change`、`password_expiration_exempt`（列表里显示为密码状态徽标）
 - 授权：`roles`（全局角色数组）
-- SSO：`sso_connections`（提供商、外部账号、首次/最后登录），有 `admin:sso:update` 时可断开连接
+- SSO：`sso_connections`（集成、外部账号、首次/最后登录），有 `admin:integrations:login:update` 时可断开连接
 
 > **未实现 / Roadmap**：用户管理内没有单用户活动视图、登录历史、活跃会话列表或会话撤销。账户锁定由全局登录策略 `max_login_attempts` / `lockout_duration_minutes` 强制执行；用户行为需到 **Audit Logs** 按用户筛选查看。
 

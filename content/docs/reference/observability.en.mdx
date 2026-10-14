@@ -4,97 +4,103 @@ description: Look up admin observability metrics, health thresholds, aggregation
 icon: Activity
 ---
 
-Clouisle provides centralized system observability and health monitoring for platform administrators (requires the `admin:dashboard:access` global permission). All monitoring routes are mounted under `/api/v1/admin/observability`, and responses are cached in Redis for `30` seconds (namespace `admin:observability:v1`).
+Clouisle exposes an operational observability API for platform administrators, mounted at `/api/v1/admin/observability`. Read endpoints require the `admin:dashboard:access` permission; acknowledging and silencing alerts and updating rules require `admin:observability:manage`.
 
-## Time Range and Bucketing Rules
+## Time Window Parameters
 
-Most metric endpoints accept the `time_range` query parameter:
-- Supported values: `7d`, `30d` (default), `90d`, `all` (all historical records). Invalid values fall back to `30d`.
-- Trend granularity (`granularity`): `hour` or `day`. When omitted, `7d` defaults to `hour` buckets and other ranges default to `day` buckets.
+The `summary`, `runs`, and `dependencies` endpoints share one time-window model:
 
-## Metric Categories
+| Parameter | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `period` | `15m \| 1h \| 24h \| 7d \| custom` | `1h` | Preset window; `custom` requires start/end times |
+| `team_id` | `string` | — | Filter by team |
+| `start_time` | `datetime` | — | Custom window start |
+| `end_time` | `datetime` | — | Custom window end |
 
-### 1. Overview
+Invalid window parameters return `422`.
 
-Endpoint: `GET /api/v1/admin/observability/overview`
+## Run Summary
 
-| Metric Field | Type | Definition |
-| --- | --- | --- |
-| `totals.agent_requests` | integer | Canonical assistant-final messages in the period |
-| `totals.workflow_runs` | integer | Total workflow run instances in the period |
-| `totals.total_requests` | integer | Combined agent requests and workflow runs |
-| `totals.total_tokens` | integer | Total tokens consumed |
-| `rates.agent_success_rate` | number (0-100) | Agent success rate (`round_status == 'completed'`) |
-| `rates.workflow_success_rate` | number (0-100) | Workflow run success rate (`status == 'success'`) |
-| `rates.overall_success_rate` | number (0-100) | Combined execution success rate |
-| `rates.timeout_rate` | number (0-100) | Combined error/timeout rate (workflow `status == 'timeout'` plus agent `round_status == 'error'`) |
-| `latency.p50_ms / p90_ms / p95_ms / p99_ms` | number | Continuous percentiles of total duration (agent `duration_ms` and workflow `total_duration_ms`) |
-| `ttft.p50_ms / p90_ms / p95_ms / p99_ms` | number | Time-to-first-token percentiles, computed from agent `first_token_ms` only |
-| `throughput.current_qps` | number | Events created in the preceding 60 seconds divided by 60 |
-| `throughput.peak_hourly_requests` | integer | Highest number of requests in a single hourly bucket |
+Endpoint: `GET /api/v1/admin/observability/summary`
 
-### 2. Entity Performance (Agents & Workflows)
+Returns compact run rollups and trends (submission counts, success rates, percentiles, tokens, trend buckets, open issues). Percentiles and success rates are `null` when samples are insufficient — never treat them as zero.
 
-Endpoints:
-- Agent list: `GET /api/v1/admin/observability/agents` (sortable by `requests`, `p50`, `p90`, `p95`, `p99`, `timeout_rate`, `success_rate`, `tokens`)
-- Agent detail and trend: `GET /api/v1/admin/observability/agent/{agent_id}`
-- Workflow list: `GET /api/v1/admin/observability/workflows` (additionally sortable by `runs`, `failed_nodes`)
-- Workflow detail and node bottlenecks: `GET /api/v1/admin/observability/workflow/{workflow_id}`
+## Run List and Detail
 
-The workflow detail endpoint also returns node-type statistics for the top 20 most-executed node types (`execution_count`, `failed_count`, `avg_duration_ms`), which makes it fast to identify which node (for example `http_request` or `llm`) is blocking a pipeline.
+List endpoint: `GET /api/v1/admin/observability/runs`
 
-### 3. Timeout and Failure Diagnosis
+The list returns summary-only fields; fetch detail separately. It uses keyset pagination: pass the response's `next_cursor` as the next request's `cursor`.
 
-Endpoint: `GET /api/v1/admin/observability/timeouts` (supports `source=all|agent|workflow`)
+| Parameter | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `period` / `team_id` / `start_time` / `end_time` | — | `period` defaults to `1h` | Same window as above |
+| `source` | `all \| agent \| workflow` | `all` | Run origin |
+| `status` | `string` | — | Filter by status |
+| `error_category` | `string` | — | Filter by error category |
+| `run_id` | `string` | — | Exact lookup by run ID |
+| `cursor` | `string` | — | Pagination cursor |
+| `limit` | `1–50` | `25` | Page size |
 
-- Workflow timeout events: runs with `status = 'timeout'`, reported as `timeout_type = 'workflow'`.
-- Agent error events: assistant interactions with `round_status = 'error'`. Because historical messages do not separate the error subtype, the type is reported as `unknown`, and the response explicitly sets `agent_timeout_type_available: false`.
+Detail endpoint: `GET /api/v1/admin/observability/runs/{source}/{run_id}`
 
-### 4. Throughput and Token Consumption
+- `{source}` accepts only `agent` or `workflow` (not `all`); `run_id` is a UUID.
+- Unknown runs return `404`. Permission is checked before any trace content loads.
 
-- `GET /api/v1/admin/observability/throughput`: returns real-time `qps`, `running_workflows`, and time-bucketed request series.
-- `GET /api/v1/admin/observability/tokens`: aggregates token usage by source (`agent`, `workflow`, `other`) and by model (`by_model`). For `7d` and `30d` it also compares against team model quota counters and takes the larger value, preventing undercounting when events are missing.
+## Dependency Aggregates
 
-## System Health and Thresholds
+Endpoint: `GET /api/v1/admin/observability/dependencies`
 
-Endpoint: `GET /api/v1/admin/observability/system/health`
+Accepts the same time-window parameters as `summary`. Returns model, tool, and retrieval aggregates when supported by recorded telemetry.
 
-The system collects hardware metrics and retains roughly the most recent 120 health snapshots in a Redis list (`LTRIM 0..120`; the whole list expires after 24 hours — retrieve the trend via `GET .../system/trend`). Thresholds and fields:
+<Callout type="warn">
+Tool and retrieval child spans are not yet captured, so their aggregates are reported as unavailable rather than inferred.
+</Callout>
 
-| Monitor | Warning / Danger Thresholds | Key Fields |
-| --- | --- | --- |
-| **CPU** | `usage_percent >= 70%` warning; `>= 90%` danger | `status`, `usage_percent`, `cores`, `architecture` |
-| **Memory** | `usage_percent >= 80%` warning; `>= 90%` danger | `status`, `usage_percent`, `used_bytes`, `total_bytes` |
-| **Disk** | `usage_percent >= 80%` warning; `>= 90%` danger | `status`, `usage_percent`, `used_bytes`, `total_bytes` |
-| **Database** | Connection usage derived from PostgreSQL `pg_stat_activity` and `max_connections` | `status`, `active_connections`, `max_connections` |
-| **Redis** | Connectivity and cache efficiency | `status`, `used_memory`, `connected_clients`, `ops_per_sec`, `hit_rate` |
-| **Workers** | Celery nodes and backlog across 5 core queues | See the worker section below |
+## Queue and Infrastructure Snapshots
 
-### Celery Workers and Core Queues
+- `GET /api/v1/admin/observability/queues`: bounded current snapshot of queues and workers; no query parameters.
+- `GET /api/v1/admin/observability/infrastructure`: bounded infrastructure snapshot, dependency health, and safe `pg_stat_statements` slow-query display; no query parameters. Missing probes report as `unknown`; unavailable statistics are never shown as zero.
 
-Endpoint: `GET /api/v1/admin/observability/system/workers`
+## Operational details
 
-Clouisle defines 5 fixed queues:
-- `default`: general system tasks and email delivery
-- `knowledge`: document parsing, chunk extraction, and vector indexing
-- `workflow`: asynchronous workflow execution and long-running scheduling
-- `agent`: background agent reasoning and async inference
-- `sandbox`: code node sandbox execution
+Queue snapshots are collected on demand (no dedicated background task) with a `5`-second per-API-process cache: Celery inspection uses separate inspectors to collect active, reserved, and scheduled tasks plus active queues concurrently, with a `0.5`-second reply collection timeout per inspection and a `2.2`-second overall inspection deadline; Redis queue lengths are read concurrently afterward.
 
-Queue inspection scans Redis lists in batches of 500 messages with a per-queue cap of 5000. Backlog beyond that cap is reported as `unscanned:{queue}`.
+Infrastructure snapshots carry the same `5`-second per-API-process cache (the page refreshes every `30` seconds): primary health sampling, registry reads, and slow-query statistics each have a `2`-second deadline; Celery keeps its `1.5`-second deadline with `0.5` seconds for reply collection, and Celery latency includes reply collection. Failures in instance discovery or slow-query statistics do not suppress dependency health: discovery failure returns no instances with partial metadata rather than a fabricated local-only list.
 
-### Slow Query Diagnostics
+Each API identity reports its latest resource sample to shared Redis every `10` seconds, with a renewable, owner-checked lease electing a single reporter across that identity's Gunicorn processes. Redis server time decides freshness: samples up to `30` seconds old keep their measured health state, samples over `30` seconds are `stale`, and samples over `60` seconds are `offline`; old values and timestamps stay visible but marked as retained rather than current, and records disappear after `5` minutes without a successful publication.
 
-Endpoint: `GET /api/v1/admin/observability/system/slow-queries`
+Span caps: each Agent run retains at most `128` dependency spans, and the run detail marks traces that exceed the cap as incomplete; workflow detail is bounded to `100` node spans and likewise reports incompleteness; historical runs are not backfilled.
 
-- Default threshold is `threshold_ms=1000` (queries slower than 1 second), returning duration, call count, and returned rows with pagination.
-- **Prerequisite**: PostgreSQL must have the `pg_stat_statements` extension enabled. If unavailable, the endpoint returns `available: false` with the reason.
+Run summaries are best-effort telemetry and AgentRun records are authoritative: an API maintenance task reconciles every minute in batches of at most `100`; runs become eligible `60` seconds after their recorded finish time and only within the `30`-day telemetry retention window; reconciliation restores status, timing, model, and Token fields from the run and its final message while keeping captured dependency spans, never touches active runs or replays model/tool calls, needs multiple cycles for a large backlog, and never recreates missing or expired historical summary rows.
 
-## Database Aggregate Concurrency Limit
+## Alerts
 
-Statistics and observability analysis fan out independent aggregates with `asyncio.gather`. Without a bound, one request can hold every slot of the shared connection pool and stall regular APIs.
+List endpoint: `GET /api/v1/admin/observability/alerts`
 
-Clouisle bounds this with a global semaphore:
-- **Environment variable**: `DB_AGGREGATE_CONCURRENCY` (default `4`, must be greater than 0).
-- **Mechanism**: a single process-wide `asyncio.Semaphore`, applied per query via `run_bounded()` rather than once around an entire `gather()`.
-- **Rationale**: the Tortoise shared pool defaults to `maxsize=5` and PostgreSQL defaults to `max_connections=100`. The default deployment already runs roughly 17 processes, each holding a pool, so limiting a single process's aggregate concurrency to `4` keeps analytics from exhausting database connections at any moment.
+| Parameter | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `status` | `active \| resolved \| all` | `active` | Alert status |
+| `cursor` | `string` | — | Pagination cursor |
+| `limit` | `1–50` | `25` | Page size |
+
+Alert event fields: `id`, `rule_id`, `kind`, `severity` (`critical`, `warning`, `info`), `title`, `detail`, `affected_count`, `status` (`active`, `resolved`), `opened_at`, `resolved_at`, `acknowledged_at`, `silenced_until`.
+
+Alert actions (all require `admin:observability:manage`; resolved or unknown alerts return `404`):
+
+- `POST /api/v1/admin/observability/alerts/{alert_id}/acknowledge`: acknowledge an alert.
+- `POST /api/v1/admin/observability/alerts/{alert_id}/silence?duration_seconds=...`: silence an alert; `duration_seconds` is required, range `60–604800` (1 minute to 7 days).
+
+Rule endpoints:
+
+- `GET /api/v1/admin/observability/alerts/rules`: list alert rules (read permission suffices).
+- `PUT /api/v1/admin/observability/alerts/rules/{rule_id}`: update a rule (requires `admin:observability:manage`). All body fields are optional: `threshold` (`0–1`), `enabled`, `evaluation_window_seconds` (`60–604800`), `recovery_window_seconds` (`60–604800`). Unknown rules return `404`.
+
+<Callout type="info">
+Alert rules are evaluated on alert reads, so evaluation depends on the API being reachable; the scheduled retention task uses the existing `default` Celery queue.
+</Callout>
+
+## Recording Boundaries
+
+- Run summaries live in compact indexed records kept for `30` days; historical runs without submission timestamps are not backfilled.
+- Only allowlisted fields are recorded: timing, status, model name, token counts, resource/team identifiers, and error codes. Prompts, message bodies, tool arguments/results, credentials, and tracebacks are never stored.
+- New agent records include model aggregates and a safe root run span; tool/retrieval child spans and their aggregates are not captured and are marked unavailable.

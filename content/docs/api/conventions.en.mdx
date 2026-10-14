@@ -1,0 +1,157 @@
+---
+title: Pagination, Filtering, and Sorting
+description: Page through lists, filter results, and find the real batch endpoints
+icon: ListOrdered
+---
+
+List endpoints share one pagination envelope, filters are defined per endpoint, ordering is fixed server-side, and only the documented batch endpoints exist — there is no generic batch interface.
+
+## Pagination
+
+List endpoints accept two query parameters: `page` (1-indexed, default `1`) and `page_size` (default `20`). There is no uniform `page_size` cap: most endpoints accept any value, while some (e.g. conversations, admin observability) constrain it with `le=100` — check each endpoint schema.
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/agents?page=2&page_size=50" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Pagination Envelope
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [],
+    "total": 156,
+    "page": 2,
+    "page_size": 50
+  },
+  "msg": "success"
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `items` | Items on the current page |
+| `total` | Total items across all pages |
+| `page` | Current page number |
+| `page_size` | Items per page |
+
+Paginated responses carry only `total`, `page`, and `page_size` — no `total_pages`, `has_next`, `has_prev`, and no cursor pagination. The single exception is the admin audit-log list (`GET /api/v1/admin/audit-logs`), whose `data` additionally includes `total_pages`. Everywhere else, compute boundaries client-side from `total` and `page_size`:
+
+```python
+import math
+
+total_pages = math.ceil(total / page_size)
+has_next = page < total_pages
+has_prev = page > 1
+```
+
+### Iterate All Pages
+
+```python
+import math
+
+def get_all_items(endpoint, params=None):
+    params = dict(params or {})
+    params["page"] = 1
+    params["page_size"] = 100
+    all_items = []
+    while True:
+        data = api.get(endpoint, params=params)["data"]
+        all_items.extend(data["items"])
+        if params["page"] >= math.ceil(data["total"] / data["page_size"]):
+            break
+        params["page"] += 1
+    return all_items
+```
+
+## Filtering
+
+There is no generic query-parameter filtering system. Each list endpoint exposes only its own filter parameters, and unsupported parameters are silently ignored. Conventions: filters are exact-match single values (no comma-separated OR, except repeatable `status` parameters); `search` / `keyword` do case-insensitive substring matching on names; regular list endpoints have no date ranges (`created_after` / `created_before`), relative dates, boolean `is_active` filters, or numeric comparison filters.
+
+### Agents
+
+`GET /api/v1/agents`: `team_id` (UUID, requires team membership), `status` (single value `draft` or `published`), `visibility` (single value `private` or `team`), `keyword` (name/description substring), `own_only` (current user's agents only, non-superusers).
+
+```bash
+GET /api/v1/agents?team_id=550e8400-e29b-41d4-a716-446655440000
+GET /api/v1/agents?status=published
+GET /api/v1/agents?own_only=true&status=draft&keyword=support
+```
+
+### Conversations
+
+`GET /api/v1/conversations`: `team_id`, `agent_id`, `user_id` (admin only), `search` (title substring), `untitled_only` (untitled conversations only). See [Conversations](./conversations).
+
+### Knowledge Bases
+
+`GET /api/v1/knowledge-bases`: `team_id`, `search` (KB name substring), `status` (repeatable: `active`, `processing`, `error`, `archived`), `own_only`, and `include_shared` (default `true`, also includes KBs shared with the caller's teams; ignored when `own_only=true`). Document listing `GET /api/v1/knowledge-bases/{kb_id}/documents` supports `search`, repeatable `status`, and repeatable `doc_type` (e.g. `pdf`, `pptx`, `url`). See [Knowledge Base](./knowledge).
+
+### API Keys
+
+`GET /api/v1/api-keys`: repeatable `status` (`active`, `inactive`, `expired`), repeatable `user_id` (admin only), `search` (name or key-prefix substring).
+
+### Workflows
+
+`GET /api/v1/workflows`: `status` (`draft`, `published`, `archived`), `trigger_type` (`manual`, `cron`, `webhook`), `visibility` (`private`, `team`, `public`), `keyword`, `own_only`. See [Workflow Execution](./workflow).
+
+### Filtering Troubleshooting
+
+On empty results, check that values are legal (e.g. Agent `status` must be `draft` / `published`), that the data exists and you can access it (`own_only` narrows visibility). When a parameter seems ignored, confirm the endpoint supports it — unsupported parameters are silently ignored; multi-value KB/API-key `status` needs repeated parameters, not comma-joined values.
+
+## Sorting
+
+Regular list endpoints do not support client-side sorting — `sort_by` / `order` parameters are silently ignored. Each endpoint returns a fixed server-side order (usually newest first). To apply a custom order, fetch the data and sort in memory; to sort the whole dataset, page through everything first.
+
+| Endpoint | Fixed Order |
+| --- | --- |
+| `GET /api/v1/conversations` | `-updated_at` (most recently updated first) |
+| `GET /api/v1/api-keys` | `-created_at` (newest first) |
+| `GET /api/v1/workflows` | `-updated_at` |
+| `GET /api/v1/workflows/runs` | `-created_at` |
+| `GET /api/v1/notifications` | `-created_at` |
+| `GET /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | `chunk_index` |
+
+These are implementation details and may change; rely only on the documented intent (e.g. "newest first"), not the exact order.
+
+The one exception is the admin observability endpoint `GET /api/v1/admin/observability/agents`, which supports `sort_by` (default `requests`) and `sort_order` (`asc` or `desc`, default `desc`).
+
+```python
+agents = api.get("/api/v1/agents", params={"page": 1, "page_size": 100})["items"]
+agents_by_name = sorted(agents, key=lambda x: x["name"])
+agents_by_date = sorted(agents, key=lambda x: x["created_at"], reverse=True)
+```
+
+## Batch Endpoints
+
+There are no generic batch create/update endpoints (`/agents/batch`, `/users/batch`, and the like do not exist). Only these five batch capabilities exist, each linked to its endpoint page:
+
+| Capability | Endpoint | Details |
+| --- | --- | --- |
+| Batch delete conversations | `DELETE /api/v1/conversations?ids=<uuid1>&ids=<uuid2>` | [Conversations](./conversations) |
+| Batch authorize/revoke team models | `POST` / `DELETE /api/v1/teams/{team_id}/models/batch` | [Team Models](./team-models) |
+| Batch KB search | `POST /api/v1/knowledge-bases/{kb_id}/search/batch` (one query × up to 10 retrieval configurations) | [Knowledge Base](./knowledge) |
+| Batch file parsing | `POST /api/v1/upload/parse/batch` (up to 5 files) | [File Uploads](./file-uploads) |
+| Admin batch delete conversations | `DELETE /api/v1/admin/conversations?ids=...` | [Conversations](./conversations) |
+
+```bash
+# Batch delete conversations (needs conversation:delete on ALL listed conversations, else 3000 or 4000)
+curl -X DELETE "$API_BASE_URL/api/v1/conversations?ids=550e8400-e29b-41d4-a716-446655440000&ids=550e8400-e29b-41d4-a716-446655440001" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN"
+
+# Batch parse files (more than 5 files returns 1001)
+curl -X POST "$API_BASE_URL/api/v1/upload/parse/batch" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "files=@doc1.pdf" \
+  -F "files=@doc2.md"
+```
+
+## Related Docs
+
+- [SDK and Code Samples](./sdk) — Generate a client and call the API
+- [Conversations](./conversations) — Batch delete conversations
+- [Team Models](./team-models) — Batch authorize and revoke
+- [Knowledge Base](./knowledge) — Batch retrieval comparison
+- [File Uploads](./file-uploads) — Batch file parsing
+- [Error Handling](./errors) — 422 validation and partial batch failures

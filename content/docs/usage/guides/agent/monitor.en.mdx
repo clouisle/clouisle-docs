@@ -10,6 +10,33 @@ The monitor dashboard (`/app/apps/{agent_id}/monitor`) aggregates one Agent's co
   You need access to the Agent: superadmins can open it directly; a **private** Agent is visible only to its creator; a **team** Agent requires team access. Denied requests return `403`, and a missing Agent returns `404`.
 </Callout>
 
+## Admin Apps list
+
+Administrators see a cross-team Agent list under **Apps** (in the admin console's **Resources** group), a separate entry point from the per-Agent monitor page above:
+
+| List column | Notes |
+| --- | --- |
+| **Name and description** | Agent name and description |
+| **Team** | Owning team |
+| **Status** | `draft` or `published` |
+| **Model** | The LLM model in use |
+| **Usage** | Only `conversation_count` and `message_count`; no separate statistics tab |
+| **Created / last active** | Creation date and last activity time |
+
+The list supports filtering and search:
+
+| Capability | Values |
+| --- | --- |
+| Status filter | `draft`, `published` |
+| Visibility filter | `private` or `team` (`public` is kept for legacy records only) |
+| Team filter | By owning team |
+| Creator filter | By creator |
+| Search | By name or description |
+
+<Callout type="note">
+  The admin list shows only conversation and message counts; for time-ranged volume, Tokens, latency, tool distribution, and execution health, use the Agent monitor page described on this page.
+</Callout>
+
 ## Open the Monitor
 
 1. Go to **Apps** (`/app/apps`) and open the target Agent.

@@ -52,6 +52,17 @@ Agent 的创建、更新、发布与删除：
 | `publish_agent` | 发布 Agent | 操作者、时间、可见性、是否上架市场 |
 | `delete_agent` | 删除 Agent | 操作者、时间、Agent 标识 |
 
+### 沙箱任务事件
+
+代码沙箱任务的生命周期（资源类型 `sandbox_task`），用于追踪代码执行与恢复：
+
+| 事件 | 说明 | 记录内容 |
+| --- | --- | --- |
+| `sandbox_task_started` | 沙箱任务开始 | 任务 ID、提交者、时间 |
+| `sandbox_task_completed` | 沙箱任务完成 | 任务 ID、耗时、退出状态 |
+| `sandbox_task_failed` | 沙箱任务失败 | 任务 ID、错误信息 |
+| `sandbox_task_cancelled` | 沙箱任务取消 | 任务 ID、取消者 |
+| `sandbox_task_recovered` | 沙箱任务恢复 | 任务 ID、恢复方式 |
 ### API Key 事件
 
 API Key 的创建与状态变更：

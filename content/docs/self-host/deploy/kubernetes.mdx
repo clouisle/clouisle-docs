@@ -73,13 +73,70 @@ kubectl apply -f ./clouisle-k8s.yaml
 
 ```bash
 kubectl -n clouisle scale deployment worker --replicas=4
-kubectl -n clouisle scale deployment sandbox-worker --replicas=2
 kubectl -n clouisle scale deployment api --replicas=3
 ```
+
+sandbox-worker 是 DaemonSet（每节点一 Pod），不能 `scale` 改副本——扩容即加节点。
 
 `beat` 始终保持一个副本。使用 `ReadWriteOnce` 本地上传卷时，API 保持单副本；生产多副本应配置共享卷或对象存储。
 
 `worker` 默认消费 `default,agent,knowledge,workflow` 4 个队列（Helm `worker.command`），整体扩副本会同时扩展这 4 类任务。只扩容某一类时，为其单独部署一个 Worker，命令末尾只保留一个队列（如 `-Q agent`）；`sandbox` 队列由独立的 `sandbox-worker` 消费。队列与任务的对应关系见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
+
+## 性能目标与自动扩缩
+
+以下目标、规格与 HPA 示例来自产品 `deployment/scaling.md`，属于通用调优起点，不是交付配置的保证；请按自身负载做代表性压测后验证。
+
+性能基线目标：API 端点 `p50 < 100ms`、`p95 < 500ms`、`p99 < 1000ms`；聊天首 Token `< 2s`、流式输出每 Token `< 100ms`；简单工作流 `< 5s`、复杂工作流 `< 30s`；向量检索 `< 500ms`、混合检索 `< 1s`。
+
+垂直规格（API Deployment 示例）：`requests` 内存 `4Gi`、CPU `2000m`；`limits` 内存 `8Gi`、CPU `4000m`。生产模式用 `python main.py server --no-reload -w 8` 增加 API Worker，用 `python main.py worker -c 8 -Q default,agent,knowledge,workflow` 提高 Celery 并发。
+
+自动扩缩（HPA 示例，CPU `70%`、内存 `80%`，3–20 副本）：
+
+```yaml title="hpa.yaml"
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+```
+
+官方 manifest 默认不带 HPA，副本数静态；启用 HPA 前先给 API Deployment 设置 `resources.requests`，否则 CPU/内存利用率无从计算。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/kubernetes-resources.svg" alt="Kubernetes 资源与 Ingress" />

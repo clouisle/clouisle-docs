@@ -1,0 +1,130 @@
+---
+title: High Availability
+description: Build high availability on top of the standard deployment with HAProxy, database replication, and clustered components
+icon: Network
+---
+
+High-availability deployment removes single points of failure so the API, workers, and data layer recover automatically when an instance fails.
+
+<Callout type="warn" title="Theoretical recipe">
+This page is an operator reference recipe, not a description of the supplied deployment files. The bundled Compose/Kubernetes deployments run single instances of PostgreSQL, Redis, and Qdrant (with health checks) and scale the API/worker/frontend workloads via replicas. Extend the standard deployment using the recipe below.
+</Callout>
+
+Health checks target `GET /api/v1/health`, which returns `{"code": 0, "data": {"status": "healthy"}, "msg": "success"}` when healthy. The endpoint only reflects that the app process is alive; it does not probe the database or Redis — track dependencies via logs and observability.
+
+## Load balancing
+
+### HAProxy
+
+Point `option httpchk GET /api/v1/health` at `/api/v1/health`, never `/health`. Use `roundrobin` for the frontend and `leastconn` with buffering disabled for WebSocket/streaming backends.
+
+```text
+backend backend_api
+    balance roundrobin
+    option httpchk GET /api/v1/health
+    http-check expect status 200
+    server backend1 backend-1:8000 check inter 2000 rise 2 fall 3
+    server backend2 backend-2:8000 check inter 2000 rise 2 fall 3
+    server backend3 backend-3:8000 check inter 2000 rise 2 fall 3
+
+backend backend_websocket
+    balance leastconn
+    option http-server-close
+    option forceclose
+    server backend1 backend-1:8000 check inter 2000 rise 2 fall 3
+    server backend2 backend-2:8000 check inter 2000 rise 2 fall 3
+```
+
+The `frontend` listens on `80` (redirect to HTTPS) and `443`, routing by `path_beg /api` and the `Upgrade` header to the API, long-lived-connection, and frontend backends. Serve the stats page from a separate `listen stats` on `8404`.
+
+### Keepalived
+
+Put a virtual IP in front of two HAProxy nodes; master and backup differ only in `state` and `priority`:
+
+```text
+vrrp_script chk_haproxy {
+    script "killall -0 haproxy"
+    interval 2
+    weight 2
+}
+
+vrrp_instance VI_1 {
+    state MASTER
+    interface eth0
+    virtual_router_id 51
+    priority 101
+    advert_int 1
+    virtual_ipaddress {
+        192.168.1.100/24
+    }
+    track_script {
+        chk_haproxy
+    }
+}
+```
+
+On the backup change `state` to `BACKUP` and `priority` to `100`; keep everything else identical. Replace the example auth password with your own.
+
+## Database high availability
+
+### PostgreSQL primary-replica replication
+
+Enable `wal_level = replica` on the primary and allow replication connections; pull a base backup with `pg_basebackup` on the replica and start it with `standby.signal`:
+
+```bash
+sudo -u postgres pg_basebackup -h primary-host -D /var/lib/postgresql/14/main -U replicator -v -P -W
+sudo -u postgres touch /var/lib/postgresql/14/main/standby.signal
+```
+
+Verify with `SELECT * FROM pg_stat_replication;` on the primary and `SELECT pg_is_in_recovery();` on the replica.
+
+### Automatic failover with Patroni
+
+For automatic leader election use Patroni (3-node etcd as DCS): key parameters are `ttl: 30`, `loop_wait: 10`, `maximum_lag_on_failover: 1048576`, and `use_pg_rewind: true`. Give each Patroni node its own `name`, `connect_address`, and `data_dir`, with distinct replication and superuser passwords.
+
+## Redis Sentinel
+
+The `sentinel.conf` essentials are four lines: monitor the master, declare down-after time, parallel syncs, and failover timeout, plus `auth-pass`.
+
+```text
+port 26379
+sentinel monitor mymaster redis-master 6379 2
+sentinel down-after-milliseconds mymaster 5000
+sentinel parallel-syncs mymaster 1
+sentinel failover-timeout mymaster 10000
+```
+
+Deploy 1 master, 2 replicas, and 3 Sentinels. Clients write via the Sentinel-resolved master and read from replicas; failover switches over automatically.
+
+## Qdrant cluster
+
+Form a 3-node cluster with nodes 2/3 bootstrapping from the first node via `QDRANT__CLUSTER__P2P__BOOTSTRAP__URI`, keeping P2P port `6335` reachable. Set a replication factor when creating collections:
+
+```python
+client.create_collection(
+    collection_name="documents",
+    vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+    replication_factor=3,
+    write_consistency_factor=2,
+)
+```
+
+## Stateless application
+
+Multi-instance APIs share the upload directory (NFS or object storage); keep session state in Redis, never on local disk. Drain connections before stopping a process during rolling deploys so in-flight requests can finish.
+
+## Disaster recovery and multi-region
+
+Dump the primary daily with `pg_dump`, compress, and upload off-site; snapshot Qdrant per collection; Redis holds only cache/queue state so backup is optional. Recovery drills must cover Qdrant and uploads, recording RTO/RPO. For multi-region, use DNS failover (short TTL plus health checks) to switch primary/backup regions.
+
+## Monitoring and alerting
+
+The backend exposes no built-in Prometheus `/metrics` endpoint; alert on external probes plus the admin observability endpoints: failed health checks, auth anomalies, queue backlog, disk exhaustion, and backup failures all need alerts. LB and database metrics come from their own exporters or cloud monitoring.
+
+## Failover drills
+
+Regularly stop the primary to verify replica promotion, and stop one backend to verify traffic shift. Drill checklist: replica `pg_is_in_recovery()` returns `false`, LB health checks still return 200, no queue buildup.
+
+## Best practices
+
+Do: eliminate single points of failure, health-check everything, shut down gracefully, drill regularly, automate recovery, document procedures. Don't: rely on a single instance, skip health checks, kill processes forcefully, recover only manually, or send traffic directly to instances.

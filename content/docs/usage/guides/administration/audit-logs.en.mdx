@@ -52,6 +52,18 @@ Agent creation, update, publish, and deletion:
 | `publish_agent` | Publish Agent | Actor, time, visibility, marketplace listing |
 | `delete_agent` | Delete Agent | Actor, time, Agent identifier |
 
+### Sandbox Task Events
+
+Sandbox task lifecycle (resource type `sandbox_task`), tracking code execution and recovery:
+
+| Event | Description | Recorded Content |
+| --- | --- | --- |
+| `sandbox_task_started` | Sandbox task started | Task ID, submitter, time |
+| `sandbox_task_completed` | Sandbox task completed | Task ID, duration, exit status |
+| `sandbox_task_failed` | Sandbox task failed | Task ID, error message |
+| `sandbox_task_cancelled` | Sandbox task cancelled | Task ID, canceller |
+| `sandbox_task_recovered` | Sandbox task recovered | Task ID, recovery method |
+
 ### API Key Events
 
 API Key creation and state changes:

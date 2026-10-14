@@ -37,8 +37,10 @@ Clouisle 的权限判定是四层复合结构：**身份绕过层**（`is_superu
 | `admin:knowledge-base:read/test/create/update/delete` | 管理台知识库管理 |
 | `admin:settings:read` | 查看站点设置 |
 | `admin:settings:update` | 修改站点设置 |
-| `admin:sso:read` | 查看 SSO 提供商与配置 |
-| `admin:sso:update` | 管理 SSO 提供商与用户 SSO 连接 |
+| `admin:integrations:login:read` | 查看登录集成与全局 SSO 策略 |
+| `admin:integrations:login:update` | 管理登录集成与用户 SSO 连接 |
+| `admin:integrations:settings:read` | 查看邮件、Webhook 与飞书内置集成 |
+| `admin:integrations:settings:update` | 管理邮件、Webhook 与飞书内置集成（含凭据、测试与目录同步） |
 | `audit:read` | 查看审计日志 |
 | `audit:export` | 导出审计日志（归档审计日志也使用该权限，独立于 `admin:settings:update`） |
 
@@ -63,7 +65,7 @@ Clouisle 的权限判定是四层复合结构：**身份绕过层**（`is_superu
 | 角色名称 | 角色类型 | 核心权限特征 | 典型适用人员 |
 | --- | --- | --- | --- |
 | **Super Admin** | 全局内置 | 持有通配权限码 `*`，且以 `is_superuser` 绕过权限与团队成员校验，可执行系统配置、角色管理、审计导出等所有操作 | 运维负责人、系统所有者 |
-| **Admin** | 全局内置 | 包含 `admin:dashboard:access` 与几乎所有资源的管理类权限；**不含** `admin:role:create/update/delete`、`admin:permission:create/update/delete`、`admin:settings:update`、`admin:sso:update`、`admin:memory:update/delete` | 工作空间管理员、技术主管 |
+| **Admin** | 全局内置 | 包含 `admin:dashboard:access` 与几乎所有资源的管理类权限；**不含** `admin:role:create/update/delete`、`admin:permission:create/update/delete`、`admin:settings:update`、`admin:integrations:login:update`、`admin:memory:update/delete` | 工作空间管理员、技术主管 |
 | **Team Admin** | 全局内置 | 具备 Member 的全部权限，另加 `team:update` 与 `team:manage`；由启动迁移授予团队 `owner`/`admin` 成员 | 团队负责人、项目组长 |
 | **Member** | 全局内置 | 无 `admin:dashboard:access`；具备团队内 Agent、工作流、知识库、工具、Skill 的创建/编辑/运行完整协作权限 | 研发人员、业务编排人员 |
 | **Viewer** | 全局内置 | 只读角色；具备团队内已发布 Agent 和工作流的查看与对话/运行权限，以及工具/Skill 的读取与执行（无 `apikey:*`） | 业务审计人员、观察员 |
@@ -111,7 +113,7 @@ Clouisle 的权限判定是四层复合结构：**身份绕过层**（`is_superu
 
 - **System、Resources、Monitoring** 三组整组受 `admin:dashboard:access` 约束：没有该权限时整组隐藏。
 - **General 与 Settings** 不按 `admin:dashboard:access` 整组隐藏，但每个条目仍需各自的权限（例如只有 `admin:team:read` 的用户能看到 Teams 与 Activities，看不到 Dashboard）。Help Center 外链无需权限。
-- 路由权限映射见 `frontend/lib/route-permissions.ts`：`/apps` 与 `/capabilities` 使用前缀匹配；不存在 `/tools` 路由（工具/Skill 管理位于 `/capabilities`）；`/site-settings/sso` 使用 `admin:sso:read`；Storage 页的「归档审计日志」单独使用 `audit:export`。
+- 路由权限映射见 `frontend/lib/route-permissions.ts`：`/apps` 与 `/capabilities` 使用前缀匹配；不存在 `/tools` 路由（工具/Skill 管理位于 `/capabilities`）；`/site-settings/integrations` 使用 `admin:integrations:login:read` 与 `admin:integrations:settings:read` 任一；Storage 页的「归档审计日志」单独使用 `audit:export`。
 
 ## 检查顺序
 

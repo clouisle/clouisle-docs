@@ -1,0 +1,93 @@
+---
+title: Resource Packages Import & Export
+description: Package and install Agents, workflows, knowledge bases, and tools across teams
+icon: Package
+---
+
+A resource package (`.clouisle`) bundles an Agent, workflow, knowledge base, or tool together with its dependency metadata into one file for cross-team migration or backup. The flow has two steps: export, then preview and install into the target team. Both the platform and admin routers expose the same shape (`/api/v1/packages` and `/api/v1/admin/packages`).
+
+<Callout type="info">
+  Import is two-phase: `POST /import/preview` only validates dependencies and returns a session — it writes nothing. Call `POST /import/{session_id}/install` with the `session_id` to persist. Preview sessions expire; re-upload after expiry.
+</Callout>
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/packages/{resource_type}/{resource_id}/export` | Export a resource as a `.clouisle` package (file download) |
+| POST | `/api/v1/packages/import/preview` | Upload a package and preview contents and dependencies (multipart: `team_id` + `file`) |
+| POST | `/api/v1/packages/import/{session_id}/install` | Install the previewed resources into the target team |
+
+`resource_type` is one of `tool`, `agent`, `workflow`, `knowledge_base`. Import/export is authorized by each resource's own access rules; there is no separate package permission code.
+
+## 1. Export a Package
+
+```
+GET /api/v1/packages/agent/550e8400-e29b-41d4-a716-446655440000/export
+```
+
+Returns a file stream (`Content-Disposition: attachment`); save it as a `.clouisle` file. Export and import operations are audit-logged (`export_clouisle_package` / `preview_clouisle_import`).
+
+## 2. Preview an Import
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/packages/import/preview" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "team_id=TEAM_UUID" \
+  -F "file=@assistant.clouisle"
+```
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "session_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "valid": true,
+    "resources": [
+      { "type": "agent", "name": "Support Assistant", "version": "1.0.0" }
+    ],
+    "dependencies": [],
+    "errors": [],
+    "warnings": []
+  },
+  "msg": "success"
+}
+```
+
+Each dependency is marked `resolved` (already in the target team), `missing` (handle first), or `forbidden` (no access). When `valid=false`, resolve `errors` before installing.
+
+## 3. Install an Import
+
+```
+POST /api/v1/packages/import/{session_id}/install
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `action` | `install` (default) | No | Conflict-handling action |
+| `target_name` | string (1–100) | No | Install under a new name to avoid clashing with an existing resource |
+| `dependency_mapping` | object | No | Dependency ID mapping (`{original ID: target team UUID}`) pointing missing dependencies at existing resources |
+
+**Success (200 OK):**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "installed": "550e8400-e29b-41d4-a716-446655440000",
+    "updated": null,
+    "skipped": false,
+    "errors": [],
+    "warnings": []
+  },
+  "msg": "success"
+}
+```
+
+## Related
+
+- [Creating an Agent](/usage/guides/agent/create-agent) — preparing an Agent for export
+- [Workflow Orchestration](/usage/guides/workflow/orchestrate) — what a workflow package covers
+- [Admin API](./admin) — admin package routes and permission boundaries

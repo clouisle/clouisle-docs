@@ -1,0 +1,52 @@
+---
+title: Security Checklist
+description: Verify secrets, access control, proxy, backup, and sandbox item by item before going live
+icon: ShieldCheck
+---
+
+Use this checklist before exposing the deployment to users. Items describe operator responsibilities; the supplied Compose or Kubernetes files complete none of them automatically.
+
+## Secrets and configuration
+
+- [ ] Replace every default in `SECRET_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and `QDRANT_API_KEY`.
+- [ ] Set a unique non-empty `INTERNAL_API_TOKEN` shared by the API, worker, and sandbox-worker for the internal upload gateway.
+- [ ] Keep `.env`, Kubernetes Secret manifests, and installer output out of version control with tight file permissions.
+- [ ] Store production secrets in a secret manager or externally managed Secrets where possible; rotate during planned maintenance windows.
+- [ ] Point `API_BASE_URL`/`API_INTERNAL_BASE_URL` at internal service URLs, and `PUBLIC_API_URL`, `FRONTEND_URL`, `BACKEND_CORS_ORIGINS` at the public browser origin.
+
+## Authentication and access
+
+- [ ] Register the first account only while the deployment is still private; the first registered user becomes the initial superuser.
+- [ ] Configure session timeout, registration, email/SSO, and other site settings in the admin UI per policy.
+- [ ] Review team membership and admin permissions regularly; remove unused API keys and integrations.
+- [ ] Before enabling MFA/SSO, test the provider configuration and recovery path.
+
+## Network and proxy
+
+- [ ] Terminate HTTPS at the external reverse proxy or Ingress with valid certificates.
+- [ ] Expose only the frontend/reverse-proxy port; keep PostgreSQL, Redis, Qdrant, and the direct API port on private networks.
+- [ ] Set exact CORS origins; never use `*` in production.
+- [ ] Configure streaming over HTTP/1.1 with `proxy_buffering off` and read/write timeouts matching the 1800-second example.
+- [ ] Restrict the `clouisle` namespace with RBAC, NetworkPolicies, and Ingress policy.
+
+## Data protection and recovery
+
+- [ ] Enable encryption at rest for PostgreSQL, Qdrant, uploads, and backup storage where supported.
+- [ ] Back up PostgreSQL, Qdrant snapshots, and uploads on schedule; Redis holds only cache/queue state so backup is optional.
+- [ ] Keep encrypted off-site copies with a retention policy.
+- [ ] Rehearse a full restore including Qdrant and uploads; record RTO/RPO results.
+- [ ] Never run `docker compose down -v` or delete PVCs outside intentional destructive operations.
+
+## Runtime and sandbox
+
+- [ ] Pin production image tags/digests instead of `latest`; scan images before deploying.
+- [ ] Keep sandbox filesystem isolation enabled with the worker's required seccomp/capability settings; review the sandbox hardening guidance before changing them.
+- [ ] Limit sandbox egress and resource usage at the host/cluster layer per the threat model.
+- [ ] Keep Docker, Kubernetes, PostgreSQL, Redis, Qdrant, Bubblewrap, and the host kernel patched.
+
+## Logging and incident response
+
+- [ ] Collect and protect API, worker, beat, frontend, and proxy logs; exclude tokens and passwords.
+- [ ] Poll `GET /api/v1/health` and use the admin observability endpoints/dashboard (requires `admin:dashboard:access`). There is no built-in Prometheus `/metrics` endpoint.
+- [ ] Alert on failed health checks, auth anomalies, queue backlog, disk exhaustion, and backup failures.
+- [ ] Document escalation, credential rotation, isolation, restore, and post-incident review procedures.

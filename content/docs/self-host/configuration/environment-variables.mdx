@@ -58,8 +58,7 @@ Celery broker 与结果后端由 `REDIS_*` 派生（broker `redis://…/0`、bac
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox 产物上传地址 |
 | `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | 空 | 可替代默认内部签名 |
 | `SANDBOX_RUNTIME_ENABLED` | `true` | 启用沙箱运行时 |
-| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | 沙箱运行时任务失败时回退到进程内 legacy runner；设为 `false` 则 fail-closed 直接失败 |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | 代码 `false`；镜像/Compose/K8s `true` | 在 Bubblewrap 挂载命名空间内执行可执行载荷 |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true`（代码默认，官方部署同样 `true`） | 在 Bubblewrap 挂载命名空间内执行可执行载荷 |
 | `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | 代码 `bwrap`；镜像/Compose/K8s `/usr/bin/bwrap` | Bubblewrap 可执行文件名或绝对路径 |
 | `SANDBOX_WORKER_CONCURRENCY` | `1` | Sandbox Worker 并发槽位数 |
 | `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | 任务和会话目录在 Worker 上的根路径 |

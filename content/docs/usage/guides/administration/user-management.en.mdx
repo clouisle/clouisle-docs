@@ -70,7 +70,7 @@ Click a user to open the detail/edit panel (`GET /api/v1/admin/users/{user_id}`,
 - Timestamps: `created_at`, `last_login`
 - Password state: `force_password_change`, `password_expiration_exempt` (rendered as a password-status badge in the list)
 - Authorization: `roles` (array of global roles)
-- SSO: `sso_connections` (provider, external account, first/last login); disconnect is available with `admin:sso:update`
+- SSO: `sso_connections` (integration, external account, first/last login); disconnect is available with `admin:integrations:login:update`
 
 > **Not implemented / Roadmap**: there is no per-user activity view, login history, active-session list, or session revocation inside user management. Account lockout is enforced by the global login policy `max_login_attempts` / `lockout_duration_minutes`; review user actions in **Audit Logs** filtered by user.
 

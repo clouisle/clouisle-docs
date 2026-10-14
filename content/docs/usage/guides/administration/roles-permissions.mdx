@@ -20,7 +20,7 @@ Clouisle 的授权由**全局角色**和**团队门限**两层叠加决定。前
   ├── 管理台权限（admin:*，需 admin:dashboard:access 才进得去管理台）
   │     ├── admin:user:*、admin:role:*、admin:permission:*
   │     ├── admin:team:*、admin:model:*、admin:app:*、admin:capability:*
-  │     ├── admin:knowledge-base:*、admin:settings:*、admin:sso:*
+  │     ├── admin:knowledge-base:*、admin:settings:*、admin:integrations:login:*、admin:integrations:settings:*
   │     ├── admin:conversation:*、admin:memory:*、admin:notification:*
   │     └── audit:read、audit:export
   └── 资源权限（team:*、agent:*、workflow:*、kb:*、tool:*、skill:*、apikey:*、conversation:*、memory:*）
@@ -62,7 +62,8 @@ Clouisle 的授权由**全局角色**和**团队门限**两层叠加决定。前
 | `admin:capability:read/create/update/delete/execute` | 跨团队工具与 Skill |
 | `admin:knowledge-base:read/test/create/update/delete` | 管理台知识库管理 |
 | `admin:settings:read/update` | 查看 / 修改站点设置 |
-| `admin:sso:read/update` | 查看 / 管理 SSO |
+| `admin:integrations:login:read/update` | 查看 / 管理登录集成与全局 SSO 策略 |
+| `admin:integrations:settings:read/update` | 查看 / 管理邮件、Webhook 与飞书内置集成 |
 | `admin:conversation:read/delete` | 管理台会话管理 |
 | `admin:memory:read/update/delete` | 管理台记忆记录 |
 | `admin:notification:create/delete` | 管理台通知 |
@@ -93,7 +94,7 @@ Clouisle 的授权由**全局角色**和**团队门限**两层叠加决定。前
 | 角色 | 管理台访问 | 授权要点 |
 | --- | --- | --- |
 | **Super Admin** | 是（且绕过一切检查） | 持有通配权限码 `*`，满足任意权限检查 |
-| **Admin** | 是 | 管理台读写 + 团队内资源全套权限；**不含** `admin:role:create/update/delete`、`admin:permission:create/update/delete`、`admin:settings:update`、`admin:sso:update`、`admin:memory:update/delete` |
+| **Admin** | 是 | 管理台读写 + 团队内资源全套权限；**不含** `admin:role:create/update/delete`、`admin:permission:create/update/delete`、`admin:settings:update`、`admin:integrations:login:update`、`admin:memory:update/delete` |
 | **Team Admin** | 否 | Member 全部权限 + `team:update`、`team:manage`；由启动迁移授予团队成员角色为 `owner`/`admin` 的用户 |
 | **Member** | 否 | 团队内创建/编辑/运行资源，可管理自己的 API Key；不含 `team:update/manage`、`agent:delete/publish`、`workflow:delete/publish`、`tool:delete` |
 | **Viewer** | 否 | 只读 + 使用/执行；没有任何写权限，也没有 `apikey:*` |
@@ -127,7 +128,7 @@ is_superuser: true  # 该账户同时是超管标志
   - admin:app:read/create/update/delete/publish/duplicate
   - admin:knowledge-base:read/test/create/update/delete
   - admin:settings:read
-  - admin:sso:read
+  - admin:integrations:login:read
   - audit:read/export
   - admin:conversation:read/delete
   - admin:notification:create/delete

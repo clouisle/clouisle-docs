@@ -20,7 +20,7 @@ Global-layer namespaces
   ├── Admin permissions (admin:*, requires admin:dashboard:access to enter the dashboard)
   │     ├── admin:user:*, admin:role:*, admin:permission:*
   │     ├── admin:team:*, admin:model:*, admin:app:*, admin:capability:*
-  │     ├── admin:knowledge-base:*, admin:settings:*, admin:sso:*
+  │     ├── admin:knowledge-base:*, admin:settings:*, admin:integrations:login:*, admin:integrations:settings:*
   │     ├── admin:conversation:*, admin:memory:*, admin:notification:*
   │     └── audit:read, audit:export
   └── Resource permissions (team:*, agent:*, workflow:*, kb:*, tool:*, skill:*, apikey:*, conversation:*, memory:*)
@@ -63,7 +63,8 @@ For a team-scoped request the backend runs, in order (see `backend/app/api/team_
 | `admin:capability:read/create/update/delete/execute` | Cross-team tools and skills |
 | `admin:knowledge-base:read/test/create/update/delete` | Knowledge base management from the admin |
 | `admin:settings:read/update` | View / modify site settings |
-| `admin:sso:read/update` | View / manage SSO |
+| `admin:integrations:login:read/update` | View / manage login integrations and global SSO policy |
+| `admin:integrations:settings:read/update` | View / manage builtin email, Webhook and Feishu integrations |
 | `admin:conversation:read/delete` | Admin conversation management |
 | `admin:memory:read/update/delete` | Admin memory records |
 | `admin:notification:create/delete` | Admin notifications |
@@ -94,7 +95,7 @@ At startup the backend idempotently initializes 5 global built-in roles (`is_sys
 | Role | Dashboard access | Authorization highlights |
 | --- | --- | --- |
 | **Super Admin** | Yes (and bypasses all checks) | Holds the wildcard permission code `*`, satisfying any permission check |
-| **Admin** | Yes | Dashboard read/write plus the full team-scoped resource set; **without** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:sso:update`, `admin:memory:update/delete` |
+| **Admin** | Yes | Dashboard read/write plus the full team-scoped resource set; **without** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:integrations:login:update`, `admin:memory:update/delete` |
 | **Team Admin** | No | All Member permissions plus `team:update` and `team:manage`; granted by a startup migration to users whose membership role is `owner`/`admin` |
 | **Member** | No | Creates, edits, and runs team resources and manages their own API keys; without `team:update/manage`, `agent:delete/publish`, `workflow:delete/publish`, `tool:delete` |
 | **Viewer** | No | Read plus use/execute only; no write permission at all, and no `apikey:*` |
@@ -128,7 +129,7 @@ Permissions:
   - admin:app:read/create/update/delete/publish/duplicate
   - admin:knowledge-base:read/test/create/update/delete
   - admin:settings:read
-  - admin:sso:read
+  - admin:integrations:login:read
   - audit:read/export
   - admin:conversation:read/delete
   - admin:notification:create/delete

@@ -1,0 +1,157 @@
+---
+title: 分页、过滤与排序
+description: 按列表约定翻页、筛选结果并理解批量端点
+icon: ListOrdered
+---
+
+列表端点统一返回分页信封，过滤参数按端点各自定义，排序由服务端固定。只有文档中列出的批量端点真实存在，没有通用批量接口。
+
+## 分页
+
+列表端点接受 `page`（从 1 起，默认 1）与 `page_size`（默认 20）两个查询参数。`page_size` 没有统一上限：多数端点接受任意值，部分端点（如会话、管理可观测）用 `le=100` 约束，以各端点 schema 为准。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/agents?page=2&page_size=50" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 分页信封
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [],
+    "total": 156,
+    "page": 2,
+    "page_size": 50
+  },
+  "msg": "success"
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `items` | 当前页条目数组 |
+| `total` | 全部页总数 |
+| `page` | 当前页码 |
+| `page_size` | 每页条数 |
+
+分页响应只有 `total`、`page`、`page_size`，没有 `total_pages`、`has_next`、`has_prev`，也没有游标分页。唯一例外是管理审计日志列表（`GET /api/v1/admin/audit-logs`），其 `data` 额外包含 `total_pages`。其余场景在客户端用 `total` 与 `page_size` 计算边界：
+
+```python
+import math
+
+total_pages = math.ceil(total / page_size)
+has_next = page < total_pages
+has_prev = page > 1
+```
+
+### 遍历全部页
+
+```python
+import math
+
+def get_all_items(endpoint, params=None):
+    params = dict(params or {})
+    params["page"] = 1
+    params["page_size"] = 100
+    all_items = []
+    while True:
+        data = api.get(endpoint, params=params)["data"]
+        all_items.extend(data["items"])
+        if params["page"] >= math.ceil(data["total"] / data["page_size"]):
+            break
+        params["page"] += 1
+    return all_items
+```
+
+## 过滤
+
+没有通用查询参数过滤系统。每个列表端点只认自己的过滤参数，不支持的参数会被静默忽略。通用约定：过滤为精确匹配单值，不支持逗号分隔的 OR（可重复传参的 `status` 除外）；`search` / `keyword` 对名称做大小写不敏感的子串匹配；常规列表端点没有日期范围（`created_after` / `created_before`）、相对日期、布尔 `is_active` 或数值比较过滤器。
+
+### Agent
+
+`GET /api/v1/agents`：`team_id`（UUID，需团队成员）、`status`（单值 `draft` 或 `published`）、`visibility`（单值 `private` 或 `team`）、`keyword`（名称或描述子串）、`own_only`（仅当前用户创建，非超管）。
+
+```bash
+GET /api/v1/agents?team_id=550e8400-e29b-41d4-a716-446655440000
+GET /api/v1/agents?status=published
+GET /api/v1/agents?own_only=true&status=draft&keyword=support
+```
+
+### 会话
+
+`GET /api/v1/conversations`：`team_id`、`agent_id`、`user_id`（仅管理员）、`search`（标题子串）、`untitled_only`（仅无标题会话）。详见 [会话](./conversations)。
+
+### 知识库
+
+`GET /api/v1/knowledge-bases`：`team_id`、`search`（知识库名子串）、`status`（可重复传参：`active`、`processing`、`error`、`archived`）、`own_only`、以及 `include_shared`（默认 `true`，同时包含共享给调用方团队的知识库；`own_only=true` 时忽略）。文档列表 `GET /api/v1/knowledge-bases/{kb_id}/documents` 支持 `search`、`status`（可重复）、`doc_type`（可重复，如 `pdf`、`pptx`、`url`）。详见 [知识库](./knowledge)。
+
+### API Key
+
+`GET /api/v1/api-keys`：`status`（可重复：`active`、`inactive`、`expired`）、`user_id`（可重复，仅管理员）、`search`（名称或 Key 前缀子串）。
+
+### 工作流
+
+`GET /api/v1/workflows`：`status`（`draft`、`published`、`archived`）、`trigger_type`（`manual`、`cron`、`webhook`）、`visibility`（`private`、`team`、`public`）、`keyword`、`own_only`。详见 [工作流执行](./workflow)。
+
+### 过滤排错
+
+返回空时检查取值是否合法（如 Agent 的 `status` 只能是 `draft` / `published`）、数据是否存在且有访问权限（`own_only` 会收窄可见范围）。参数看似被忽略时，先确认该端点是否支持它：不支持的参数会被静默忽略；KB 与 API Key 的多值 `status` 需要重复传参，而不是逗号拼接。
+
+## 排序
+
+常规列表端点不支持客户端排序，`sort_by` / `order` 参数会被静默忽略。各端点按服务端固定顺序返回（通常最新在前），如需自定义顺序，先取数再在内存中排序；对全量排序先翻完所有页再排序。
+
+| 端点 | 固定顺序 |
+| --- | --- |
+| `GET /api/v1/conversations` | `-updated_at`（最近更新在前） |
+| `GET /api/v1/api-keys` | `-created_at`（最新在前） |
+| `GET /api/v1/workflows` | `-updated_at` |
+| `GET /api/v1/workflows/runs` | `-created_at` |
+| `GET /api/v1/notifications` | `-created_at` |
+| `GET /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks` | `chunk_index` |
+
+以上是实现细节，可能变化；只依赖「最新在前」这类文档化意图，不要依赖精确顺序。
+
+唯一的例外是管理可观测端点 `GET /api/v1/admin/observability/agents`，支持 `sort_by`（默认 `requests`）与 `sort_order`（`asc` 或 `desc`，默认 `desc`）。
+
+```python
+agents = api.get("/api/v1/agents", params={"page": 1, "page_size": 100})["items"]
+agents_by_name = sorted(agents, key=lambda x: x["name"])
+agents_by_date = sorted(agents, key=lambda x: x["created_at"], reverse=True)
+```
+
+## 批量端点
+
+不存在通用批量创建/更新端点（`/agents/batch`、`users/batch` 之类均无）。真实存在的批量能力只有以下五组，逐个链到已有端点页：
+
+| 批量能力 | 端点 | 归宿 |
+| --- | --- | --- |
+| 批量删除会话 | `DELETE /api/v1/conversations?ids=<uuid1>&ids=<uuid2>` | [会话](./conversations) |
+| 批量授权/撤销团队模型 | `POST` / `DELETE /api/v1/teams/{team_id}/models/batch` | [团队模型授权](./team-models) |
+| 批量知识库检索 | `POST /api/v1/knowledge-bases/{kb_id}/search/batch`（1 个查询 × 最多 10 个检索配置） | [知识库](./knowledge) |
+| 批量解析文件 | `POST /api/v1/upload/parse/batch`（最多 5 个文件） | [文件上传](./file-uploads) |
+| 管理批量删除会话 | `DELETE /api/v1/admin/conversations?ids=...` | [会话](./conversations) |
+
+```bash
+# 批量删除会话（需对全部会话都有 conversation:delete 权限，否则返回 3000 或 4000）
+curl -X DELETE "$API_BASE_URL/api/v1/conversations?ids=550e8400-e29b-41d4-a716-446655440000&ids=550e8400-e29b-41d4-a716-446655440001" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN"
+
+# 批量解析文件（超过 5 个文件返回 1001）
+curl -X POST "$API_BASE_URL/api/v1/upload/parse/batch" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  -F "files=@doc1.pdf" \
+  -F "files=@doc2.md"
+```
+
+## 相关文档
+
+- [SDK 与代码示例](./sdk) — 生成客户端并调用 API
+- [会话](./conversations) — 批量删除会话
+- [团队模型授权](./team-models) — 批量授权与撤销
+- [知识库](./knowledge) — 批量检索配置对比
+- [文件上传](./file-uploads) — 批量解析文件
+- [错误处理](./errors) — 422 校验与批量部分失败

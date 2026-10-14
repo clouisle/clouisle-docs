@@ -1,0 +1,130 @@
+---
+title: 高可用部署
+description: 用 HAProxy、数据库复制与集群组件在标准部署之上构建高可用
+icon: Network
+---
+
+高可用部署消除单点故障，让 API、Worker 与数据层在实例故障时自动恢复。
+
+<Callout type="warn" title="理论配方">
+本页是运维参考配方，不是自带部署文件的说明。自带的 Compose/Kubernetes 部署中 PostgreSQL、Redis、Qdrant 均为单实例（带健康检查），API/Worker/Frontend 通过副本扩容。请按下面的配方在标准部署之上自行扩展。
+</Callout>
+
+健康检查以 `GET /api/v1/health` 为准，正常返回 `{"code": 0, "data": {"status": "healthy"}, "msg": "success"}`。该端点只反映应用进程存活，不探测数据库与 Redis，依赖项状态看日志与可观测性。
+
+## 负载均衡
+
+### HAProxy
+
+`option httpchk GET /api/v1/health` 必须指向 `/api/v1/health`，不要用 `/health`。前端走 `roundrobin`，WebSocket/流式后端用 `leastconn` 并关闭缓冲。
+
+```text
+backend backend_api
+    balance roundrobin
+    option httpchk GET /api/v1/health
+    http-check expect status 200
+    server backend1 backend-1:8000 check inter 2000 rise 2 fall 3
+    server backend2 backend-2:8000 check inter 2000 rise 2 fall 3
+    server backend3 backend-3:8000 check inter 2000 rise 2 fall 3
+
+backend backend_websocket
+    balance leastconn
+    option http-server-close
+    option forceclose
+    server backend1 backend-1:8000 check inter 2000 rise 2 fall 3
+    server backend2 backend-2:8000 check inter 2000 rise 2 fall 3
+```
+
+前端 `frontend` 监听 `80` 跳转 HTTPS，`443` 按 `path_beg /api` 与 `Upgrade` 头分流到 API/长连接/前端后端。统计页用独立 `listen stats` 监听 `8404`。
+
+### Keepalived
+
+两台 HAProxy 前加虚拟 IP，主备配置只有 `state` 与 `priority` 不同：
+
+```text
+vrrp_script chk_haproxy {
+    script "killall -0 haproxy"
+    interval 2
+    weight 2
+}
+
+vrrp_instance VI_1 {
+    state MASTER
+    interface eth0
+    virtual_router_id 51
+    priority 101
+    advert_int 1
+    virtual_ipaddress {
+        192.168.1.100/24
+    }
+    track_script {
+        chk_haproxy
+    }
+}
+```
+
+备机把 `state` 改为 `BACKUP`、`priority` 改为 `100`，其余相同。认证密码自行替换，不要用示例值。
+
+## 数据库高可用
+
+### PostgreSQL 主从复制
+
+主库开 `wal_level = replica`，允许复制连接；备库用 `pg_basebackup` 从主库拉取基线后以 `standby.signal` 启动：
+
+```bash
+sudo -u postgres pg_basebackup -h primary-host -D /var/lib/postgresql/14/main -U replicator -v -P -W
+sudo -u postgres touch /var/lib/postgresql/14/main/standby.signal
+```
+
+主库用 `SELECT * FROM pg_stat_replication;` 确认从库连接，备库用 `SELECT pg_is_in_recovery();` 确认处于恢复模式。
+
+### Patroni 自动故障转移
+
+需要自动选主时用 Patroni（3 节点 etcd 做 DCS）：关键参数是 `ttl: 30`、`loop_wait: 10`、`maximum_lag_on_failover: 1048576` 与 `use_pg_rewind: true`。每个 Patroni 节点配独立 `name`/`connect_address`/`data_dir`，复制用户与超级用户密码各自设置。
+
+## Redis Sentinel
+
+`sentinel.conf` 核心只有四行：监控主库、判定下线时间、并行同步数、故障转移超时，并配 `auth-pass`。
+
+```text
+port 26379
+sentinel monitor mymaster redis-master 6379 2
+sentinel down-after-milliseconds mymaster 5000
+sentinel parallel-syncs mymaster 1
+sentinel failover-timeout mymaster 10000
+```
+
+部署 1 主 2 从 + 3 个 Sentinel。客户端通过 Sentinel 拿主库写、从库读，故障转移后自动切换。
+
+## Qdrant 集群
+
+3 节点组成集群，2/3 节点用 `QDRANT__CLUSTER__P2P__BOOTSTRAP__URI` 指向首节点，P2P 端口 `6335` 互通。集合创建时指定复制因子：
+
+```python
+client.create_collection(
+    collection_name="documents",
+    vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+    replication_factor=3,
+    write_consistency_factor=2,
+)
+```
+
+## 无状态应用
+
+多实例 API 共享上传目录（NFS 或对象存储），会话状态放 Redis，不要写本地磁盘。滚动发布时先排空连接再停止进程，给在途请求留出完成时间。
+
+## 容灾与多地域
+
+每天从主库 `pg_dump` 并压缩上传异地存储；Qdrant 按集合打快照；Redis 只存缓存与队列状态，可选备份。恢复演练必须包含 Qdrant 与上传文件，并记录 RTO/RPO。多地域用 DNS 故障转移（短 TTL + 健康检查）切主备地域。
+
+## 监控告警
+
+后端没有内置 Prometheus `/metrics` 端点，告警基于外部探针与管理端可观测接口：健康检查失败、认证异常、队列积压、磁盘耗尽、备份失败必须配告警。LB 与数据库的指标走各自 exporter 或云监控。
+
+## 故障转移演练
+
+定期停主库验证备库提升、停单个后端验证流量转移。演练清单：备库 `pg_is_in_recovery()` 返回 `false`、LB 健康检查仍返回 200、队列无堆积。
+
+## 最佳实践
+
+应该做：消除单点、处处健康检查、优雅停机、定期演练、自动化恢复、文档化流程。不要做：依赖单实例、跳过健康检查、强制杀进程、只手动恢复、把流量直连实例。

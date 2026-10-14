@@ -4,7 +4,12 @@ description: Back up Clouisle metadata, indexes, queues, and upload assets
 icon: ArchiveRestore
 ---
 
-A recoverable Clouisle backup includes at least PostgreSQL, Qdrant, upload storage, and deployment configuration/Secrets. Redis mainly holds queues, caches, and session state; whether to back it up depends on the organization's recovery requirements for unfinished tasks.
+## Backup strategy
+
+Backup and recovery protect data, support disaster recovery and business continuity, and meet compliance and point-in-time rollback needs. The command reference below mirrors the product `deployment/backup-recovery.md` guide; this section states the general strategy first: full backups (all data, largest and slowest, recommended weekly) plus incremental/differential backups (changed data only, recommended daily). Example operator schedule: full backup every Sunday at `02:00` retained for 4 weeks, daily incremental at `02:00` retained for 7 days; WAL archiving and point-in-time recovery (PITR) are an externally designed PostgreSQL process, not provided by the shipped Compose deployment.
+
+Key objects to back up: PostgreSQL (users, teams, Agents, workflows, knowledge-base metadata, conversations, API keys, audit logs), Qdrant (document vectors and collection indexes), file storage (uploaded documents, avatars, icons, exports), environment variables and Secrets, and certificates.
+
 
 ## What to Back Up
 

@@ -94,7 +94,7 @@ Clouisle 的认证流程由站点设置决定：密码、邮箱验证、管理�
 - 邮箱匹配开启（`sso_match_by_email`，默认开启）且邮箱已存在时，SSO 连接会关联到该账户。
 - 否则在允许自动创建时新建账户。新账户**没有本地密码**、邮箱视为已验证，并按配置进入待审批状态。
 
-支持 OAuth2/OIDC、SAML 2.0 与 CAS。配置与排查详见 [SSO 配置](./sso.mdx)。
+支持 OAuth2/OIDC、SAML 2.0、CAS 与飞书（飞书登录需管理员在飞书集成上显式开启才会显示按钮）。配置与排查详见 [SSO 配置](./sso.mdx)。
 
 <Callout type="warn">
   关闭 `sso_allow_password_login` 会把站点切换成 SSO-only。切换前请确认至少一个超级管理员已完成 SSO 绑定，否则可能无人能登录后台。

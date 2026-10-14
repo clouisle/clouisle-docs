@@ -32,6 +32,23 @@ Visibility is set in the create/edit dialog:
 
 Cross-team access is only ever granted through a share and is always read-only — see “Cross-team sharing (read-only)” below.
 
+## Knowledge base list
+
+Administrators see a cross-team knowledge base table under **Admin** → **Knowledge Bases**:
+
+| Table column | Notes |
+| --- | --- |
+| **Name** | Knowledge base name, with the description as a secondary line |
+| **Team** | Owning team |
+| **Documents** | Total document count |
+| **Chunks** | Total chunk count |
+| **Status** | Current status |
+| **Created At** | Creation time |
+
+The table also has a selection checkbox and per-row actions. It only renders the **active ↔ archived** toggle: the status facet offers just `active` and `archived`, even though a record can also be `processing` or `error`.
+
+Supported filters and query parameters (`GET /api/v1/knowledge-bases`): `team_id`, `search` (matches the KB name), `status`, `own_only`, and `include_shared`. A team on the receiving end of a share uses `include_shared=false` or `own_only=true` to see only its own teams' knowledge bases.
+
 ## Creating a knowledge base
 
 1. Go to **Knowledge Bases** and select **Create Knowledge Base**.

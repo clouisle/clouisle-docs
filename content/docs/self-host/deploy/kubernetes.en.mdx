@@ -73,13 +73,70 @@ The generated file has `0600` permissions and contains Base64-encoded Secrets; t
 
 ```bash
 kubectl -n clouisle scale deployment worker --replicas=4
-kubectl -n clouisle scale deployment sandbox-worker --replicas=2
 kubectl -n clouisle scale deployment api --replicas=3
 ```
+
+sandbox-worker is a DaemonSet (one Pod per node) and cannot change replicas with `scale` — add nodes to grow it.
 
 `beat` always stays at one replica. With `ReadWriteOnce` local upload volumes, keep the API at a single replica; production with multiple replicas should configure a shared volume or object storage.
 
 The `worker` consumes the `default,agent,knowledge,workflow` queues (Helm `worker.command`), so scaling the deployment grows all four task classes together. To grow one class only, add a worker deployment whose command ends with a single queue (for example `-Q agent`); the `sandbox` queue is consumed by the separate `sandbox-worker` deployment. Queue-to-task mapping: [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
+
+## Performance targets and autoscaling
+
+The targets, sizing, and HPA example below come from the product `deployment/scaling.md` guide. They are generic tuning starting points, not guarantees of the shipped configuration; validate them with representative load tests of your own.
+
+Baseline targets: API endpoints `p50 < 100ms`, `p95 < 500ms`, `p99 < 1000ms`; chat first token `< 2s`, streaming `< 100ms` per token; simple workflows `< 5s`, complex workflows `< 30s`; vector search `< 500ms`, hybrid search `< 1s`.
+
+Vertical sizing (API Deployment example): `requests` of `4Gi` memory / `2000m` CPU; `limits` of `8Gi` memory / `4000m` CPU. In production mode, raise API workers with `python main.py server --no-reload -w 8` and Celery concurrency with `python main.py worker -c 8 -Q default,agent,knowledge,workflow`.
+
+Autoscaling (HPA example, CPU `70%`, memory `80%`, 3–20 replicas):
+
+```yaml title="hpa.yaml"
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+```
+
+The supplied manifest ships no HPA, so replicas stay static. Set `resources.requests` on the API Deployment before enabling HPA, otherwise CPU/memory utilization cannot be computed.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/kubernetes-resources.svg" alt="Kubernetes resources and Ingress" />

@@ -1,49 +1,56 @@
 ---
 title: SSO API
-description: Single sign-on flows, connection unlinking, and admin provider configuration
+description: Single sign-on flows, connection unlinking, and unified integration administration
 icon: ShieldCheck
 ---
 
-The SSO API covers three things: **provider discovery** for the login page, the browser-redirect **single sign-on flow** (OAuth2 / OIDC, SAML2, CAS), and the user **unlinking their own SSO identity**. Provider CRUD belongs to the admin surface under `/api/v1/admin/sso`.
+The SSO API covers three things: **login integration discovery** for the login page, the browser-redirect **single sign-on flow** (OAuth2 / OIDC, SAML2, CAS, Feishu), and the user **unlinking their own SSO identity**. Creating, configuring, and testing integrations belongs to unified integration administration under `/api/v1/admin/integrations`.
 
 <Callout type="info" title="Prerequisites and authentication">
-  `GET /api/v1/sso/providers`, `GET /api/v1/sso/login/{provider_name}`, and `GET /api/v1/sso/callback/{provider_name}` are **public**, need no authentication, and return redirects or JSON rather than the unified envelope.
+  `GET /api/v1/sso/integrations`, `GET /api/v1/sso/login/{provider_name}`, and `GET /api/v1/sso/callback/{provider_name}` are **public** and need no authentication. `login` and `callback` return redirects rather than the unified envelope.
 
   `DELETE /api/v1/sso/connections/{connection_id}` requires a signed-in user (it can only unlink their own connections).
 
-  Admin endpoints use permission codes: `GET /api/v1/admin/sso/providers` requires `admin:sso:read`; creating, updating, deleting, and testing providers — and unlinking any user's connection — require `admin:sso:update`.
+  The admin base is `/api/v1/admin/integrations`: login-domain operations require `admin:integrations:login:read` / `admin:integrations:login:update`; builtin configuration (email, webhook, Feishu directory sync, …) requires `admin:integrations:settings:read` / `admin:integrations:settings:update`. The catalog and list endpoints accept either read domain, and the list filters instances to authorized domains.
 
-  Provider configuration (`config`, `attribute_mapping`, `allow_signup`, `require_approval`, `default_role_id`) is covered in [SSO configuration](/usage/guides/administration/sso).
+  Integration configuration (the `config`, `attribute_mapping`, `credentials`, and `login_config` boundaries) is covered in [SSO configuration](/usage/guides/administration/sso).
 </Callout>
 
 <Callout type="warn">
-  `login` and `callback` return an **HTTP 307 redirect**, not a `{code, data, msg}` envelope. The frontend receives a `token` or `error` query parameter on its `/sso-callback` route. When the `sso_enabled` site setting is `false`, `GET /sso/providers` returns an empty array `[]` even if providers are configured.
+  `login` and `callback` return an **HTTP 307 redirect**, not a `{code, data, msg}` envelope. The frontend receives a `token` or `error` query parameter on its `/sso-callback` route. When the `sso_enabled` site setting is `false`, `GET /sso/integrations` returns an empty `data` array even if integrations are configured.
 </Callout>
 
 ## Endpoints
 
 | Method | Path | Purpose | Auth |
 | --- | --- | --- | --- |
-| GET | `/api/v1/sso/providers` | List enabled providers (login page) | Public |
+| GET | `/api/v1/sso/integrations` | List enabled login integrations (login page) | Public |
 | GET | `/api/v1/sso/login/{provider_name}` | Begin SSO login; redirect to the identity provider | Public |
 | GET | `/api/v1/sso/callback/{provider_name}` | Identity-provider callback; finish login and redirect back | Public |
 | DELETE | `/api/v1/sso/connections/{connection_id}` | Unlink one of the caller's SSO connections | Signed-in user |
-| GET | `/api/v1/admin/sso/providers` | List all providers (including disabled) | `admin:sso:read` |
-| POST | `/api/v1/admin/sso/providers` | Create a provider | `admin:sso:update` |
-| PUT | `/api/v1/admin/sso/providers/{provider_id}` | Update a provider | `admin:sso:update` |
-| DELETE | `/api/v1/admin/sso/providers/{provider_id}` | Delete a provider | `admin:sso:update` |
-| POST | `/api/v1/admin/sso/providers/{provider_id}/test` | Test whether the provider config can build an authorization URL | `admin:sso:update` |
-| DELETE | `/api/v1/admin/sso/connections/{connection_id}` | Unlink any user's SSO connection | `admin:sso:update` |
+| GET | `/api/v1/admin/integrations/types` | Static integration types, capabilities, and singleton flags | Either read domain |
+| GET | `/api/v1/admin/integrations` | Domain-filtered integration list | Either read domain |
+| POST | `/api/v1/admin/integrations` | Create a non-singleton login integration | Login-domain `update` |
+| PUT / DELETE | `/api/v1/admin/integrations/{id}` | Field-level-authorized update / delete login integration (never a singleton) | See below |
+| POST | `/api/v1/admin/integrations/{id}/test` | Test login configuration | Login-domain `update` |
+| DELETE | `/api/v1/admin/integrations/connections/{connection_id}` | Unlink any user's SSO connection | `admin:integrations:login:update` |
+| GET / PUT | `/api/v1/admin/integrations/login-settings` | Global login settings (UI entry: **Site Settings** > **Security**) | Login-domain read / write |
+| GET / PUT | `/api/v1/admin/integrations/email`, `/webhook` | Builtin notification configuration | Settings-domain read / write |
+| POST | `/api/v1/admin/integrations/email/test`, `/webhook/test` | Test notification delivery | Settings-domain `update` |
+| GET / PUT | `/api/v1/admin/integrations/feishu/config` | Feishu configuration | Settings-domain read / write |
+| GET | `/api/v1/admin/integrations/feishu/departments` | Browse departments | Settings-domain read |
+| PUT | `/api/v1/admin/integrations/feishu/department-scope` | Save sync scope | Settings-domain `update` |
+| POST | `/api/v1/admin/integrations/feishu/sync` | Manual directory synchronization | Settings-domain `update` |
 
 ---
 
-## 1. List enabled providers
+## 1. List enabled login integrations
 
 ```
-GET /api/v1/sso/providers
+GET /api/v1/sso/integrations
 ```
 
-Used by the login page to render SSO buttons. Only `is_enabled=true` providers are returned, and no sensitive configuration is included.
+Used by the login page to render SSO buttons. Only integrations that are enabled **and** have `user_login` among their enabled capabilities are returned; an enabled Feishu integration that has not opted in to sign-in stays hidden.
 
 **200 OK:**
 
@@ -57,7 +64,7 @@ Used by the login page to render SSO buttons. Only `is_enabled=true` providers a
       "display_name": "GitHub",
       "icon_url": "https://cdn.example.com/github.svg",
       "button_text": "Continue with GitHub",
-      "protocol": "oauth2"
+      "provider_type": "oauth2"
     }
   ],
   "msg": "success"
@@ -66,12 +73,12 @@ Used by the login page to render SSO buttons. Only `is_enabled=true` providers a
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `id` | string (UUID) | Provider ID |
-| `name` | string | Unique provider identifier (used in login URLs) |
+| `id` | string (UUID) | Integration ID (preserved across the migration) |
+| `name` | string | Unique integration identifier (used in login URLs) |
 | `display_name` | string | User-facing name |
 | `icon_url` | string \| null | Icon URL |
 | `button_text` | string \| null | Button text |
-| `protocol` | string | `oauth2`, `oidc`, `saml2`, or `cas` |
+| `provider_type` | string | `oauth2`, `oidc`, `saml2`, `cas`, or `feishu` |
 
 ---
 
@@ -85,12 +92,12 @@ GET /api/v1/sso/login/{provider_name}
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `redirect` | string | No | **Same-origin relative path** (e.g. `/dashboard`) to land on after login. Values with a scheme/host, starting with `//`, or containing a backslash are ignored and fall back to `/dashboard` |
+| `redirect` | string | No | **Same-origin relative path** (e.g. `/app/kb`) to land on after login. Non-relative or external values are ignored and fall back to `/app` — for every role |
 
 **Behaviour:**
 
-1. Validates that the provider exists and is enabled; otherwise it redirects to `{frontend}/sso-callback?error=sso_provider_not_found`.
-2. Generates a random `state` (the `session_id`, `secrets.token_urlsafe(32)`) and creates an SSO session that expires after 10 minutes, storing the PKCE `code_verifier` / `nonce` (OAuth2, OIDC) or RelayState.
+1. Validates that the integration exists and is enabled; otherwise it redirects to `{frontend}/sso-callback?error=sso_provider_not_found`.
+2. Creates a temporary SSO session that expires after 10 minutes, holding the protocol state (PKCE `code_verifier` / `nonce` or relay state).
 3. Builds the callback URL from the **backend** origin: `{backend}/api/v1/sso/callback/{provider_name}`.
 4. Returns `307 Temporary Redirect` to the identity provider's authorization URL.
 
@@ -102,8 +109,8 @@ GET /api/v1/sso/login/{provider_name}
 
 | `error` | Meaning |
 | --- | --- |
-| `sso_provider_not_found` | Provider missing or disabled |
-| `sso_login_failed` | Provider initialization failed (unsupported protocol, bad config, …) |
+| `sso_provider_not_found` | Integration missing or disabled |
+| `sso_login_failed` | Integration initialization failed (unsupported protocol, bad config, …) |
 
 <Callout type="info" title="About state">
   For OAuth2 / OIDC the `state` is the server-generated SSO session ID, used on callback to retrieve the PKCE `code_verifier` / `nonce`; SAML2 passes the same session ID through `RelayState` and CAS through `state` or `ticket`. The `state` in the callback URL is therefore **not** a client-chosen value — do not construct or reuse it yourself.
@@ -119,11 +126,13 @@ GET /api/v1/sso/callback/{provider_name}
 
 The identity provider redirects the browser here after the user authenticates. Parameters differ by protocol:
 
-| Protocol | Callback parameters | Session identifier source |
-| --- | --- | --- |
-| `oauth2` / `oidc` | `code`, `state` | `state` |
-| `cas` | `ticket` (and optionally `state`) | `state` or `ticket` |
-| `saml2` | form-POSTed `SAMLResponse`, `RelayState` | `RelayState` |
+| Protocol | Callback parameters |
+| --- | --- |
+| `oauth2` / `oidc` / `feishu` | `code`, `state` |
+| `cas` | `ticket` (and optionally `state`) |
+| `saml2` | `SAMLResponse`, `RelayState` |
+
+Register this URL with the identity provider as `https://<backend-host>/api/v1/sso/callback/{name}`. For Feishu, the app also needs the login scopes `contact:user.base:readonly contact:user.email:readonly`; the callback exchanges the code with PKCE and stores the profile `union_id` (falling back to `open_id`) as `provider_user_id`.
 
 **Success** → the browser is redirected to:
 
@@ -131,13 +140,13 @@ The identity provider redirects the browser here after the user authenticates. P
 {frontend}/sso-callback?token=<access_token>&redirect=<path>
 ```
 
-`token` is a standard JWT access token (lifetime controlled by the `session_timeout_days` site setting, default 7 days). When `single_session` is enabled the server records the session so older tokens are invalidated. The SSO session is deleted immediately after success.
+`token` is a standard JWT access token (see the [Authentication API](./auth)). The SSO session is deleted immediately after success.
 
 **Failure** → redirect to `{frontend}/sso-callback?error=<error_code>&redirect=<path>`. Common `error` values:
 
 | `error` | Meaning |
 | --- | --- |
-| `sso_provider_not_found` | Provider does not exist |
+| `sso_provider_not_found` | Integration does not exist |
 | `sso_session_expired` | Session missing or older than 10 minutes |
 | `sso_login_failed` | User-info exchange failed or `provider_user_id` is missing |
 | `pending_approval` | New user requires admin approval before signing in |
@@ -161,9 +170,9 @@ DELETE /api/v1/sso/connections/{connection_id}
 | --- | --- | --- | --- |
 | `connection_id` | string (UUID) | Yes | User SSO connection ID |
 
-Only connections **belonging to the caller** can be operated on. If the account has no password and this is its last SSO connection, deletion is refused (the account would become unreachable).
+Only connections **belonging to the caller** can be operated on; other users' connections return `404` (`sso_connection_not_found`). If the account has no password and this is its last SSO connection, deletion is refused with `403` (`cannot_disconnect_only_auth_method`) — the account would otherwise become unreachable.
 
-The caller's connection list is available from the `sso_connections` field of `GET /api/v1/users/me`; see the [Users API](./users).
+The caller's connection list is available from the `sso_connections` field of `GET /api/v1/users/me`; see the [Users API](./users). Connection fields use the `integration_` prefix: `integration_id`, `integration_name`, `integration_display_name`, `integration_icon_url`; `provider_user_id` remains the external identity key.
 
 **200 OK:**
 
@@ -179,110 +188,66 @@ The caller's connection list is available from the `sso_connections` field of `G
 
 | HTTP | Code | Meaning |
 | --- | --- | --- |
-| `400` | `4000` | `sso_connection_not_found`: unknown connection or not owned by the caller |
-| `400` | `1004` | `cannot_disconnect_only_auth_method`: no password and this is the only sign-in method |
+| `404` | `4000` | `sso_connection_not_found`: unknown connection or not owned by the caller |
+| `403` | `1004` | `cannot_disconnect_only_auth_method`: no password and this is the only sign-in method |
 
 ---
 
-## 5. Admin: provider configuration
+## 5. Admin: unified integrations
 
-The following endpoints are mounted under `/api/v1/admin/sso`.
+The admin base is `/api/v1/admin/integrations`. Login-domain operations require `admin:integrations:login:read` / `admin:integrations:login:update`; builtin configuration requires `admin:integrations:settings:read` / `admin:integrations:settings:update`. The catalog (`/types`) and list accept either read domain, and the list filters instances to authorized domains.
 
-### 5.1 List all providers
+<Callout type="error" title="Old management namespace removed">
+  The old `/api/v1/admin/sso/*` admin endpoints and the `/sso/providers` discovery endpoint are **removed** — use the unified integration endpoints in this section. Login / callback URLs stay unchanged; migration preserves UUIDs and bound identities.
+</Callout>
 
-```
-GET /api/v1/admin/sso/providers
-```
+### 5.1 Create and update fields
 
-Requires `admin:sso:read`. Returns **all** providers (including `is_enabled=false`) with their full configuration.
+Create / update body fields: `name`, `provider_type`, `display_name`, `icon_url`, `button_text`, `is_enabled`, `enabled_capabilities`, `config`, `attribute_mapping`, `credentials`, and `login_config`. Signup policy (`allow_signup`, `require_approval`, `default_role_id`) belongs in `login_config`.
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `id` | string (UUID) | Provider ID |
-| `name` | string | Unique identifier, must match `^[a-z][a-z0-9_-]*$` |
-| `protocol` | string | `oauth2`, `oidc`, `saml2`, or `cas` |
-| `display_name` | string | User-facing name, max 100 characters |
-| `icon_url` | string \| null | Icon URL, must start with `http(s)://` |
-| `button_text` | string \| null | Button text, max 50 characters |
-| `config` | object | Protocol-specific configuration (below) |
-| `attribute_mapping` | object | Provider attribute → user field mapping, e.g. `{"email": "email"}` |
-| `is_enabled` | boolean | Whether the provider is enabled |
-| `allow_signup` | boolean | Whether users may be auto-created |
-| `require_approval` | boolean | Whether new users need admin approval |
-| `default_role_id` | string (UUID) \| null | Default role for new SSO users |
-| `created_at` / `updated_at` | string (ISO 8601) | Creation and update timestamps |
+Secrets are plaintext input only in `credentials`, encrypted at rest (Fernet), and **never returned**: admin output omits `credentials` entirely and exposes `credentials_configured` and `supported_capabilities` instead. Empty secret inputs preserve stored values.
 
-`config` fields by protocol:
-
-| Protocol | Typical fields |
-| --- | --- |
-| `oauth2` / `oidc` | `client_id`, `client_secret`, `issuer_url`, `authorization_url`, `token_url`, `userinfo_url`, `scopes` |
-| `saml2` | `sp_entity_id`, `idp_entity_id`, `sso_url`, `slo_url`, `x509_cert`, `acs_url` |
-| `cas` | `server_url`, `service_url`, `version` |
-
-### 5.2 Create a provider
-
-```
-POST /api/v1/admin/sso/providers
+```json
+{
+  "name": "github",
+  "provider_type": "oauth2",
+  "display_name": "GitHub",
+  "is_enabled": true,
+  "enabled_capabilities": ["user_login"],
+  "config": {
+    "client_id": "client-id",
+    "authorization_url": "https://github.com/login/oauth/authorize",
+    "token_url": "https://github.com/login/oauth/access_token",
+    "userinfo_url": "https://api.github.com/user",
+    "scopes": "read:user user:email"
+  },
+  "credentials": {"client_secret": "client-secret"},
+  "attribute_mapping": {"email": "email", "username": "login", "avatar_url": "avatar_url"},
+  "login_config": {"allow_signup": true, "require_approval": false}
+}
 ```
 
-Requires `admin:sso:update`. Body fields match the table above (`name`, `protocol`, `display_name`, `config` required; `attribute_mapping` defaults to `{}`, `is_enabled` to `true`, `allow_signup` to `true`, `require_approval` to `false`).
+The registry statically supports login for OAuth2 / OIDC / SAML2 / CAS, notification for email / Webhook, and both directory sync and login for Feishu — where login stays an explicit opt-in through `enabled_capabilities`. Builtins are singletons and use their specialized configuration endpoints; because Feishu is a singleton, it never appears in the protocol list for creating a new login integration.
 
-```bash
-curl -X POST "https://your-domain.com/api/v1/admin/sso/providers" \
-  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "github",
-    "protocol": "oauth2",
-    "display_name": "GitHub",
-    "config": {"client_id": "...", "client_secret": "...", "authorization_url": "https://github.com/login/oauth/authorize", "token_url": "https://github.com/login/oauth/access_token", "userinfo_url": "https://api.github.com/user", "scopes": ["read:user", "user:email"]},
-    "attribute_mapping": {"email": "email", "username": "login"},
-    "is_enabled": true,
-    "allow_signup": true,
-    "require_approval": false
-  }'
-```
+### 5.2 Field-level authorization (`PUT /{id}`)
 
-**Errors:**
+`PUT /{id}` authorizes per field, not per instance:
 
-| HTTP | Code | Meaning |
-| --- | --- | --- |
-| `400` | `6305` | `sso_provider_name_exists`: identifier already taken |
-| `422` | `1001` | `name` violates the naming pattern, or `icon_url` is not an `http(s)` URL |
+- `enabled_capabilities` and `is_enabled` are charged to the domain of the capabilities involved (`user_login` → login, `directory_sync` → settings);
+- a builtin's `config` and `credentials` go to settings;
+- `button_text`, `display_name`, `icon_url`, `login_config`, and `attribute_mapping` go to login when the integration type is login-capable (otherwise settings).
 
-### 5.3 Update a provider
+The same field set covers Feishu: opting in to Feishu sign-in is `{"enabled_capabilities": ["directory_sync", "user_login"], "is_enabled": true}` on the generic endpoint and requires `admin:integrations:login:update`. The `/feishu/*` endpoints below remain on the settings domain.
+
+`PUT` / `DELETE /{id}` only operate on login integrations and never delete a singleton builtin.
+
+### 5.3 Test configuration
 
 ```
-PUT /api/v1/admin/sso/providers/{provider_id}
+POST /api/v1/admin/integrations/{id}/test
 ```
 
-Requires `admin:sso:update`. Every field is optional and only the supplied ones are applied; a conflicting `name` also returns `6305`.
-
-**Errors:**
-
-| HTTP | Code | Meaning |
-| --- | --- | --- |
-| `400` | `6300` | `sso_provider_not_found` |
-| `400` | `6305` | `sso_provider_name_exists` |
-
-### 5.4 Delete a provider
-
-```
-DELETE /api/v1/admin/sso/providers/{provider_id}
-```
-
-Requires `admin:sso:update`. Deleting a provider also removes its configuration.
-
-**Errors:** `400` + `6300` (`sso_provider_not_found`).
-
-### 5.5 Test a provider
-
-```
-POST /api/v1/admin/sso/providers/{provider_id}/test
-```
-
-Requires `admin:sso:update`. Attempts to build an authorization URL with a test `state` and callback to validate the configuration.
+Requires login-domain `update`. Validates whether the login configuration works.
 
 **200 OK:**
 
@@ -291,26 +256,25 @@ Requires `admin:sso:update`. Attempts to build an authorization URL with a test 
   "code": 0,
   "data": {
     "status": "success",
-    "message": "SSO provider configuration is valid",
-    "authorization_url": "https://github.com/login/oauth/authorize?client_id=..."
+    "message": "SSO provider configuration is valid"
   },
   "msg": "success"
 }
 ```
 
-When the configuration is invalid the response is still `200 OK`, but `data.status` is `"error"`, `message` is a generic error string, and `authorization_url` is absent.
+Configuration test responses omit authorization URLs to avoid exposing query parameters or credentials. An invalid configuration still returns `200 OK`, but `data.status` is `"error"`.
 
 <Callout type="warn">
-  The test outcome is expressed in `data.status` and is **not** conveyed by the HTTP status: `code: 0` + `status: "error"` means the configuration is broken. Only a missing provider returns `400` + `6300`.
+  The test outcome is expressed in `data.status` and is **not** conveyed by the HTTP status: `code: 0` + `status: "error"` means the configuration is broken.
 </Callout>
 
-### 5.6 Unlink any user's connection
+### 5.4 Unlink any user's connection
 
 ```
-DELETE /api/v1/admin/sso/connections/{connection_id}
+DELETE /api/v1/admin/integrations/connections/{connection_id}
 ```
 
-Requires `admin:sso:update`. Semantics match self-service unlinking, but any user's connection may be targeted; the "no password and only sign-in method" protection still applies.
+Requires `admin:integrations:login:update`. Semantics match self-service unlinking, but any user's connection may be targeted; the "no password and only sign-in method" protection still applies.
 
 **Errors:**
 
@@ -325,18 +289,18 @@ Requires `admin:sso:update`. Semantics match self-service unlinking, but any use
 
 | HTTP | Code | Trigger |
 | --- | --- | --- |
-| `403` | `3000` | Missing `admin:sso:read` / `admin:sso:update` |
+| `403` | `3000` | Missing required permission (`admin:integrations:login:*` / `admin:integrations:settings:*`) |
 | `400` | `1004` | Unlinking would leave the account with no sign-in method |
-| `400` | `6300` | Provider not found (admin endpoints) |
-| `400` | `6305` | Duplicate provider identifier |
-| `400` | `4000` | SSO connection missing or not owned by the caller |
-| `422` | `1001` | Request validation failed (provider naming, `icon_url` format, …) |
+| `400` | `6300` | Integration not found (admin endpoints) |
+| `400` | `6305` | Duplicate integration identifier |
+| `400` / `404` | `4000` | SSO connection missing or not owned by the caller |
+| `422` | `1001` | Request validation failed (integration naming, `icon_url` format, …) |
 
 The login/callback flow does not use the unified envelope; failures arrive as the `error` parameter on the frontend's `/sso-callback`: `sso_provider_not_found`, `sso_session_expired`, `sso_login_failed`, `pending_approval`, `inactive`.
 
 ## Related
 
 - [Authentication API](./auth) — password login, JWT tokens, and TOTP two-factor verification
-- [SSO configuration](/usage/guides/administration/sso) — per-protocol settings and attribute mapping
+- [SSO configuration](/usage/guides/administration/sso) — per-protocol settings, the `config` / `attribute_mapping` / `credentials` / `login_config` boundaries, and upgrade/rollback cautions
 - [Users API](./users) — the `sso_connections` field on a user profile
 - [Error Handling](./errors) — recover by HTTP status and business error code

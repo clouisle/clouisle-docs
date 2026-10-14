@@ -40,12 +40,12 @@ Configure channels under **Site Settings** → **Notification Channels**. A chan
 
 | Channel | Key settings | Test endpoint |
 | --- | --- | --- |
-| Email | `smtp_enabled`, `smtp_host`, `smtp_port`, `smtp_encryption` (`none`/`ssl`/`tls`), `smtp_username`, `smtp_password`, `email_from_name`, `email_from_address` | `/test-email` |
-| DingTalk | `dingtalk_enabled`, `dingtalk_notification_type` (`webhook` or `app`), webhook URL/secret, or app key/secret/agent ID | `/test-dingtalk` |
-| WeCom | `wechat_enabled`, `wechat_notification_type` (`webhook` or `app`), webhook URL, or corp ID (`wechat_corp_id`) / agent ID (`wechat_agent_id`) / app secret (`wechat_secret`) | `/test-wechat` |
-| Feishu | `feishu_enabled`, `feishu_notification_type` (`webhook` or `app`), webhook URL/secret, or app ID/secret | `/test-feishu` |
-| Slack | `slack_enabled`, `slack_webhook_url` | `/test-slack` |
-| Webhook | `webhook_enabled`, `webhook_url`, `webhook_method` (`POST`/`GET`), `webhook_headers`, `webhook_body_template`, `webhook_secret` | `/test-webhook` |
+| Email | `smtp_enabled`, `smtp_host`, `smtp_port`, `smtp_encryption` (`none`/`ssl`/`tls`), `smtp_username`, `smtp_password`, `email_from_name`, `email_from_address` | `POST /api/v1/admin/integrations/email/test` |
+| Webhook | `webhook_enabled`, `webhook_url`, `webhook_method` (`POST`/`GET`), `webhook_headers`, `webhook_body_template`, `webhook_secret` | `POST /api/v1/admin/integrations/webhook/test` |
+
+<Callout type="note">
+  Email and generic Webhook are the only external notification channels (legacy DingTalk, WeCom, Feishu messaging, and Slack integrations were removed). The Feishu integration now only provides directory sync and optional web sign-in — it sends **no agent messages or notifications**. See [SSO Configuration](./sso.mdx).
+</Callout>
 
 Send a test message before saving. **Never put a signing secret in a URL query parameter** — query strings end up in proxies, gateways, and browser history.
 

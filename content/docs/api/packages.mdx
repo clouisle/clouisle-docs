@@ -1,0 +1,93 @@
+---
+title: 资源包导入导出
+description: 跨团队迁移 Agent、工作流、知识库与工具的打包与安装
+icon: Package
+---
+
+资源包（`.clouisle`）把 Agent、工作流、知识库或工具连同依赖元数据打包成一个文件，用于跨团队迁移或备份。流程分两步：先导出，再到目标团队预览并安装。平台端与管理端各挂一套同形路由（`/api/v1/packages` 与 `/api/v1/admin/packages`）。
+
+<Callout type="info">
+  导入是两阶段的：`POST /import/preview` 只校验依赖并返回会话，不写入任何资源；拿到 `session_id` 后再调 `POST /import/{session_id}/install` 落盘。预览会话有有效期，过期需重新上传。
+</Callout>
+
+## 端点总览
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| GET | `/api/v1/packages/{resource_type}/{resource_id}/export` | 导出资源为 `.clouisle` 包（文件下载） |
+| POST | `/api/v1/packages/import/preview` | 上传包并预览内容与依赖（multipart：`team_id` + `file`） |
+| POST | `/api/v1/packages/import/{session_id}/install` | 安装预览会话中的资源到目标团队 |
+
+`resource_type` 取值：`tool`、`agent`、`workflow`、`knowledge_base`。导入/导出按资源自身的访问规则校验权限，无独立的包权限码。
+
+## 1. 导出资源包
+
+```
+GET /api/v1/packages/agent/550e8400-e29b-41d4-a716-446655440000/export
+```
+
+返回文件流（`Content-Disposition: attachment`），直接保存为 `.clouisle` 文件。导出与导入操作会记审计日志（`export_clouisle_package` / `preview_clouisle_import`）。
+
+## 2. 预览导入
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/packages/import/preview" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "team_id=TEAM_UUID" \
+  -F "file=@assistant.clouisle"
+```
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "session_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "valid": true,
+    "resources": [
+      { "type": "agent", "name": "Support Assistant", "version": "1.0.0" }
+    ],
+    "dependencies": [],
+    "errors": [],
+    "warnings": []
+  },
+  "msg": "success"
+}
+```
+
+依赖逐项标记状态：`resolved`（目标团队已有）、`missing`（缺失，需先处理）、`forbidden`（无权使用）。`valid=false` 时先解决 `errors` 再安装。
+
+## 3. 安装导入
+
+```
+POST /api/v1/packages/import/{session_id}/install
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `action` | `install`（默认） | 否 | 冲突处理动作 |
+| `target_name` | string（1–100） | 否 | 重命名后安装，避免与同名资源冲突 |
+| `dependency_mapping` | object | 否 | 依赖 ID 映射（`{原ID: 目标团队UUID}`），把缺失依赖指向已有资源 |
+
+**成功响应（200 OK）：**
+
+```json
+{
+  "code": 0,
+  "data": {
+    "installed": "550e8400-e29b-41d4-a716-446655440000",
+    "updated": null,
+    "skipped": false,
+    "errors": [],
+    "warnings": []
+  },
+  "msg": "success"
+}
+```
+
+## 相关文档
+
+- [Agent 配置](/usage/guides/agent/create-agent) — 导出前的 Agent 准备
+- [工作流编排](/usage/guides/workflow/orchestrate) — 工作流资源的打包范围
+- [管理 API](./admin) — 管理端包路由与权限边界

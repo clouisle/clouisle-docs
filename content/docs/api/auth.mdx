@@ -398,11 +398,11 @@ Content-Type: application/json
 | 需求 | 端点 | 详见 |
 | --- | --- | --- |
 | 绑定 TOTP、生成备用码、查询状态、解绑 | `POST /api/v1/totp/setup`、`/enable`、`/disable`、`/regenerate-backup-codes`、`GET /api/v1/totp/status` | [TOTP API](./totp) |
-| 列出公开 SSO 提供商、发起 SSO 登录、处理回调 | `GET /api/v1/sso/providers`、`/sso/login/{provider_name}`、`/sso/callback/{provider_name}` | [SSO API](./sso) |
+| 列出公开登录集成、发起 SSO 登录、处理回调 | `GET /api/v1/sso/integrations`、`/sso/login/{provider_name}`、`/sso/callback/{provider_name}` | [SSO API](./sso) |
 | 解除本人已绑定的 SSO 连接 | `DELETE /api/v1/sso/connections/{connection_id}` | [SSO API](./sso) |
 
 <Callout type="warn">
-  站点启用 SSO 并关闭密码登录（`sso_allow_password_login = false`）后，`POST /api/v1/login/access-token` 会直接返回 `400` / `6306`。客户端应先调用 `GET /api/v1/sso/providers` 判断可用登录方式，再决定是否显示密码表单。
+  站点启用 SSO 并关闭密码登录（`sso_allow_password_login = false`）后，`POST /api/v1/login/access-token` 会直接返回 `400` / `6306`。客户端应先调用 `GET /api/v1/sso/integrations` 判断可用登录方式，再决定是否显示密码表单。
 </Callout>
 
 ## 错误码

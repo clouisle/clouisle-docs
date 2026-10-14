@@ -32,7 +32,7 @@ icon: ShieldCheck
 | 权限 | `/api/v1/admin/permissions` | `admin:permission:read`、`admin:permission:create`、`admin:permission:update`、`admin:permission:delete` |
 | 站点设置 | `/api/v1/admin/site-settings` | `admin:settings:read`、`admin:settings:update`（归档审计日志另需 `audit:export`） |
 | 模型 | `/api/v1/admin/models` | `admin:model:read`、`admin:model:create`、`admin:model:update`、`admin:model:delete` |
-| SSO | `/api/v1/admin/sso` | `admin:sso:read`、`admin:sso:update` |
+| 集成 | `/api/v1/admin/integrations` | `admin:integrations:login:read/update`（登录域）、`admin:integrations:settings:read/update`（内置配置域） |
 | 通知 | `/api/v1/admin/notifications` | `admin:notification:create`（创建）、`admin:notification:delete`（删除）；列表按全局管理权限或授权团队收敛 |
 | 团队 | `/api/v1/admin/teams` | `admin:team:read`、`admin:team:create`、`admin:team:delete` |
 | 记忆 | `/api/v1/admin/memories` | `admin:memory:read`、`admin:memory:update`、`admin:memory:delete` |

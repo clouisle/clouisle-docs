@@ -127,21 +127,16 @@ sysctl --system
 
 ### 运行时开关与降级行为
 
-沙箱链路上有四个关键开关，**默认配置更偏向「代码总能跑起来」而不是「隔离一定生效」**，生产部署需要逐项确认：
+沙箱运行时由 `SANDBOX_RUNTIME_ENABLED` 控制，默认 `true`。设为 `false` 时不走沙箱网关，代码会在 API/Worker 进程内执行，不具备沙箱隔离，仅适用于本地调试。当前配置中**没有** `SANDBOX_LEGACY_FALLBACK_ENABLED` 开关：沙箱任务或网关失败不会静默回退到进程内执行。
 
 | 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
-| `SANDBOX_RUNTIME_ENABLED` | `true` | 设为 `false` 时完全不走沙箱网关，代码直接在 API/Worker 进程内执行（**无任何隔离**），仅供本地调试 |
-| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | 沙箱任务失败或网关抛异常时，回退到进程内的 legacy runner |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | 代码 `false`；镜像/Compose/Helm/K8s `true` | 把可执行载荷包进 Bubblewrap 挂载命名空间 |
-| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | 代码 `bwrap`；部署 `/usr/bin/bwrap` | Bubblewrap 可执行文件名或绝对路径 |
-
-**为什么 `SANDBOX_LEGACY_FALLBACK_ENABLED` 值得单独关注**：`execute_code` 这条调用路径在沙箱网关返回失败或抛出异常时，会**静默**改用进程内 legacy runner 重新执行，只在服务端日志留一条 `warning`。也就是说，沙箱 Worker 宕机、`bwrap` 缺失、队列无人消费这些情况，默认结果不是「代码被拒绝执行」，而是「代码退回到**没有隔离**的进程内执行」——隔离保护在无声中消失，而调用方拿到的是一个「成功」的结果。
-
-要 fail-closed，把它设为 `false`：沙箱失败会直接把失败结果返回给调用方，不再降级。安全敏感的部署应当关闭该开关，并对沙箱任务失败率设告警。
+| `SANDBOX_RUNTIME_ENABLED` | `true` | 启用沙箱运行时；关闭后进程内执行，无隔离 |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true`（代码默认） | 把可执行载荷包进 Bubblewrap 挂载命名空间 |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `bwrap`；官方部署 `/usr/bin/bwrap` | Bubblewrap 可执行文件名或绝对路径 |
 
 <Callout type="warn">
-反方向的坑同样要提防：文件系统隔离**已启用**时，找不到 `bwrap`、工作空间根目录不存在、或任务 `cwd` 逃出工作空间，启动器会抛 `SandboxIsolationError` 让任务失败——**启动器自身不会退化成未隔离执行**。但上层 `SANDBOX_LEGACY_FALLBACK_ENABLED=true` 仍会捕获这次失败并降级，所以只配置隔离开关、不关闭 fallback，并不能保证隔离一定生效。
+文件系统隔离开启时，找不到 `bwrap`、工作空间根目录不存在或任务 `cwd` 逃出工作空间，任务会失败；沙箱启动器不会降级成未隔离执行。
 </Callout>
 
 ### 相关配置

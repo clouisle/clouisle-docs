@@ -40,12 +40,12 @@ icon: BellRing
 
 | 渠道 | 关键设置 | 测试端点 |
 | --- | --- | --- |
-| 邮件 | `smtp_enabled`、`smtp_host`、`smtp_port`、`smtp_encryption`（`none`/`ssl`/`tls`）、`smtp_username`、`smtp_password`、`email_from_name`、`email_from_address` | `/test-email` |
-| 钉钉 | `dingtalk_enabled`、`dingtalk_notification_type`（`webhook` 或 `app`）、Webhook URL/Secret 或 App Key/Secret/Agent ID | `/test-dingtalk` |
-| 企业微信 | `wechat_enabled`、`wechat_notification_type`（`webhook` 或 `app`）、Webhook URL，或 Corp ID（`wechat_corp_id`）/Agent ID（`wechat_agent_id`）/App Secret（`wechat_secret`） | `/test-wechat` |
-| 飞书 | `feishu_enabled`、`feishu_notification_type`（`webhook` 或 `app`）、Webhook URL/Secret 或 App ID/Secret | `/test-feishu` |
-| Slack | `slack_enabled`、`slack_webhook_url` | `/test-slack` |
-| Webhook | `webhook_enabled`、`webhook_url`、`webhook_method`（`POST`/`GET`）、`webhook_headers`、`webhook_body_template`、`webhook_secret` | `/test-webhook` |
+| 邮件 | `smtp_enabled`、`smtp_host`、`smtp_port`、`smtp_encryption`（`none`/`ssl`/`tls`）、`smtp_username`、`smtp_password`、`email_from_name`、`email_from_address` | `POST /api/v1/admin/integrations/email/test` |
+| Webhook | `webhook_enabled`、`webhook_url`、`webhook_method`（`POST`/`GET`）、`webhook_headers`、`webhook_body_template`、`webhook_secret` | `POST /api/v1/admin/integrations/webhook/test` |
+
+<Callout type="note">
+  邮件与通用 Webhook 是仅有的外部通知渠道（旧版的钉钉、企业微信、飞书消息、Slack 集成已移除）。飞书集成现在只提供通讯录同步与可选的网页登录，**不发送 Agent 消息或通知**，详见[配置单点登录](./sso.mdx)。
+</Callout>
 
 配置完先发测试消息再保存。**不要把签名密钥放进 URL 查询参数**——查询串会出现在代理、网关与浏览器历史里。
 

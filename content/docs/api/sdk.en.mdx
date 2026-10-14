@@ -1,0 +1,160 @@
+---
+title: SDK and Code Samples
+description: Generate a typed client from the OpenAPI spec and call the API
+icon: Package
+---
+
+Clouisle publishes no official SDK (Python, JavaScript, Go, Ruby, or otherwise). The API is a standard REST + JSON interface: all requests use the `https://your-domain.com/api/v1` base path with JSON request/response bodies and a `Bearer` JWT or `clou_`-prefixed API Key in the `Authorization` header. Responses use a unified envelope `{"code": 0, "data": ..., "msg": "success"}` — check `code` before using `data`.
+
+## Get the OpenAPI Spec
+
+| Entry | URL |
+| --- | --- |
+| Swagger UI | `https://your-domain.com/docs` |
+| OpenAPI JSON | `https://your-domain.com/api/v1/openapi.json` |
+
+To get a typed client, generate one from the OpenAPI JSON with `openapi-generator` or `openapi-typescript`:
+
+```bash
+# TypeScript types
+npx openapi-typescript https://your-domain.com/api/v1/openapi.json -o api.d.ts
+
+# Python client
+openapi-generator generate -i https://your-domain.com/api/v1/openapi.json -g python -o ./client
+```
+
+## Authentication
+
+The login endpoint `POST /api/v1/login/access-token` takes form-encoded `username` and `password`. The token lifetime follows the `session_timeout_days` site setting (default 30 days); there is no refresh endpoint, so log in again before expiry. For server-to-server calls, use an API Key (created in the UI or via `POST /api/v1/api-keys`), sent the same `Bearer` way:
+
+```bash
+export CLOUISLE_API_KEY="clou_your_full_key_here"
+curl -X GET "https://your-domain.com/api/v1/agents" \
+  -H "Authorization: Bearer $CLOUISLE_API_KEY"
+```
+
+## TypeScript Minimal Example
+
+```ts title="sdk-example.ts"
+const API_BASE = 'https://your-domain.com/api/v1';
+const headers = {
+  Authorization: `Bearer ${process.env.CLOUISLE_API_KEY}`,
+  'Content-Type': 'application/json',
+};
+
+// List Agents (pagination envelope, see ./conventions)
+const listRes = await fetch(`${API_BASE}/agents?page=1&page_size=20`, { headers });
+const listBody = await listRes.json();
+if (listBody.code !== 0) throw new Error(listBody.msg);
+for (const agent of listBody.data.items) console.log(agent.id, agent.name);
+
+// Run a workflow (async: returns run_id + stream_url)
+const runRes = await fetch(`${API_BASE}/workflows/${workflowId}/run`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({ inputs: { customer_email: 'customer@example.com' } }),
+});
+const runBody = await runRes.json();
+console.log(runBody.data.run_id, runBody.data.stream_url);
+```
+
+## Python Minimal Example
+
+```python title="sdk_example.py"
+import os
+import requests
+
+API_BASE = "https://your-domain.com/api/v1"
+headers = {"Authorization": f"Bearer {os.getenv('CLOUISLE_API_KEY')}"}
+
+# Log in for a JWT (form-encoded)
+login = requests.post(
+    f"{API_BASE}/login/access-token",
+    data={"username": "your_username", "password": "your_password"},
+).json()
+token = login["data"]["access_token"]
+
+# Chat (conversations are created implicitly; pass conversation_id to continue one)
+chat = requests.post(
+    f"{API_BASE}/agents/{agent_id}/chat",
+    headers={"Authorization": f"Bearer {token}"},
+    json={"message": "Hello! I need help with my order.", "conversation_id": None, "variables": {}},
+).json()
+print(chat["data"]["conversation_id"], chat["data"]["message"]["content"])
+
+# Search a knowledge base
+search = requests.post(
+    f"{API_BASE}/knowledge-bases/{kb_id}/search",
+    headers=headers,
+    json={"query": "How to reset password?", "search_mode": "hybrid", "top_k": 5},
+).json()
+for item in search["data"]["results"]:
+    print(item["document_name"], item["score"])
+```
+
+## Streaming Chat (SSE)
+
+`POST /api/v1/agents/{agent_id}/chat/stream` returns `text/event-stream` with events such as `content_delta` and `message_end`. See [Streaming Events](./streaming) for the full event table:
+
+```javascript
+const response = await fetch(
+  `https://your-domain.com/api/v1/agents/${agentId}/chat/stream`,
+  {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+    },
+    body: JSON.stringify({ message: 'Tell me a story', conversation_id: null, variables: {} }),
+  }
+);
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
+let buffer = '';
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  const lines = buffer.split('\n');
+  buffer = lines.pop() || '';
+  let eventType = '';
+  for (const line of lines) {
+    if (line.startsWith('event: ')) eventType = line.slice(7);
+    else if (line.startsWith('data: ') && eventType) {
+      const data = JSON.parse(line.slice(6));
+      if (eventType === 'content_delta') process.stdout.write(data.delta);
+      if (eventType === 'message_end') console.log('\n[Done]');
+      eventType = '';
+    }
+  }
+}
+```
+
+## Error Handling
+
+Validation failures return HTTP 422 with `data.errors` as a field-to-messages dictionary. Check `code` before using `data`:
+
+```python
+result = requests.post(
+    f"{API_BASE}/agents",
+    headers={"Authorization": f"Bearer {token}"},
+    json={"name": "x"},  # missing required team_id
+).json()
+
+if result["code"] != 0:
+    if result["code"] == 1001:
+        for field, messages in result["data"]["errors"].items():
+            print(f"{field}: {', '.join(messages)}")
+    else:
+        print(f"Error {result['code']}: {result['msg']}")
+```
+
+## Related Docs
+
+- [Get Started](./get-started) — Create an API Key and send your first request
+- [Conventions](./conventions) — Pagination, filtering, sorting, and batch endpoints
+- [Best Practices](./best-practices) — Token management, retries, and rate limits
+- [Error Handling](./errors) — HTTP status and business error codes
+- [Streaming Events](./streaming) — Parsing SSE events

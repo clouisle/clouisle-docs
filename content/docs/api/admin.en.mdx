@@ -32,7 +32,7 @@ Every endpoint declares the permission code it requires (`admin:*` or `audit:*`)
 | Permissions | `/api/v1/admin/permissions` | `admin:permission:read`, `admin:permission:create`, `admin:permission:update`, `admin:permission:delete` |
 | Site settings | `/api/v1/admin/site-settings` | `admin:settings:read`, `admin:settings:update` (archiving audit logs additionally needs `audit:export`) |
 | Models | `/api/v1/admin/models` | `admin:model:read`, `admin:model:create`, `admin:model:update`, `admin:model:delete` |
-| SSO | `/api/v1/admin/sso` | `admin:sso:read`, `admin:sso:update` |
+| Integrations | `/api/v1/admin/integrations` | `admin:integrations:login:read/update` (login domain), `admin:integrations:settings:read/update` (builtin-config domain) |
 | Notifications | `/api/v1/admin/notifications` | `admin:notification:create` (create), `admin:notification:delete` (delete); listing narrows to global admin access or an authorized team |
 | Teams | `/api/v1/admin/teams` | `admin:team:read`, `admin:team:create`, `admin:team:delete` |
 | Memories | `/api/v1/admin/memories` | `admin:memory:read`, `admin:memory:update`, `admin:memory:delete` |

@@ -1,0 +1,106 @@
+---
+title: API Best Practices
+description: Build reliable API integrations with webhooks, batch, and SSE
+icon: ShieldCheck
+---
+
+Beyond token hygiene, error retries, and respecting rate limits, integration quality comes down to three high-traffic scenarios: webhook triggers, batch operations, and SSE streaming. This page converges the Do / Don't guidance for those three; endpoint details live on their reference pages.
+
+## Tokens and Authentication
+
+JWTs have no refresh endpoint: before the `session_timeout_days` lifetime (default 30 days) expires, log in again via `POST /api/v1/login/access-token`. Use API Keys for server-to-server calls (least privilege, regular rotation, one key per service) and revoke compromised keys immediately.
+
+Do: store tokens in environment variables or secure storage, use different tokens per environment, monitor token usage. Don't: hardcode tokens in source, commit them to version control, reuse production tokens in development, or share tokens between users.
+
+```python
+import os
+
+class TokenManager:
+    """Re-authenticate before expiry (no refresh endpoint)."""
+
+    def get_token(self):
+        if not self.token or self.is_expiring_soon():
+            data = requests.post(
+                f"{API_BASE_URL}/api/v1/login/access-token",
+                data={"username": os.getenv("CLOUISLE_USERNAME"), "password": os.getenv("CLOUISLE_PASSWORD")},
+            ).json()["data"]
+            self.token = data["access_token"]
+        return self.token
+```
+
+## Webhook Triggers
+
+`POST /api/v1/workflows/webhook/{webhook_token}` is the only workflow entry that accepts API Key authentication: the token goes in the URL path while the `Authorization` header must still carry a `clou_`-prefixed API Key. The workflow must be published with trigger type `webhook`; tokens and stream URLs are not public or unauthenticated, and workflow access rules still apply. Rotate the token with `POST /api/v1/workflows/{workflow_id}/regenerate-webhook-token`.
+
+Do: treat the `webhook_token` as a secret (regenerate on leak), check publish status and trigger type when triggers fail, and make external retry deliveries idempotent or deduplicated. Don't: embed the token in publicly served frontend code, assume webhooks are anonymously callable, or trigger draft or `manual`-trigger workflows.
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/workflows/webhook/wh_abc123" \
+  -H "Authorization: Bearer clou_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"customer_email": "customer@example.com", "inquiry_text": "I need help"}'
+```
+
+See [Workflow Execution](./workflow).
+
+## Batch Operations
+
+Use only the batch endpoints that actually exist (see [Conventions](./conventions)) — never guess a generic `/batch` path: batch delete conversations with `DELETE /api/v1/conversations?ids=...` (needs delete permission on every conversation, else `3000` or `4000`); team-model authorize/revoke with `POST` / `DELETE /api/v1/teams/{team_id}/models/batch` (super admin only); retrieval comparison with `POST /api/v1/knowledge-bases/{kb_id}/search/batch` (one query × up to 10 configurations; one failed configuration doesn't fail the others); file parsing with `POST /api/v1/upload/parse/batch` (up to 5 files, more returns `1001`; on mixed success `data` holds only the successful items).
+
+Do: batch authorize instead of N single requests, use `search/batch` to compare retrieval configurations against one embedding, use `parse/batch` instead of looping the single parse endpoint. Don't: invent `/batch` paths for arbitrary resources, send more than 5 parse files or 10 search configurations, or assume `deleted_count` always equals the requested count (inaccessible IDs are ignored or error).
+
+## SSE Streaming
+
+Agent chat streams (`POST /api/v1/agents/{agent_id}/chat/stream`) and workflow run streams (`GET /api/v1/workflows/runs/{run_id}/stream`) both return `text/event-stream`: send `Accept: text/event-stream` and parse `event:` / `data:` lines with `curl -N` or a streaming reader. Workflow runs are async: the `run` endpoint immediately returns `run_id` plus `stream_url`, then consume `workflow_start`, `node_complete`, `workflow_complete`, `workflow_error`, and similar events from the stream URL.
+
+Do: receive updates via webhooks/SSE instead of polling status endpoints, reconnect workflow event streams with `from_sequence=0`, and cap stream timeouts and reconnects. Don't: poll `GET /runs/{run_id}` at high frequency, retry 429s immediately (use exponential backoff), or show raw errors to end users.
+
+```bash
+curl -N "https://your-domain.com/api/v1/workflows/runs/$RUN_ID/stream?from_sequence=0" \
+  -H "Authorization: Bearer $CLOUISLE_TOKEN"
+```
+
+See [Streaming Events](./streaming) and [Workflow Execution](./workflow).
+
+## Errors and Rate Limits
+
+Check the response `code` before using `data`; validation failures are HTTP 422 with `data.errors` as a field-to-messages dictionary. Retry with exponential backoff (max 3 attempts) only for retryable errors: never retry 4xx client errors or 2xxx auth errors. Clouisle sends no `X-RateLimit-*` response headers; rate limiting applies to specific security-sensitive flows (login lockout, TOTP lockout, email quota, model quotas such as `6103` model-quota-exceeded and `5400` email/provider limits) — back off before retrying HTTP 429s.
+
+```python
+import time
+
+def retry_with_backoff(func, max_retries=3, delay=1.0):
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except ApiError as e:
+            if 2000 <= e.code < 3000 or 4000 <= e.code < 5000:
+                raise
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
+```
+
+## Caching and Pagination
+
+Fetch large datasets page by page (`page` / `page_size`, envelope in [Conventions](./conventions)) instead of all at once; cache stable reads client-side; debounce search inputs instead of firing a request per keystroke.
+
+## Pre-Production Checklist
+
+- [ ] All requests over HTTPS; tokens and keys in secure storage
+- [ ] JWTs re-authenticated before expiry (no refresh endpoint); API Keys least-privilege and rotated
+- [ ] Webhook tokens treated as secrets; workflow published with `webhook` trigger before triggering
+- [ ] Only documented batch endpoints used, within the 5-file / 10-configuration caps
+- [ ] Streaming consumed via SSE plus reconnect, not status polling
+- [ ] Handlers for 422 validation, `6103` / `5400` quotas, and 429 backoff in place
+- [ ] Error and edge cases verified in a test environment, never with production credentials
+
+## Related Docs
+
+- [SDK and Code Samples](./sdk) — Generate a client and call the API
+- [Conventions](./conventions) — Pagination, filtering, sorting, and batch endpoints
+- [Workflow Execution](./workflow) — Runs, webhooks, and cancellation
+- [Streaming Events](./streaming) — Parsing SSE events
+- [Error Handling](./errors) — HTTP status and business error codes
+- [Get Started](./get-started) — Your first request

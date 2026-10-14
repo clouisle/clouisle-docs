@@ -37,8 +37,10 @@ Clouisle authorization is a four-layer composite: **identity bypass** (`is_super
 | `admin:knowledge-base:read/test/create/update/delete` | Knowledge base management from admin |
 | `admin:settings:read` | View site settings |
 | `admin:settings:update` | Modify site settings |
-| `admin:sso:read` | View SSO providers and configuration |
-| `admin:sso:update` | Manage SSO providers and user SSO connections |
+| `admin:integrations:login:read` | View login integrations and global SSO policy |
+| `admin:integrations:login:update` | Manage login integrations and user SSO connections |
+| `admin:integrations:settings:read` | View builtin email, Webhook and Feishu integrations |
+| `admin:integrations:settings:update` | Manage builtin email, Webhook and Feishu integrations (credentials, tests, directory sync) |
 | `audit:read` | View audit logs |
 | `audit:export` | Export audit logs (archiving audit logs also uses this permission, independent of `admin:settings:update`) |
 
@@ -63,7 +65,7 @@ The backend idempotently initializes 5 global built-in roles at startup, with th
 | Role | Type | Key Permissions | Typical Audience |
 | --- | --- | --- | --- |
 | **Super Admin** | Global built-in | Holds the wildcard code `*` and bypasses permission and team-membership checks via `is_superuser`, so it can perform system configuration, role management, audit export, and anything else | Operations lead, system owner |
-| **Admin** | Global built-in | Includes `admin:dashboard:access` and almost all management permissions; **excludes** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:sso:update`, and `admin:memory:update/delete` | Workspace administrator, tech lead |
+| **Admin** | Global built-in | Includes `admin:dashboard:access` and almost all management permissions; **excludes** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:integrations:login:update`, and `admin:memory:update/delete` | Workspace administrator, tech lead |
 | **Team Admin** | Global built-in | All Member permissions plus `team:update` and `team:manage`; granted to team `owner`/`admin` members by a startup migration | Team lead, project lead |
 | **Member** | Global built-in | No `admin:dashboard:access`; full collaboration permissions to create/edit/run Agents, workflows, knowledge bases, tools, and skills within a team | Developer, solution builder |
 | **Viewer** | Global built-in | Read-only role: view/chat/run published Agents and workflows and read/execute tools and skills within a team (no `apikey:*`) | Auditor, observer |
@@ -111,7 +113,7 @@ The sidebar renders five groups: **General** (Dashboard, Teams, Knowledge Bases,
 
 - **System**, **Resources**, and **Monitoring** are gated as a whole on `admin:dashboard:access`: without it the entire group is hidden.
 - **General** and **Settings** are not hidden as a group by `admin:dashboard:access`, but each item still requires its own permission (for example, a user with only `admin:team:read` sees Teams and Activities but not Dashboard). The Help Center external link requires no permission.
-- Route permission mapping lives in `frontend/lib/route-permissions.ts`: `/apps` and `/capabilities` use prefix matching; there is no `/tools` route (tool/skill management lives under `/capabilities`); `/site-settings/sso` uses `admin:sso:read`; the Storage page's "archive audit logs" action uses `audit:export` on its own.
+- Route permission mapping lives in `frontend/lib/route-permissions.ts`: `/apps` and `/capabilities` use prefix matching; there is no `/tools` route (tool/skill management lives under `/capabilities`); `/site-settings/integrations` uses either `admin:integrations:login:read` or `admin:integrations:settings:read`; the Storage page's "archive audit logs" action uses `audit:export` on its own.
 
 ## Check Order
 

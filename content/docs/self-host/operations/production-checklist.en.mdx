@@ -1,0 +1,59 @@
+---
+title: Production Checklist
+description: Verify security, performance, reliability, monitoring, and rollback item by item before launch
+icon: ClipboardCheck
+---
+
+Work through this checklist before launch; open the deployment to users only after every critical item passes.
+
+## Security
+
+- [ ] Password policy requires at least 8 characters with complexity; admins use two-factor auth.
+- [ ] JWT secret is unique and strong; session timeout follows policy (site setting `session_timeout_days`, default 30 days).
+- [ ] Accounts lock after 5 failed logins, new accounts require email verification; API keys have a rotation plan.
+- [ ] HTTPS everywhere with valid certificates, TLS 1.2 minimum, HSTS enabled.
+- [ ] CORS lists exact origins, no wildcards in production; rate limiting covers all endpoints.
+- [ ] Firewall opens only required ports; database/Redis/vector ports stay private.
+- [ ] Secrets live in environment variables or a secret manager — no hardcoding, no defaults, `.env` never committed.
+- [ ] Database connections encrypted, sensitive data encrypted at rest, backups encrypted.
+- [ ] Security headers (CSP, `X-Frame-Options`, etc.), input validation, and CSRF protection in place; dependency vulnerabilities scanned and fixed.
+
+## Performance and load testing
+
+- [ ] Slow database queries optimized, common queries indexed, connection pool sized for concurrency.
+- [ ] Redis caching in place with maxmemory and eviction policy set; static assets on CDN with Gzip/Brotli.
+- [ ] Worker processes sized to CPU cores; queue consumer concurrency load-tested.
+- [ ] Streaming timeouts configured: proxy read timeout at least 300s, `proxy_buffering off`, Redis `maxclients` and system `nofile` sized for peak SSE connections.
+- [ ] Load and stress tests done: p95 under 500ms, concurrent users meet target (minimum 100, target 500), bottlenecks resolved.
+- [ ] Targets: API p50 < 100ms, p95 < 500ms; chat first token < 2s; vector search < 500ms; CPU average < 60%, memory average < 70%.
+
+## Reliability and backup
+
+- [ ] At least 3 backend instances behind a load balancer with health checks (`GET /api/v1/health`); no single points of failure.
+- [ ] Database replication, Redis Sentinel or cluster mode, and Qdrant cluster (if used) configured with automatic failover drilled.
+- [ ] Daily automated backups retained 30+ days, stored encrypted off-site; restore procedure documented and actually rehearsed, RTO/RPO defined.
+- [ ] Retries with exponential backoff, timeouts and circuit breakers on external calls, dead-letter queue for failed tasks.
+
+## Monitoring and alerting
+
+- [ ] Centralized logging (excluding tokens and passwords) with rotation and retention in place.
+- [ ] Key metrics visible: RPS, latency, error rate, CPU/memory/disk, database and queue metrics.
+- [ ] Alerts cover failed health checks, auth anomalies, queue backlog, disk exhaustion, and backup failures; on-call and escalation defined.
+- [ ] The backend has no Prometheus `/metrics` endpoint — use the admin observability endpoints plus infrastructure monitoring instead.
+
+<Callout type="info">
+Clouisle uses Tortoise ORM: the backend creates and updates the schema automatically at startup, so there are no Alembic-style migrations to run manually.
+</Callout>
+
+## Configuration and deployment
+
+- [ ] All production environment variables set, no example defaults; environment configs separated and validated at startup.
+- [ ] LLM keys, email, object storage, CDN, DNS, and certificate auto-renewal configured and tested.
+- [ ] Images tagged and pushed to a registry, CI tests and security scans green, rollback documented and verified in staging.
+- [ ] Staging mirrors production; rollback rehearsed in staging.
+
+## Launch day and first week
+
+- [ ] Launch day: health endpoints, database, Redis, external integrations, certificates, DNS, and traffic distribution all healthy; smoke tests cover signup, login, agent creation, chat, upload, workflow, and search.
+- [ ] First week: error rate under 1%, response times on target, no memory leaks, backup verification done, capacity plan reviewed.
+- [ ] Launch sign-off from tech, security, ops, and product owners; rollback plan ready; on-call rota active.

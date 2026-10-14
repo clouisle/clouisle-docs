@@ -398,11 +398,11 @@ The login flow only issues and verifies challenges; everything else lives on oth
 | Need | Endpoints | Details |
 | --- | --- | --- |
 | Enroll TOTP, generate backup codes, check status, disable | `POST /api/v1/totp/setup`, `/enable`, `/disable`, `/regenerate-backup-codes`, `GET /api/v1/totp/status` | [TOTP API](./totp) |
-| List public SSO providers, start SSO login, handle the callback | `GET /api/v1/sso/providers`, `/sso/login/{provider_name}`, `/sso/callback/{provider_name}` | [SSO API](./sso) |
+| List public login integrations, start SSO login, handle the callback | `GET /api/v1/sso/integrations`, `/sso/login/{provider_name}`, `/sso/callback/{provider_name}` | [SSO API](./sso) |
 | Disconnect your own SSO connection | `DELETE /api/v1/sso/connections/{connection_id}` | [SSO API](./sso) |
 
 <Callout type="warn">
-  Once a deployment enables SSO and disables password login (`sso_allow_password_login = false`), `POST /api/v1/login/access-token` returns `400` / `6306` outright. Clients should call `GET /api/v1/sso/providers` first and decide whether to render the password form at all.
+  Once a deployment enables SSO and disables password login (`sso_allow_password_login = false`), `POST /api/v1/login/access-token` returns `400` / `6306` outright. Clients should call `GET /api/v1/sso/integrations` first and decide whether to render the password form at all.
 </Callout>
 
 ## Error Codes

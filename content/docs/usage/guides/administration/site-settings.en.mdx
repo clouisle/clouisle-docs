@@ -19,7 +19,7 @@ Settings categories:
 - **Notifications** (`/site-settings/notifications`)
 - **Storage** (`/site-settings/storage`)
 - **Memory** (`/site-settings/memory`)
-- **SSO** (`/site-settings/sso`)
+- **Integrations** (`/site-settings/integrations`: login identity sources, email, Webhook, Feishu directory; login and builtin-config domains authorize separately)
 
 Settings are stored as key-value site settings and exposed through `GET /api/v1/admin/site-settings` (single key: `GET/PUT /api/v1/admin/site-settings/{key}`, bulk update: `PUT /api/v1/admin/site-settings`). Viewing requires `admin:settings:read`; updating requires `admin:settings:update`.
 
@@ -223,15 +223,12 @@ Update SMTP settings: Navigate to **Settings** → **Notifications**, enter SMTP
 
 ### External Notification Channels
 
-The following channels can be enabled and configured (each with its own settings page section and a test endpoint):
+Email and generic Webhook are the only external notification channels, configured under **Settings** → **Integrations** (`GET/PUT /api/v1/admin/integrations/email`, `/webhook`; tests: `POST …/email/test`, `POST …/webhook/test`). Legacy DingTalk, WeCom, Feishu messaging, and Slack integrations were removed; the Feishu integration only provides directory sync and optional web sign-in, not notifications.
 
 | Channel | Key Settings | Test Endpoint |
 | --- | --- | --- |
-| DingTalk | `dingtalk_enabled`, type (`webhook` or `app`), webhook URL/secret or app key/secret/agent ID | `/test-dingtalk` |
-| WeChat Work | `wechat_enabled`, `wechat_notification_type` (`webhook` or `app`), webhook URL, or corp ID (`wechat_corp_id`) / agent ID (`wechat_agent_id`) / app secret (`wechat_secret`) | `/test-wechat` |
-| Feishu | `feishu_enabled`, type (`webhook` or `app`), webhook URL/secret or app ID/secret | `/test-feishu` |
-| Slack | `slack_enabled`, incoming webhook URL | `/test-slack` |
-| Webhook | `webhook_enabled`, URL, method, custom headers, body template, HMAC secret | `/test-webhook` |
+| Email | SMTP server, sender, credentials | `POST /api/v1/admin/integrations/email/test` |
+| Webhook | `webhook_enabled`, URL, method, custom headers, body template, HMAC secret | `POST /api/v1/admin/integrations/webhook/test` |
 
 ### Auto Notifications
 
@@ -392,11 +389,13 @@ The following five keys are seeded into the database at initialization, but **no
 For real security alerting, use the implemented path: the `security.*` events and external channels of [Auto Notifications](./notifications.mdx).
 
 
-## SSO Settings
+## Integration Settings (SSO / Email / Webhook / Feishu)
+
+Login identity sources, email, Webhook, and the Feishu directory are managed together under **Settings** → **Integrations** (`/site-settings/integrations`) on one Integration model with separate permission domains: `admin:integrations:login:read/update` for login integrations and global SSO policy, `admin:integrations:settings:read/update` for email, Webhook, and Feishu configuration and credentials.
 
 ### Global SSO Behavior
 
-Configured in **Settings** → **Security** (SSO section) or **Settings** → **SSO**:
+Configured in **Settings** → **Security** (SSO section):
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -406,9 +405,30 @@ Configured in **Settings** → **Security** (SSO section) or **Settings** → **
 | `sso_require_approval` | boolean | `false` | Require approval |
 | `sso_match_by_email` | boolean | `true` | Match by email |
 
-### SSO Providers
+### Login Integrations and Feishu
 
-SSO providers are managed in **Settings** → **SSO**. Providers are created generically with a name and protocol — there is no preset picker (Google, GitHub, Azure AD, etc.); each provider's configuration and attribute mapping are entered manually. See [SSO Configuration](./sso.mdx) for the full guide.
+Login integrations (OAuth2/OIDC, SAML2, CAS) are created and managed on the Integrations page; signup policy (`allow_signup`, `require_approval`, `default_role_id`) lives in `login_config`. Feishu sign-in is an opt-in capability on the Feishu integration — the button only appears once explicitly enabled. See [SSO Configuration](./sso.mdx).
+
+### Feishu Directory Sync
+
+Under **Settings** → **Integrations** → **Feishu directory sync**, manually sync selected Feishu department members into Clouisle accounts using the same app_id/app_secret (one-way: nothing syncs back to Feishu, and Feishu departures do not disable local accounts):
+
+1. Create a Feishu custom app with contact read scope covering the departments and their members; reading the root department requires full-member scope.
+2. Grant `tenant:tenant:readonly` (company name), `contact:user.employee_id:readonly` (user_id), `contact:user.base:readonly` (name), and `contact:user.email:readonly` (without it, placeholder emails are used).
+3. Save the App ID and App Secret in the Clouisle Feishu card (Fernet-encrypted; blank preserves the stored secret), browse the department tree, and save the scope: the top-level **Company** node is the root department (ID `0`); other departments cover themselves and descendants.
+4. Run **Sync selected department members** to import accounts and create/update the matching teams. The result reports created, updated, and skipped accounts plus new teams.
+
+New accounts have no local password and take the configured default role/team; accounts without a Feishu email get a deterministic placeholder (`@accounts.clouisle.example`, RFC 6761 reserved, derived from user_id so repeat syncs are stable). Existing local accounts are never merged by email alone; repeat syncs match on the stored Feishu user_id and skip email conflicts. Legacy `.invalid` placeholders are rewritten to `.example` on startup.
+
+| Feishu error | Meaning | Fix |
+| --- | --- | --- |
+| HTTP 400 `41050` (no user authority) | Member outside the app's contact data scope | Add the user/department to the scope and retry |
+| HTTP 403 `40004` (no dept authority) | Department outside the scope | Add the department to the scope |
+| HTTP 400 `40011`/`40012` | Invalid pagination parameters | Retry; report if it repeats |
+| `users without user_id` | Cannot read user IDs | Grant `contact:user.employee_id:readonly` |
+| `secret cannot be decrypted` | Backend `SECRET_KEY` changed | Re-save the App Secret |
+
+Admin endpoints: `GET/PUT /api/v1/admin/feishu/config`, `GET /feishu/departments`, `PUT /feishu/department-scope`, `POST /feishu/sync` (settings domain).
 
 ## Team Settings
 

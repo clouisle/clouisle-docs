@@ -19,7 +19,7 @@ icon: MonitorCog
 - **通知渠道**（`/site-settings/notifications`）
 - **存储**（`/site-settings/storage`）
 - **记忆**（`/site-settings/memory`）
-- **SSO**（`/site-settings/sso`）
+- **集成**（`/site-settings/integrations`：登录身份源、邮件、Webhook、飞书通讯录；登录域与内置配置域分别鉴权）
 
 设置以键值形式存储，通过 `GET /api/v1/admin/site-settings` 暴露（单键：`GET/PUT /api/v1/admin/site-settings/{key}`，批量更新：`PUT /api/v1/admin/site-settings`）。查看需要 `admin:settings:read`；更新需要 `admin:settings:update`。
 
@@ -223,15 +223,12 @@ Clouisle 对自定义 HTTP 工具、工作流 HTTP 请求节点、知识库网�
 
 ### 外部通知渠道
 
-以下渠道可单独启用和配置（各有自己的设置页分区和测试端点）：
+邮件与通用 Webhook 是仅有的外部通知渠道，在**设置** → **集成**中配置（`GET/PUT /api/v1/admin/integrations/email`、`/webhook`，测试：`POST …/email/test`、`POST …/webhook/test`）。旧版的钉钉、企业微信、飞书消息、Slack 集成已移除；飞书集成只提供通讯录同步与可选网页登录，不发送通知。
 
 | 渠道 | 关键设置 | 测试端点 |
 | --- | --- | --- |
-| 钉钉 | `dingtalk_enabled`、类型（`webhook` 或 `app`）、Webhook URL/Secret 或 App Key/Secret/Agent ID | `/test-dingtalk` |
-| 企业微信 | `wechat_enabled`、`wechat_notification_type`（`webhook` 或 `app`）、Webhook URL 或 Corp ID（`wechat_corp_id`）/Agent ID（`wechat_agent_id`）/App Secret（`wechat_secret`） | `/test-wechat` |
-| 飞书 | `feishu_enabled`、类型（`webhook` 或 `app`）、Webhook URL/Secret 或 App ID/Secret | `/test-feishu` |
-| Slack | `slack_enabled`、Incoming Webhook URL | `/test-slack` |
-| Webhook | `webhook_enabled`、URL、方法、自定义请求头、正文模板、HMAC Secret | `/test-webhook` |
+| 邮件 | SMTP 服务器、发件人、凭据 | `POST /api/v1/admin/integrations/email/test` |
+| Webhook | `webhook_enabled`、URL、方法、自定义请求头、正文模板、HMAC Secret | `POST /api/v1/admin/integrations/webhook/test` |
 
 ### 自动通知
 
@@ -257,14 +254,10 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 
 ### 外部渠道（管理员配置）
 
-管理员为自动通知类型全局配置外部投递渠道。可用渠道：
+管理员为自动通知类型全局配置外部投递渠道。可用渠道只有两个：
 
 - **邮件**（需 SMTP 配置）
-- **钉钉**
-- **企业微信**
-- **飞书**
 - **Webhook**（通用 Webhook）
-- **Slack**
 
 渠道仅在全局配置中选中且管理员启用/配置时发送通知。未配置渠道时，通知仅停留在应用内。
 
@@ -290,7 +283,7 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 
 其他类型（如 `workflow.run_success`、`agent.published`、`agent.unpublished`、`password.expiring` 等）存在并可启用。
 
-管理员在**管理后台** > **站点设置** > **通知渠道** > **自动通知**（以及对应的渠道标签：邮件、钉钉、企业微信、飞书、Webhook、Slack）中配置。
+管理员在**管理后台** > **站点设置** > **集成**（邮件、Webhook）与**自动通知**中配置。
 
 ### 用户可执行操作
 
@@ -392,11 +385,13 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 需要安全告警时请使用已实现的路径：[自动通知](./notifications.mdx) 的 `security.*` 事件与外部渠道。
 
 
-## SSO 设置
+## 集成设置（SSO / 邮件 / Webhook / 飞书）
+
+登录身份源、邮件、Webhook 与飞书通讯录在**设置** → **集成**（`/site-settings/integrations`）统一管理，使用同一 Integration 模型但权限分域：`admin:integrations:login:read/update` 管登录集成与全局 SSO 策略，`admin:integrations:settings:read/update` 管邮件、Webhook、飞书的配置与凭据。
 
 ### 全局 SSO 行为
 
-在**设置** > **安全**（SSO 分区）或**设置** > **SSO** 中配置：
+在**设置** > **安全**（SSO 分区）中配置：
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -406,9 +401,32 @@ Clouisle 的通知投递由管理员全局配置——没有每用户通知偏�
 | `sso_require_approval` | boolean | `false` | 需要审批 |
 | `sso_match_by_email` | boolean | `true` | 通过邮箱匹配 |
 
-### SSO 提供商
+### 登录集成与飞书
 
-SSO 提供商在**设置** > **SSO** 中管理。提供商通过名称和协议通用创建——没有预设选择器（Google、GitHub、Azure AD 等）；每个提供商的配置和属性映射需手动输入。详见[配置单点登录](./sso.mdx)。
+登录集成（OAuth2/OIDC、SAML2、CAS）在集成页创建与管理，注册策略（`allow_signup`、`require_approval`、`default_role_id`）位于 `login_config`；飞书登录是飞书集成上的可选能力，需显式开启才会显示按钮。详见[配置单点登录](./sso.mdx)。
+
+### 飞书通讯录同步
+
+在**设置** → **集成** → **飞书通讯录同步**中，用同一套 app_id、app_secret 手动把选中飞书部门的成员同步为 Clouisle 账号（单向：不同步回飞书，飞书侧离职/停用不会禁用本地账号）：
+
+1. 在飞书开发者后台建自建应用，授予通讯录读取与需要同步的部门数据范围（含成员）；读根部门需要全员范围。
+2. 授予 `tenant:tenant:readonly`（读公司名）、`contact:user.employee_id:readonly`（读 user_id）、`contact:user.base:readonly`（读姓名）与 `contact:user.email:readonly`（读邮箱，无该 scope 则用占位邮箱）。
+3. 在 Clouisle 飞书卡片保存 App ID 与 App Secret（Fernet 加密存储，留空保留原值），浏览部门树并保存同步范围：顶层**公司**节点即根部门（ID `0`），选它等于选全员；其他部门只含自身及后代。
+4. 点击**同步所选部门成员**，导入账号并创建/更新对应团队（含根部门的公司团队）。结果报告新建、更新、跳过账号与新建团队数。
+
+新账号无本地密码，取配置的默认角色与默认团队；飞书无邮箱时用确定性占位邮箱（`@accounts.clouisle.example`，RFC 6761 保留域，不可投递，local 部分由 user_id 派生，重复同步稳定）。已有本地账号不会仅按邮箱合并；重复同步按存储的飞书 user_id 匹配更新，邮箱冲突跳过。旧版 `.invalid` 占位域在启动时自动改写为 `.example`，无需手动修复。
+
+同步失败先看卡片上的飞书原始错误码：
+
+| 飞书错误 | 含义 | 处理 |
+| --- | --- | --- |
+| HTTP 400 `41050`（no user authority） | 成员超出应用通讯录数据范围 | 在飞书后台把该用户/部门加入数据范围后重试 |
+| HTTP 403 `40004`（no dept authority） | 部门超出数据范围 | 把该部门加入数据范围 |
+| HTTP 400 `40011`/`40012` | 分页参数非法 | 重试，重复出现则上报 |
+| `users without user_id` | 读不到 user_id | 补 `contact:user.employee_id:readonly` |
+| `secret cannot be decrypted` | 后端 `SECRET_KEY` 换过 | 重新保存 App Secret |
+
+相关管理端点：`GET/PUT /api/v1/admin/feishu/config`、`GET /feishu/departments`、`PUT /feishu/department-scope`、`POST /feishu/sync`（settings 域）。
 
 ## 团队设置
 

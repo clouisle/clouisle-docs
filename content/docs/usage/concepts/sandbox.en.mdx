@@ -125,23 +125,18 @@ The sandbox task runs in a fresh Bubblewrap user + mount namespace, so it cannot
 - **Docker Compose**: enable daemon user namespace remapping (`"userns-remap": "default"` in `/etc/docker/daemon.json`) to place every container in a nested user namespace — `CAP_SYS_ADMIN` then only applies to the container's own user namespace and the host-escape chains no longer work. The sandbox worker still creates its Bubblewrap user namespace (privileged inside the remapped namespace), so sandbox functionality is unaffected. Existing named volumes need an ownership reset, and all containers on the daemon are remapped.
 - **Kubernetes**: daemon-level remapping does not apply; rely on NetworkPolicy for outbound sandbox traffic, keep Bubblewrap updated and monitor its CVEs, or use node-level user namespace support where the cluster provides it.
 
-### Runtime Switches and Fallback Behaviour
+### Runtime Switches and Degraded Behaviour
 
-Four switches govern the sandbox path, and the **defaults favour "the code always runs" over "isolation is always in effect"** — production deployments should confirm each one:
+The sandbox path is governed by `SANDBOX_RUNTIME_ENABLED` (default `true`). When `false`, the sandbox gateway is skipped and code runs in-process inside the API/worker without sandbox isolation — local debugging only. There is **no** `SANDBOX_LEGACY_FALLBACK_ENABLED` switch in the current configuration: a failed sandbox job or gateway error does not silently fall back to in-process execution.
 
 | Environment variable | Default | Effect |
 | --- | --- | --- |
-| `SANDBOX_RUNTIME_ENABLED` | `true` | When `false`, the sandbox gateway is skipped entirely and code runs in-process inside the API/worker (**no isolation at all**); debugging only |
-| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | On a failed sandbox job or a gateway exception, fall back to the in-process legacy runner |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `false` in code; `true` in images/Compose/Helm/K8s | Wrap executable payloads in a Bubblewrap mount namespace |
-| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `bwrap` in code; `/usr/bin/bwrap` in deployments | Bubblewrap executable name or absolute path |
-
-**Why `SANDBOX_LEGACY_FALLBACK_ENABLED` deserves attention**: when the sandbox gateway returns a failure or raises, the `execute_code` code path **silently** re-runs the payload with the in-process legacy runner and only leaves a `warning` in the server log. So a dead sandbox worker, a missing `bwrap`, or an unconsumed queue does not mean "code refused to run" by default — it means "code ran in-process **without isolation**", while the caller receives a successful-looking result.
-
-To fail closed, set it to `false`: a sandbox failure is returned to the caller instead of degrading. Security-sensitive deployments should turn it off and alert on sandbox job failure rates.
+| `SANDBOX_RUNTIME_ENABLED` | `true` | Enables the sandbox runtime; when off, code runs in-process with no isolation |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true` (code default) | Wraps executable payloads in a Bubblewrap mount namespace |
+| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `bwrap` in code; `/usr/bin/bwrap` in official deployments | Bubblewrap executable name or absolute path |
 
 <Callout type="warn">
-Beware the opposite trap as well: when filesystem isolation **is** enabled, a missing `bwrap`, a missing workspace root, or a task `cwd` escaping the workspace raises `SandboxIsolationError` and fails the job — **the launcher itself never degrades to unisolated execution**. But `SANDBOX_LEGACY_FALLBACK_ENABLED=true` upstream still catches that failure and degrades anyway, so enabling isolation without disabling the fallback does not guarantee isolation is in effect.
+When filesystem isolation is enabled, a missing `bwrap`, a missing workspace root, or a task `cwd` escaping the workspace fails the job; the sandbox launcher never degrades to unisolated execution.
 </Callout>
 
 ### Related Configuration

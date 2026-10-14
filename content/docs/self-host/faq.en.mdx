@@ -59,7 +59,7 @@ No. Compose, Helm, and the single-file manifest all run `sandbox-worker` as root
 
 ### Is `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` on or off?
 
-The code default is `false`, so unsupported development hosts can still start. The supplied `sandbox-worker` image sets it to `true` in its `ENV`, and `deploy/.env.example`, the K8s ConfigMap, and the Helm values set it to `true` as well. Official deployments are therefore isolated; if you build your own image or manifest, do not drop this variable, or sandbox code will execute without filesystem isolation.
+The code default is `true` (`config.py`), and the official image, Compose, Helm, and K8s manifests set it to `true` as well. If you build your own image or manifest, do not drop this variable, or sandbox code will execute without filesystem isolation.
 
 ## Security
 

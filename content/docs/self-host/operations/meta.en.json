@@ -1,12 +1,1 @@
-{
-  "title": "Operations",
-  "icon": "Activity",
-  "pages": [
-    "storage",
-    "backup-recovery",
-    "database-maintenance",
-    "upgrade",
-    "monitoring",
-    "troubleshooting"
-  ]
-}
+{"icon":"Activity","pages":["storage","backup-recovery","database-maintenance","upgrade","monitoring","troubleshooting","high-availability","production-checklist","security-checklist"],"title":"Operations"}

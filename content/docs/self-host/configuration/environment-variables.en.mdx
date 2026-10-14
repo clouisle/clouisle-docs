@@ -58,8 +58,7 @@ The Celery broker and result backend are derived from `REDIS_*` (broker `redis:/
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | Compose `http://api:8000` | Sandbox artifact upload address |
 | `SANDBOX_ARTIFACT_UPLOAD_API_KEY` | Empty | Can replace the default internal signing |
 | `SANDBOX_RUNTIME_ENABLED` | `true` | Enable the sandbox runtime |
-| `SANDBOX_LEGACY_FALLBACK_ENABLED` | `true` | Fall back to the in-process legacy runner when the sandbox runtime task fails; set to `false` to fail closed |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | code `false`; image/Compose/K8s `true` | Run executable payloads inside a Bubblewrap mount namespace |
+| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true` (code default; official deployments also `true`) | Run executable payloads inside a Bubblewrap mount namespace |
 | `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | code `bwrap`; image/Compose/K8s `/usr/bin/bwrap` | Bubblewrap executable name or absolute path |
 | `SANDBOX_WORKER_CONCURRENCY` | `1` | Number of concurrent sandbox worker slots |
 | `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | Host-side root for job and session directories |

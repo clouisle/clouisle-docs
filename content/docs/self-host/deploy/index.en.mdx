@@ -6,6 +6,22 @@ icon: Rocket
 
 Clouisle offers the guided installer, manual Docker Compose, Helm, generated single-file Kubernetes manifests, manual Kubernetes templates, running from source, and the community-maintained Sealos template.
 
+
+## Overview
+
+Clouisle runs **3 images** as **5 application services** plus **3 infrastructure services**: `clouisle-backend` (api, worker, beat), `clouisle-sandbox-worker` (sandbox-worker), and `clouisle-frontend` (frontend), backed by PostgreSQL, Redis, and Qdrant. The frontend container runs the Next.js standalone server directly (`node server.js`, `:3000`) with no Nginx inside; `/api/*` is proxied to the backend by Next.js rewrites, and `deploy/nginx/default.conf` is only an optional external reverse-proxy example.
+
+Service commands and replicas: api runs `python main.py server -H 0.0.0.0 -w 4 --no-reload` (1+ replicas); worker runs `python main.py worker -c 4 -Q default,agent,knowledge,workflow` (1+ replicas); sandbox-worker runs `python main.py sandbox-worker -c ${SANDBOX_WORKER_CONCURRENCY:-1}` (1+ replicas); beat runs `python main.py beat` with **exactly 1 replica** — extra beat instances duplicate scheduled tasks.
+
+Build all images (from the project root):
+
+```bash
+docker build -f deploy/dockerfiles/backend.Dockerfile -t clouisle-backend:latest .
+docker build -f deploy/dockerfiles/sandbox-worker.Dockerfile -t clouisle-sandbox-worker:latest .
+docker build -f deploy/dockerfiles/frontend.Dockerfile -t clouisle-frontend:latest .
+```
+
+See the per-method pages for details: Docker Compose for single servers, Helm or the single-file manifest for clusters, running from source for development, and the Sealos community template.
 <Cards>
   <Card title="Docker Compose" href="/self-host/deploy/docker-compose">Single-server deployment with API, Worker, database, cache, and vector store.</Card>
   <Card title="Sealos" href="/self-host/deploy/sealos">Deploy with the community-maintained template and provision PostgreSQL, Redis, Qdrant, and persistent upload storage.</Card>
