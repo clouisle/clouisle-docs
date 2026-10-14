@@ -1,17 +1,26 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "main": ".open-next/worker.js",
-  "build": {
-    "command": "npm run build:cf",
-  },
   "name": "clouisle-docs",
   "compatibility_date": "2026-08-01",
-  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  // 纯静态站：main 是 ~200 行的极简路由 Worker（worker/index.ts），
+  // 不再加载 Next/fumadocs/takumi 运行时。页面 miss 时才执行（默认资源优先），
+  // 逻辑只有 URL 改写 + ASSETS.fetch + /api/feedback，CPU/内存占用可忽略。
+  "main": "worker/index.ts",
+  "build": {
+    "command": "npm run build",
+  },
   "assets": {
-    "directory": ".open-next/assets",
-    "binding": "ASSETS"
+    "directory": "out",
+    "binding": "ASSETS",
+    // 默认资源优先：命中静态文件直接 serving、不执行 Worker；
+    // miss（无前缀 zh 路径、/api/feedback、404）才进 Worker。
+    "run_worker_first": false,
+    // /usage -> out/zh/usage.html 这类无扩展名映射
+    "html_handling": "auto-trailing-slash",
+    // 有 Worker 时 404 由 worker/index.ts 兜底返回 /404.html，此处保持默认 none
+    "not_found_handling": "none",
   },
   "vars": {
     "GITHUB_APP_ID": "4572453",
-  }
+  },
 }

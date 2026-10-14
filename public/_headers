@@ -1,0 +1,28 @@
+# 静态资源缓存策略（随构建拷贝到 out/_headers，由 Cloudflare 静态资源层应用）。
+# 注意：本文件不处理页面 HTML（构建产物无 hash、内容随部署变更，默认按需回源即可）。
+
+# Next 构建产物（带 content hash）：永久缓存
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# OG 图片：构建期预渲染、内容不变，永久缓存
+/og/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# 搜索索引 JSON（8MB+）：1 天边缘缓存，内容只随部署变更
+/api/search.json
+  Cache-Control: public, max-age=86400, s-maxage=86400
+
+# LLM 文本导出：1 天边缘缓存，内容只随部署变更
+/llms.txt
+  Cache-Control: public, max-age=86400, s-maxage=86400
+/llms-full.txt
+  Cache-Control: public, max-age=86400, s-maxage=86400
+/llms.mdx/*
+  Cache-Control: public, max-age=86400, s-maxage=86400
+
+# 站点 logo：内容几乎不变，1 天缓存
+/clouisle-*.svg
+  Cache-Control: public, max-age=86400
+/icon.svg
+  Cache-Control: public, max-age=86400

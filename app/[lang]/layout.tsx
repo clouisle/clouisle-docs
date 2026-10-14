@@ -11,8 +11,15 @@ import { docsSiteUrl } from '@/lib/shared';
 import { source } from '@/lib/source';
 import { notFound } from 'next/navigation';
 
-// 站点 origin 是写死的常量：启动即解析失败 Lost（fail-fast），避免每个请求重复 new URL()
-const siteUrl = new URL(docsSiteUrl);
+// 站点 origin 是写死的常量：构建期解析一次，失败即报错（fail-fast），避免每个请求重复 new URL()
+function parseSiteUrl(): URL {
+  try {
+    return new URL(docsSiteUrl);
+  } catch {
+    throw new Error(`Invalid docsSiteUrl: ${docsSiteUrl}`);
+  }
+}
+const siteUrl = parseSiteUrl();
 
 const inter = Inter({
   subsets: ['latin'],
@@ -40,10 +47,10 @@ export default async function Layout({ children, params }: LayoutProps<'/[lang]'
         />
       </head>
       <body>
-        {/* 搜索走静态索引：构建期由 /api/search 预渲染全量索引 JSON，
+        {/* 搜索走静态索引：构建期由 /api/search.json 预渲染全量索引 JSON，
             客户端下载后在浏览器内检索，不再按请求打 Worker 实时建库（CPU 大户）。
             type: 'static' 虽标记 deprecated，但在当前版本仍完整可用；后续版本移除时再迁到自定义 Dialog。 */}
-        <RootProvider search={{ options: { type: 'static' } }}>
+        <RootProvider search={{ options: { type: 'static', api: '/api/search.json' } }}>
           <I18nProvider locale={locale} locales={value.locales} translations={value.translations}>
             <JsonLd data={getSiteStructuredData(locale)} />
             <SyncHtmlLang />

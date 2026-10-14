@@ -7,7 +7,7 @@ import { i18n } from '@/lib/i18n';
 // 客户端改走 `type: 'static'` 下载这份 JSON 后在浏览器里查（见 app/[lang]/layout.tsx search.options）。
 //
 // 用 `simple` 而不用 `createFromSource` 默认的 `advanced`：advanced 按 heading/text 切块
-// 建索引（含 embeddings 向量位），全站导出 35MB；simple 按页一条，约 4MB（gzip 后 ~1MB），
+// 建索引（含 embeddings 向量位），全站导出 35MB；simple 按页一条，实测 8.7MB（gzip 后 2.1MB），
 // 只在用户打开搜索框时下载一次。代价是结果定位到页面而非 heading 锚点，对文档站可接受。
 // 注意：zbsearch 没有中文专用分词器（SUPPORTED_LANGUAGES 无 chinese），
 // 中文走默认的 `multilingual`（Intl.Segmenter 按词切分），官方默认即此。

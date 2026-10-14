@@ -1,8 +1,23 @@
-import {
-  pageFeedback,
-  type ActionResponse,
-  type PageFeedback,
-} from '@/components/feedback/schema';
+/**
+ * 页面反馈提交（独立模块：只依赖 Web 标准 API，无 Next.js 依赖）。
+ *
+ * 现状：由主 Worker（worker/index.ts）在 /api/feedback 路由下调用。
+ * 以后如需拆成独立 Worker：把本文件的 handleFeedback 挂到新 Worker 的 fetch 即可，
+ * 接口契约（POST JSON -> { githubUrl? } | { error }）保持不变。
+ */
+
+export interface FeedbackInput {
+  opinion: 'good' | 'bad';
+  url: string;
+  message: string;
+}
+
+export interface FeedbackEnv {
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
+  FRONTEND_URL?: string;
+  NEXT_PUBLIC_SITE_URL?: string;
+}
 
 const owner = 'clouisle';
 const repo = 'clouisle-docs';
@@ -33,9 +48,7 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
 async function signAppJwt(appId: string, privateKeyPem: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const payload = b64url(
-    JSON.stringify({ iat: now, exp: now + 60 * 5, iss: Number(appId) }),
-  );
+  const payload = b64url(JSON.stringify({ iat: now, exp: now + 60 * 5, iss: Number(appId) }));
   const signingInput = `${header}.${payload}`;
   const key = await crypto.subtle.importKey(
     'pkcs8',
@@ -51,11 +64,7 @@ async function signAppJwt(appId: string, privateKeyPem: string): Promise<string>
   return `${signingInput}.${signatureB64}`;
 }
 
-async function apiFetch(
-  path: string,
-  init: RequestInit = {},
-  token?: string,
-): Promise<Response> {
+async function apiFetch(path: string, init: RequestInit = {}, token?: string): Promise<Response> {
   return fetch(`${api}${path}`, {
     ...init,
     headers: {
@@ -69,13 +78,13 @@ async function apiFetch(
 }
 
 /** 获取 GitHub App 安装访问令牌（缓存在实例内存，接近过期时刷新）。 */
-async function getInstallationToken(): Promise<string> {
+async function getInstallationToken(env: FeedbackEnv): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
     return cachedToken.token;
   }
 
-  const appId = process.env.GITHUB_APP_ID;
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  const appId = env.GITHUB_APP_ID;
+  const privateKey = env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, '\n');
   if (!appId || !privateKey) {
     throw new Error('GitHub feedback is not configured');
   }
@@ -128,14 +137,24 @@ async function graphql(
   return body.data ?? {};
 }
 
-function pagePath(feedback: PageFeedback) {
+function parseInput(body: unknown): FeedbackInput {
+  if (!body || typeof body !== 'object') throw new Error('Invalid feedback');
+  const { opinion, url, message } = body as Record<string, unknown>;
+  if (opinion !== 'good' && opinion !== 'bad') throw new Error('Invalid feedback');
+  if (typeof url !== 'string' || typeof message !== 'string') throw new Error('Invalid feedback');
+  const text = message.trim();
+  if (!text || text.length > 4000) throw new Error('Feedback message is invalid');
+  return { opinion, url, message: text };
+}
+
+function pagePath(feedback: FeedbackInput, env: FeedbackEnv): string {
   let url: URL;
   try {
     url = new URL(feedback.url);
   } catch {
     throw new Error('Invalid feedback URL');
   }
-  const configuredOrigin = process.env.FRONTEND_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+  const configuredOrigin = env.FRONTEND_URL ?? env.NEXT_PUBLIC_SITE_URL;
   if (configuredOrigin) {
     let origin: URL;
     try {
@@ -153,21 +172,16 @@ function pagePath(feedback: PageFeedback) {
   return path;
 }
 
-function feedbackBody(feedback: PageFeedback) {
-  const message = feedback.message.trim();
-  if (!message || message.length > 4000) throw new Error('Feedback message is invalid');
-  const opinion = feedback.opinion === 'good' ? 'good' : 'bad';
-  return `[${opinion}] ${message}\n\n> Forwarded from the Clouisle docs feedback form.`;
+function feedbackBody(feedback: FeedbackInput): string {
+  return `[${feedback.opinion}] ${feedback.message}\n\n> Forwarded from the Clouisle docs feedback form.`;
 }
 
-/** 页面反馈提交（服务端逻辑，供 /api/feedback 调用；文档页保持纯静态，不再直连 server action）。 */
-export async function submitPageFeedback(feedback: PageFeedback): Promise<ActionResponse> {
-  const parsed = pageFeedback.parse(feedback);
-  return createDiscussion(pagePath(parsed), feedbackBody(parsed));
-}
-
-async function createDiscussion(path: string, body: string): Promise<ActionResponse> {
-  const token = await getInstallationToken();
+async function createDiscussion(
+  path: string,
+  body: string,
+  env: FeedbackEnv,
+): Promise<{ githubUrl?: string }> {
+  const token = await getInstallationToken(env);
 
   const repository = (await graphql(
     `query($owner: String!, $repo: String!) {
@@ -240,4 +254,18 @@ async function createDiscussion(path: string, body: string): Promise<ActionRespo
     token,
   )) as { createDiscussion: { discussion: { url: string } } };
   return { githubUrl: result.createDiscussion.discussion.url };
+}
+
+/** POST /api/feedback 的处理入口：请求体 JSON -> { githubUrl? } | { error }。 */
+export async function handleFeedback(request: Request, env: FeedbackEnv): Promise<Response> {
+  const body: unknown = await request.json().catch(() => null);
+  try {
+    const feedback = parseInput(body);
+    const result = await createDiscussion(pagePath(feedback, env), feedbackBody(feedback), env);
+    return Response.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to submit feedback';
+    const status = message === 'Invalid feedback' ? 400 : 500;
+    return Response.json({ error: message }, { status });
+  }
 }
