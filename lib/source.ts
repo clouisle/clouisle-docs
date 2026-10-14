@@ -29,7 +29,8 @@ export const source = loader({
 });
 
 export function getPageImageUrl(page: (typeof source)['$inferPage']) {
-  const segments = [page.locale, ...page.slugs, 'image.webp'];
+  // [...slug] 只有 slug 一个动态段：locale 已是 segments[0]，不再需要额外的 lang 参数
+  const segments = [page.locale, ...page.slugs, 'image.png'];
 
   return {
     segments,

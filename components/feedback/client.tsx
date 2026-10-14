@@ -46,13 +46,32 @@ const blockFeedbackResult = z.extend(blockFeedback, {
   response: actionResponse,
 });
 
+/** 默认提交：POST 到唯一的动态接口 `/api/feedback`（文档页保持纯静态）。 */
+async function defaultSendAction(feedback: PageFeedback): Promise<ActionResponse> {
+  const res = await fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(feedback),
+  });
+  const body = (await res.json().catch(() => null)) as (ActionResponse & {
+    error?: string;
+  }) | null;
+  if (!res.ok) {
+    throw new Error(body?.error ?? 'Failed to submit feedback');
+  }
+  const parsed = actionResponse.safeParse(body);
+  if (!parsed.success) throw new Error('Invalid feedback response');
+  return parsed.data;
+}
+
 /**
- * A feedback component to be attached at the end of page
+ * A feedback component to be attached at the end of page.
+ * 默认走 `/api/feedback`（唯一的动态接口），文档页可保持纯静态；传入 onSendAction 可覆盖。
  */
 export function Feedback({
-  onSendAction,
+  onSendAction = defaultSendAction,
 }: {
-  onSendAction: (feedback: PageFeedback) => Promise<ActionResponse>;
+  onSendAction?: (feedback: PageFeedback) => Promise<ActionResponse>;
 }) {
   const pathname = usePathname();
   const isEnglish = pathname.startsWith('/en');
@@ -212,7 +231,10 @@ export function FeedbackText({ onSendAction, children }: FeedbackTextProps) {
   } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const { refs, floatingStyles } = useFloating({
+  const {
+    refs: { setFloating, setReference, floating },
+    floatingStyles,
+  } = useFloating({
     open: popup !== null,
     placement: 'bottom',
     middleware: [offset(6), flip(), shift({ padding: 8 })],
@@ -270,7 +292,7 @@ export function FeedbackText({ onSendAction, children }: FeedbackTextProps) {
       return;
     }
 
-    refs.setReference({
+    setReference({
       getBoundingClientRect() {
         return range.getBoundingClientRect();
       },
@@ -290,7 +312,7 @@ export function FeedbackText({ onSendAction, children }: FeedbackTextProps) {
     if (popup === null || !(target instanceof Node)) return;
 
     if (
-      refs.floating.current?.contains(target) ||
+      floating.current?.contains(target) ||
       (popup.mode === 'tooltip' && containerRef.current?.contains(target))
     ) {
       return;
@@ -334,7 +356,7 @@ export function FeedbackText({ onSendAction, children }: FeedbackTextProps) {
 
       {popup && (
         <div
-          ref={refs.setFloating}
+          ref={setFloating}
           className={cn(
             'not-prose z-40 text-sm bg-fd-popover text-fd-popover-foreground border overflow-hidden shadow-lg rounded-xl w-30 h-9.5 box-content transition-[width,height]',
             popup.mode === 'expanded' ? 'w-[300px] h-32 max-w-[98vw]' : 'select-none',
@@ -496,16 +518,18 @@ function FeedbackTextForm({
 
 function useSubmissionStorage<Result>(key: string, validate: (v: unknown) => Result | null) {
   const storageKey = `docs-feedback-${key}`;
-  const [value, setValue] = useState<Result | null>(null);
-  const validateCallback = useEffectEvent(validate);
-
-  useEffect(() => {
-    const item = localStorage.getItem(storageKey);
-    if (item === null) return;
-    const validated = validateCallback(JSON.parse(item));
-
-    if (validated !== null) setValue(validated);
-  }, [storageKey]);
+  // 延迟初始化读 localStorage：SSR/预渲染时 window 不存在，直接返回 null（与服务端渲染一致，避免 hydration mismatch）
+  const [value, setValue] = useState<Result | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const item = localStorage.getItem(storageKey);
+      if (item === null) return null;
+      return validate(JSON.parse(item));
+    } catch {
+      localStorage.removeItem(storageKey);
+      return null;
+    }
+  });
 
   return {
     previous: value,

@@ -44,11 +44,14 @@ function withLocale(response: NextResponse, pathname: string) {
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
   const pathname = request.nextUrl.pathname;
 
-  // static assets & system routes: skip i18n and markdown rewrites
+  // static assets & system routes: skip i18n and markdown rewrites.
+  // 注意：`.md` 后缀的文档快捷路径目前走不通（i18n rewrite 会先把它带偏，见 rewriteSuffix 注释），
+  // 这里保持历史行为直接放行（404），等 Phase 2 全静态时再落盘真正的 .md 文件。
   if (
     pathname.startsWith('/_next') ||
     pathname === '/api/search' ||
     pathname.startsWith('/api/search/') ||
+    pathname.startsWith('/api/feedback') ||
     pathname.startsWith('/og') ||
     pathname.startsWith('/llms') ||
     pathname === '/icon.svg' ||
@@ -89,3 +92,11 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 
   return withLocale(NextResponse.next(), pathname);
 }
+
+// 系统路由与静态资源不进 middleware（省 Worker CPU）。
+// 注意不能整体排除 `api` 前缀：`/api/*` 下既有文档页（如 /api/auth）也有接口，
+// 这里只精确排除接口路径，文档页仍走下面的 i18n/markdown 逻辑。
+// 带点文件（icon.svg、sitemap.xml 等）仍会进入，由函数体内的前置判断直接放行，行为与之前一致。
+export const config = {
+  matcher: ['/((?!_next|api/search|api/feedback|og|llms|images|icon).*)'],
+};

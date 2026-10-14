@@ -12,9 +12,11 @@ import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { docsGitConfig } from '@/lib/shared';
 import { Feedback } from '@/components/feedback/client';
-import { onPageFeedbackAction } from '@/lib/github';
 import { JsonLd } from '@/components/seo/json-ld';
 import { getPageMetadata, getPageStructuredData } from '@/lib/seo';
+
+export const dynamic = 'force-static';
+export const dynamicParams = false;
 export default async function Page(props: PageProps<'/[lang]/[...slug]'>) {
   const params = await props.params;
   const page = source.getPage(params.slug, params.lang);
@@ -39,7 +41,7 @@ export default async function Page(props: PageProps<'/[lang]/[...slug]'>) {
         <DocsBody>
           <MDX components={getMDXComponents(page)} />
         </DocsBody>
-        <Feedback onSendAction={onPageFeedbackAction} />
+        <Feedback />
       </DocsPage>
     </>
   );

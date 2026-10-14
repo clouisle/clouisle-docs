@@ -1,5 +1,4 @@
 import {
-  actionResponse,
   pageFeedback,
   type ActionResponse,
   type PageFeedback,
@@ -130,10 +129,23 @@ async function graphql(
 }
 
 function pagePath(feedback: PageFeedback) {
-  const url = new URL(feedback.url);
-  const configuredOrigin = process.env.FRONTEND_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
-  if (configuredOrigin && url.origin !== new URL(configuredOrigin).origin) {
+  let url: URL;
+  try {
+    url = new URL(feedback.url);
+  } catch {
     throw new Error('Invalid feedback URL');
+  }
+  const configuredOrigin = process.env.FRONTEND_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+  if (configuredOrigin) {
+    let origin: URL;
+    try {
+      origin = new URL(configuredOrigin);
+    } catch {
+      throw new Error('Invalid feedback URL');
+    }
+    if (url.origin !== origin.origin) {
+      throw new Error('Invalid feedback URL');
+    }
   }
 
   const path = url.pathname.replace(/\/{2,}/g, '/');
@@ -148,8 +160,8 @@ function feedbackBody(feedback: PageFeedback) {
   return `[${opinion}] ${message}\n\n> Forwarded from the Clouisle docs feedback form.`;
 }
 
-export async function onPageFeedbackAction(feedback: PageFeedback): Promise<ActionResponse> {
-  'use server';
+/** 页面反馈提交（服务端逻辑，供 /api/feedback 调用；文档页保持纯静态，不再直连 server action）。 */
+export async function submitPageFeedback(feedback: PageFeedback): Promise<ActionResponse> {
   const parsed = pageFeedback.parse(feedback);
   return createDiscussion(pagePath(parsed), feedbackBody(parsed));
 }

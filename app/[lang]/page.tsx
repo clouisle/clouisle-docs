@@ -8,6 +8,8 @@ import type { LinkItemType } from 'fumadocs-ui/layouts/shared';
 import { JsonLd } from '@/components/seo/json-ld';
 import { getPageStructuredData } from '@/lib/seo';
 
+export const dynamic = 'force-static';
+
 function navLinks(locale: string): LinkItemType[] {
   const prefix = locale === i18n.defaultLanguage ? '' : `/${locale}`;
   const labels =
