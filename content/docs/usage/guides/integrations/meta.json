@@ -1,5 +1,5 @@
 {
   "title": "消息集成",
   "icon": "MessagesSquare",
-  "pages": ["index", "feishu", "wechat", "delivery-log"]
+  "pages": ["feishu", "wechat", "delivery-log"]
 }
