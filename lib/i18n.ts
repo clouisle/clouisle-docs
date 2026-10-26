@@ -4,7 +4,9 @@ export const i18n = defineI18nUI(
   {
     defaultLanguage: 'zh',
     languages: ['zh', 'en'],
-    hideLocale: 'default-locale',
+    // 静态导出（output: export）没有 proxy/rewrite，隐藏默认语言前缀会让 /usage 之类的
+    // 链接在 next dev 与静态托管下直接 404；统一保留 /zh 前缀，所有链接自洽。
+    hideLocale: 'never',
   },
   {
     zh: {

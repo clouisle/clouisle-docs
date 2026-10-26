@@ -10,8 +10,14 @@ import { getPageStructuredData } from '@/lib/seo';
 
 export const dynamic = 'force-static';
 
+// output: export 下每个动态页面都必须自带 generateStaticParams；
+// 仅靠 [lang]/layout.tsx 的声明在 next dev 中会报 “missing param” 并整站不可用。
+export function generateStaticParams() {
+  return i18n.languages.map((lang) => ({ lang }));
+}
+
 function navLinks(locale: string): LinkItemType[] {
-  const prefix = locale === i18n.defaultLanguage ? '' : `/${locale}`;
+  const prefix = `/${locale}`;
   const labels =
     locale === 'en'
       ? { usage: 'Usage', reference: 'Reference', api: 'API', deploy: 'Deployment' }
@@ -51,7 +57,7 @@ export default async function Page(props: PageProps<'/[lang]'>) {
   return (
     <>
       <JsonLd data={getPageStructuredData(page, 'WebPage')} />
-      <HomeLayout {...baseOptions()} links={navLinks(params.lang)}>
+      <HomeLayout {...baseOptions(params.lang)} links={navLinks(params.lang)}>
         <div className="mx-auto flex w-full max-w-(--fd-layout-width) flex-1 flex-col px-4 py-10 sm:py-14">
           <div className="prose max-w-none">
             <MDX components={getMDXComponents(page)} />

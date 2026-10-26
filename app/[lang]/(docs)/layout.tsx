@@ -9,7 +9,7 @@ export default async function Layout({ children, ...props }: LayoutProps<'/[lang
   return (
     <DocsLayout
       tree={source.getPageTree(params.lang)}
-      {...baseOptions()}
+      {...baseOptions(params.lang)}
       tabs={{
         transform(option, node) {
           if (!node.icon) return option;

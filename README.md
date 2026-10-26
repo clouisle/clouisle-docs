@@ -89,15 +89,16 @@ content/docs/     # Documentation content (.mdx pages + meta.json metadata)
 lib/source.ts     # Content loading: defineDocs + loader() + lucide icon plugin
 lib/shared.ts     # Site name, route constants, GitHub link config
 components/mdx.tsx  # MDX component registration
-app/layout.tsx    # Root layout: RootProvider + DocsLayout
-app/page.tsx      # Index page (/)
-app/[[...slug]]/  # Doc pages
-app/api/search/   # Site search
-app/og/           # OG image generation
-app/llms*.txt/    # LLM text export routes
+app/[lang]/layout.tsx  # Root layout: html/body + RootProvider + I18nProvider (zh/en)
+app/[lang]/page.tsx    # Locale homepage (/zh, /en)
+app/[lang]/(docs)/     # Doc pages with docs layout (sidebar, nav)
+app/(home)/page.tsx    # `/` → `/zh` redirect
+app/api/search.json/   # Site search index
+app/og/                # OG image generation
+app/llms*.txt/         # LLM text export routes
 ```
 
-Route mapping: `content/docs/foo/bar.mdx` → `/foo/bar`; `content/docs/foo/index.mdx` → `/foo`; `content/docs/index.mdx` → `/`. Ordering and grouping in the sidebar are controlled by `meta.json` in each folder.
+Route mapping: `content/docs/foo/bar.mdx` → `/zh/foo/bar` (and `/en/foo/bar`); `content/docs/foo/index.mdx` → `/zh/foo`; `content/docs/index.mdx` → `/zh`. Ordering and grouping in the sidebar are controlled by `meta.json` in each folder.
 
 ## Tech Stack
 

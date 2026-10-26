@@ -12,13 +12,14 @@
 
 | 路径 | 作用 |
 | --- | --- |
-| `content/docs/` | 文档内容（`.mdx` 页面 + `meta.json` 目录元数据）。`foo/bar.mdx` → `/foo/bar`；`foo/index.mdx` → `/`（首页） |
+| `content/docs/` | 文档内容（`.mdx` 页面 + `meta.json` 目录元数据）。`foo/bar.mdx` → `/zh/foo/bar`（英文 `/en/foo/bar`）；`foo/index.mdx` → `/zh/foo`；`index.mdx` → `/zh`（根路径 `/` 跳转到 `/zh`） |
 | `lib/source.ts` | 内容加载：`defineDocs`、`loader()`、`lucideIconsPlugin`、LLM/OG 工具函数 |
 | `lib/shared.ts` | `appName`、路由常量、`gitConfig`（clouisle/Clouisle） |
 | `lib/layout.shared.tsx` | `baseOptions()`：导航标题、GitHub 链接 |
 | `components/mdx.tsx` | MDX 组件注册（目前仅 `defaultMdxComponents`；新增组件在此注册） |
-| `app/layout.tsx` | 根布局：`RootProvider` + `DocsLayout`（侧边栏、导航） |
-| `app/page.tsx`、`app/[[...slug]]/page.tsx` | 文档页面渲染：标题、描述、Markdown 下载按钮、相对链接支持 |
+| `app/[lang]/layout.tsx` | 根布局：`<html>/<body>` + `RootProvider` + `I18nProvider`（zh/en）；`app/(home)/layout.tsx` 是 `/` 的根布局（跳转 `/zh`） |
+| `app/[lang]/(docs)/layout.tsx` | `DocsLayout`（侧边栏、导航、集合 tabs） |
+| `app/[lang]/page.tsx`、`app/[lang]/(docs)/[...slug]/page.tsx` | 语言首页与文档页渲染：标题、描述、Markdown 下载按钮、相对链接支持 |
 | `app/api/search/`、`app/og/`、`app/llms*.txt/`、`app/llms.mdx/` | 搜索、OG 图、LLM 文本导出路由 |
 | `.claude/skills/` | 写作规范（见下） |
 
@@ -55,7 +56,7 @@ npm run lint       # eslint
 
 - **Surgical**：只改目标文件，不顺手重构无关代码。新增 MDX 组件时改 `components/mdx.tsx` 注册即可，不要动 `lib/source.ts` 的加载逻辑。
 - **目录结构**：新栏目用文件夹 + `meta.json`（`pages` 控制顺序与分组，`---Label---` 分隔符）；同一页面 URL 不得重复。
-- **Tab 集合**：`root: true` 的文件夹自动成为 sidebar 顶部 tabs dropdown 的选项（`getLayoutTabs` 生成，`title`/`icon`/`description` 取自 meta.json，`icon` 必填且为 lucide 规范名）。当前集合（按读者分组）：使用（usage，Compass，平台用户）、参考（reference，BookText）、API（api，CodeXml，开发者）、部署（self-host，Server，开发部署者）；首页 `/` 为文档总览页，不属于任何集合。新增集合 = 建 `root: true` 文件夹，无需改代码。
+- **Tab 集合**：`root: true` 的文件夹自动成为 sidebar 顶部 tabs dropdown 的选项（`getLayoutTabs` 生成，`title`/`icon`/`description` 取自 meta.json，`icon` 必填且为 lucide 规范名）。当前集合（按读者分组）：使用（usage，Compass，平台用户）、参考（reference，BookText）、API（api，CodeXml，开发者）、部署（self-host，Server，开发部署者）；首页 `/zh`（根路径 `/` 跳转到 `/zh`）为文档总览页，不属于任何集合。新增集合 = 建 `root: true` 文件夹，无需改代码。
 - **站点身份**：`lib/shared.ts` 的 `appName`（Clouisle）与 `gitConfig`（clouisle/Clouisle, main）为文档站真实身份，改动前先确认。
 
 <!-- BEGIN:nextjs-agent-rules -->

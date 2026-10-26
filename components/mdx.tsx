@@ -22,13 +22,13 @@ const SYSTEM_ROUTES = [
 ];
 
 /**
- * 为绝对内部链接补 locale 前缀（如 /usage → /en/usage）。
- * 相对路径由 createRelativeLink 先行解析；外部/锚点/系统路由原样返回。
+ * 为绝对内部链接补 locale 前缀（如 /usage → /zh/usage）。
+ * 相对路径由 createRelativeLink 先行解析；外部/锚点/系统路由，以及已带语言的路径原样返回。
  */
 export function localizeHref(href: string, locale: string): string {
-  if (locale === i18n.defaultLanguage) return href;
   if (!href.startsWith('/') || href.startsWith('//')) return href;
-  if (href.startsWith(`/${locale}`)) return href;
+  const [first] = href.slice(1).split('/');
+  if (i18n.languages.includes(first as (typeof i18n.languages)[number])) return href;
   if (SYSTEM_ROUTES.some((route) => href.startsWith(route))) return href;
   return `/${locale}${href}`;
 }

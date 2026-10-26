@@ -217,6 +217,26 @@ export interface FeedbackTextProps {
   children?: ReactNode;
 }
 
+const HIGHLIGHT_STYLE_ID = 'fd-feedback-highlight-styles';
+
+/**
+ * CSS Custom Highlight API 的样式只能写在 `::highlight(name)` 规则里，
+ * 但 Turbopack 的 CSS 解析器不认这个（合法）伪元素，写进 Tailwind class 会报
+ * “'highlight' is not recognized as a valid pseudo-element” 解析警告。
+ * 改为运行时注入，浏览器行为不变，构建期不再解析该选择器。
+ */
+function ensureHighlightStyle() {
+  if (typeof document === 'undefined' || document.getElementById(HIGHLIGHT_STYLE_ID)) return;
+
+  const style = document.createElement('style');
+  style.id = HIGHLIGHT_STYLE_ID;
+  style.textContent = `::highlight(fd-feedback-text) {
+  background-color: var(--color-fd-primary);
+  color: var(--color-fd-primary-foreground);
+}`;
+  document.head.append(style);
+}
+
 /**
  * A feedback component for each content block in page, should be used with `remark-feedback-block`.
  *
@@ -245,6 +265,7 @@ export function FeedbackText({ onSendAction, children }: FeedbackTextProps) {
     if (popup?.mode !== 'tooltip') return;
 
     const highlight = new Highlight(popup.range);
+    ensureHighlightStyle();
     CSS.highlights.set('fd-feedback-text', highlight);
 
     _setPopup({ ...popup, mode: 'expanded' });
@@ -349,7 +370,7 @@ export function FeedbackText({ onSendAction, children }: FeedbackTextProps) {
     <>
       <div
         ref={containerRef}
-        className="prose-no-margin [&_::highlight(fd-feedback-text)]:bg-fd-primary [&_::highlight(fd-feedback-text)]:text-fd-primary-foreground"
+        className="prose-no-margin"
       >
         {children}
       </div>

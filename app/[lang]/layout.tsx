@@ -68,6 +68,27 @@ export async function generateMetadata(props: LayoutProps<'/[lang]'>): Promise<M
   if (!page) notFound();
 
   return {
+    // 全站元数据：本布局是本站的根布局（app/layout.tsx 已移除，
+    // 根级 <html>/<body> 必须与 [lang] 同级，否则 React 会把主题 script 渲染到文档外）。
+    applicationName: 'Clouisle',
+    authors: [{ name: 'Clouisle' }],
+    creator: 'Clouisle',
+    publisher: 'Clouisle',
+    icons: {
+      icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
+      shortcut: ['/icon.svg'],
+    },
+    robots: {
+      index: true,
+      follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        'max-image-preview': 'large',
+        'max-snippet': -1,
+        'max-video-preview': -1,
+      },
+    },
     ...getPageMetadata(page, 'website'),
     title: {
       default: page.data.title ?? 'Clouisle 文档',
