@@ -4,288 +4,147 @@ description: 查看、筛选、导出与归档系统操作审计日志
 icon: ScrollText
 ---
 
-审计日志记录系统内的资源操作：操作者、动作、资源、变更前后快照与来源 IP。敏感字段在落库与展示时自动脱敏，原始密钥不会出现在日志中。查看审计日志需要 `audit:read`，导出需要 `audit:export`。
+审计日志记录系统内的资源操作：操作者、动作、资源、变更前后快照与来源 IP。敏感字段在记录和展示时自动脱敏，原始密钥不会出现在日志中。
 
-## 审计日志事件
+查看审计日志需要审计日志查看权限，导出需要导出权限；权限由管理员在角色中分配，见[角色与权限](./roles-permissions.mdx)。
 
-审计日志覆盖以下事件类型，每种事件记录操作者、时间戳、资源、操作类型、状态及变更详情。
+## 审计日志记录什么
+
+每种事件都会记录操作者、时间、资源、操作类型、状态与变更详情。按大类分为：
 
 ### 认证事件
 
-用户登录、登出与注册行为：
-
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `login_success` | 登录成功 | 用户、时间、IP、User Agent、认证方式、是否使用 2FA |
-| `login_failed` | 登录失败 | 用户、时间、IP、失败原因、尝试次数 |
-| `logout` | 登出 | 用户、时间、IP、会话时长 |
-| `register` | 注册 | 用户、时间、IP、注册方式、邮箱是否已验证 |
+登录成功、登录失败、登出与注册。记录账号、时间、来源 IP、浏览器标识、认证方式、是否使用双因素，以及失败原因和尝试次数。
 
 ### 用户管理事件
 
-管理员对用户账号的创建、更新与删除操作：
-
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `create_user` | 创建用户 | 操作者、时间、新用户邮箱、姓名、角色、状态 |
-| `update_user` | 更新用户 | 操作者、时间、变更前后字段（如角色、状态） |
-| `delete_user` | 删除用户 | 操作者、时间、被删除用户标识 |
+管理员创建、更新、删除、启用或停用用户。更新类事件保存变更前后的字段快照。
 
 ### 团队管理事件
 
-团队的创建与成员变更：
+创建团队、修改团队信息、添加或移除团队成员、转让所有权。
 
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `create_team` | 创建团队 | 操作者、时间、团队名称、描述、所有者 |
-| `add_team_member` | 添加团队成员 | 操作者、时间、团队、成员 ID、成员邮箱、角色 |
-| `remove_team_member` | 移除团队成员 | 操作者、时间、团队、成员 ID、移除原因 |
+### Agent 与工作流事件
 
-### Agent 事件
-
-Agent 的创建、更新、发布与删除：
-
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `create_agent` | 创建 Agent | 操作者、时间、Agent 名称、所属团队、模型 |
-| `update_agent` | 更新 Agent | 操作者、时间、变更前后字段（如 `max_iterations`、`system_prompt`） |
-| `publish_agent` | 发布 Agent | 操作者、时间、可见性、是否上架市场 |
-| `delete_agent` | 删除 Agent | 操作者、时间、Agent 标识 |
+创建、更新、发布、删除 Agent 与工作流。更新类事件保存变更前后的字段，例如提示词或迭代上限。
 
 ### 沙箱任务事件
 
-代码沙箱任务的生命周期（资源类型 `sandbox_task`），用于追踪代码执行与恢复：
+代码沙箱任务的生命周期：开始、完成、失败、取消与恢复。只记录任务标识、来源与结果，**不记录**代码、参数、输出或原始错误文本；失败记录给出稳定的错误分类，而不是堆栈信息。
 
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `sandbox_task_started` | 沙箱任务开始 | 任务 ID、提交者、时间 |
-| `sandbox_task_completed` | 沙箱任务完成 | 任务 ID、耗时、退出状态 |
-| `sandbox_task_failed` | 沙箱任务失败 | 任务 ID、错误信息 |
-| `sandbox_task_cancelled` | 沙箱任务取消 | 任务 ID、取消者 |
-| `sandbox_task_recovered` | 沙箱任务恢复 | 任务 ID、恢复方式 |
 ### API Key 事件
 
-API Key 的创建与状态变更：
+创建、激活与停用 API Key。记录名称、权限范围、绑定的 Agent/工作流数量与过期时间。
 
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `create_api_key` | 创建 API Key | 操作者、时间、Key 名称、权限范围、关联 Agent/工作流数、过期时间 |
-| `activate_api_key` | 激活 API Key | 操作者、时间、Key 标识 |
-| `deactivate_api_key` | 停用 API Key | 操作者、时间、Key 标识、停用原因 |
+### 站点设置事件
 
-### 系统设置事件
-
-站点配置的变更：
-
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `update_site_setting` | 更新单项设置 | 操作者、时间、设置项、变更前后值 |
-| `bulk_update_site_settings` | 批量更新设置 | 操作者、时间、更新项数、设置项列表 |
-| `reset_site_settings` | 重置设置 | 操作者、时间、重置分类、重置项数 |
+单项更新、批量更新与重置站点设置。记录设置项与变更前后的值。
 
 ### 安全事件
 
-账号安全相关操作：
-
-| 事件 | 说明 | 记录内容 |
-| --- | --- | --- |
-| `change_password` | 修改密码 | 用户、时间、IP |
-| `reset_password` | 重置密码 | 用户、时间、重置方式、发起者 |
-| `activate_user` | 激活账号 | 操作者、时间、目标用户 |
-| `deactivate_user` | 停用账号 | 操作者、时间、目标用户、停用原因 |
+修改密码、重置密码、启用或停用账号。记录操作者、目标用户与来源 IP。
 
 ## 查看与筛选
 
 在**管理后台** > **审计日志**查看。每条记录包含：时间、用户、动作、资源类型、资源名称、操作（创建/读取/更新/删除）、状态、IP 地址与详情。
 
-### 搜索与过滤
+筛选条件：
 
-列表接口 `GET /api/v1/admin/audit-logs` 支持以下查询参数：
-
-| 参数 | 说明 |
+| 筛选 | 说明 |
 | --- | --- |
-| `user_id` | 按用户 UUID 过滤 |
-| `team_id` | 按团队 UUID 过滤 |
-| `action` | 按精确动作值过滤；支持多次传入进行 `action__in` 匹配（不支持通配符） |
-| `resource_type` | 按资源类型过滤（user、team、agent、workflow 等） |
-| `resource_id` | 按资源 UUID 过滤 |
-| `status` | 按状态过滤（`success`、`failed` 等） |
-| `start_date` / `end_date` | 按时间范围过滤 |
-| `search` | 对资源名称、资源 ID、IP 地址进行不区分大小写的子串（`icontains`）搜索 |
+| 用户 | 按操作者筛选 |
+| 团队 | 按团队筛选 |
+| 动作 | 精确匹配一个或多个动作，不支持通配符 |
+| 资源类型 | 用户、团队、Agent、工作流等 |
+| 资源标识 | 按具体资源筛选 |
+| 状态 | 成功、失败等 |
+| 时间范围 | 起止日期 |
+| 关键词 | 对资源名称、资源标识和 IP 地址做不区分大小写的包含搜索 |
 
 <Callout type="info">
-  没有专门的 IP 地址过滤参数，但 `search` 字段支持对 IP 进行子串匹配（如 `192.168.1.`）。`search` 不解释 `*` 或其他 glob 模式。
+  没有单独的 IP 筛选，但关键词可以匹配 IP 片段（如 `192.168.1.`）。关键词不解释 `*` 等通配符。
 </Callout>
 
 <Callout type="warn">
-  **Roadmap：** 无法按变更字段、变更前/后值进行筛选。字段级 `changes` 仅在日志详情和导出中可见。
-</Callout>
-
-<Callout type="warn">
-  **Roadmap：** 暂无保存搜索功能，需手动重新执行过滤条件。
+  **Roadmap：** 不能按变更字段或变更前后的值筛选，字段级快照只在详情和导出中可见；也不能保存筛选条件。
 </Callout>
 
 ### 查看日志详情
 
-点击日志条目可查看完整详情，包括：
+点击日志条目查看完整详情：
 
-- **基本信息**：ID、时间戳、用户、用户 ID、动作、状态
-- **资源信息**：资源类型、资源 ID、资源名称、操作类型
-- **请求信息**：IP 地址、User Agent、认证方式
-- **变更详情**：`before` / `after` 字段级变更快照（敏感值已脱敏）
-- **元数据**：团队 ID/名称、模型、执行时长等
+- **基本信息**：记录编号、时间、操作者、动作、状态
+- **资源信息**：资源类型、资源标识、资源名称、操作类型
+- **请求信息**：来源 IP、浏览器标识、认证方式
+- **变更详情**：变更前后的字段级快照（敏感值已脱敏）
+- **元数据**：团队、模型、执行耗时等
 
 <Callout type="warn">
-  **Roadmap：** 暂无「关联日志」视图。如需查找相关条目，请按相同 `user_id`、`resource_id` 或时间范围过滤。
+  **Roadmap：** 没有「关联日志」视图。查找相关条目时，按相同用户、资源标识或时间范围筛选。
 </Callout>
 
 ## 敏感数据脱敏
 
-字段级变更的 `before` / `after` 数据在存储前会经过 `AuditLogService.sanitize_changes` 处理：
+变更快照在保存前就会清洗，因此原始密钥不会出现在审计日志的任何位置：
 
-- **敏感字段掩码**：键名包含 `password`、`hashed_password`、`api_key`、`secret_key`、`access_token`、`refresh_token`、`private_key`、`secret` 或 `token` 的字段会被掩码。字符串超过 8 个字符只显示前 8 位加 `***`，其余值替换为 `***`。
-- **邮箱部分掩码**：本地部分超过 2 个字符时首尾各留 1 个（`a***e@example.com`）；不超过 2 个字符时只留首字符（`a***@example.com`）。
-- **嵌套字典递归处理**。
-- **值截断**：单字段最大 500 字符，超大结构替换为预览字符串。
-
-由于落库时即脱敏，原始密钥不会出现在审计日志的任何位置。
+- 密码、密钥、访问令牌、刷新令牌、私钥等字段整体遮蔽，只保留可识别的前几位。
+- 邮箱只显示首尾字符，例如 `a***e@example.com`。
+- 嵌套结构中的敏感字段同样遮蔽。
+- 超长文本截断为预览：单个值超过 `500` 字符、或整段快照序列化后超过 `500` 字符时，只保存前 `500` 字符并追加省略标记。详情页与导出中看到的是**预览**，不是完整原文。
 
 ## 导出审计日志
 
-### 导出格式
+支持 CSV 与 JSON 两种格式。导出使用与列表相同的筛选条件（资源标识除外），最多 `10,000` 条，按时间倒序。CSV 包含编号、时间、用户、动作、资源类型、资源名称、操作、状态、IP 与错误信息；JSON 保留完整条目与变更快照。
 
-支持 CSV 和 JSON 两种格式。导出接口 `GET /api/v1/admin/audit-logs/export?format=csv|json` 支持列表接口**除 `resource_id` 之外**的全部筛选参数（`user_id`、`team_id`、`action`、`resource_type`、`status`、`start_date`、`end_date`、`search`），最多返回 `10,000` 条，按时间倒序。
-
-<Callout type="warn" title="导出的 search 与列表不同">
-  列表接口的 `search` 匹配资源名称、资源 ID 与 IP 地址；**导出接口的 `search` 只匹配资源名称与 IP 地址**（不含资源 ID），也没有 `resource_id` 参数。用「资源 ID」搜索后导出，结果会比列表页多——排查问题时请以资源名称或 IP 作为导出条件。
+<Callout type="warn" title="导出的关键词范围略窄">
+  列表页的关键词会匹配资源名称、资源标识与 IP 地址；**导出的关键词只匹配资源名称与 IP 地址**，并且不能按资源标识导出。用资源标识搜索后再导出，结果会比列表页多——排查问题时请以资源名称或 IP 作为导出条件。
 </Callout>
 
-
-**CSV 列：** ID、Time、User、Action、Resource Type、Resource Name、Operation、Status、IP Address、Error Message
-
-**JSON：** 导出完整序列化条目（含 `changes`）。
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
-
-<Callout type="warn">
-  **Roadmap：** 暂无定时导出（日/周/月）或邮件/S3 投递功能，导出为手动操作。
-</Callout>
+导出是手动操作，没有定时导出或邮件投递。无导出权限的用户看不到导出按钮。
 
 ## 保留与归档
 
 ### 保留策略
 
-保留天数由站点设置 `audit_log_retention_days` 控制，默认 `365` 天，范围 `30-3650`。
+审计日志默认保留 `365` 天，可设置为 `30-3650` 天。
 
-**配置方式：** 前往**管理后台** > **站点设置** > **存储**，设置**审计日志保留天数**与**归档文件存储路径**（默认 `/var/log/clouisle/audit_archives`）。
+**配置方式：** 前往**管理后台** > **站点设置** > **存储**，修改**审计日志保留天数**和**归档文件存储路径**。
 
 ### 手动归档
 
 1. 前往**管理后台** > **站点设置** > **存储**。
 2. 在**审计日志**分区点击**归档**并确认。
-3. 任务异步执行（需要 `audit:export`）；界面每 `2` 秒轮询一次任务状态，**5** 分钟后超时。
+3. 归档在后台执行，页面显示进度；超过 `5` 分钟未完成会提示超时，可稍后刷新查看结果。
 
 > **注意：** 手动归档入口在**存储**设置页，不在审计日志页——审计日志页只提供查看、筛选和导出。
 
-**调用的端点：**
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | 触发归档，返回 `{ "task_id", "status": "pending" }` |
-| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | 查询任务状态：`PENDING` / `STARTED` / `SUCCESS`（含 `result.archived_count`）/ `FAILURE`（含 `error`） |
-| `POST` | `/api/v1/admin/audit-logs/archive` | 审计日志路由下的等价触发器：同样提交 `tasks.archive_old_audit_logs`，但只返回 `task_id`，**没有**配套的状态查询端点 |
-
-三个端点都要求 `audit:export`；触发成功与失败都会写入审计日志（`trigger_audit_log_archive`）。
-
-**归档机制：**
-
-- 归档任务 `tasks.archive_old_audit_logs` 选取超过保留截止日期（`now - audit_log_retention_days`）的日志
-- 日志按月导出为本地 JSON 文件，如 `/var/log/clouisle/audit_archives/audit_logs_202602.json`（已存在的月度文件会追加）
-- 归档完成后已归档日志从数据库中删除
+归档按保留期限挑选日志，按月写入归档路径下的 JSON 文件；同一月份的文件会追加。归档完成后，已归档日志**从数据库删除**。
 
 <Callout type="warn">
-  归档会**从数据库删除**已归档日志，只留下本地 JSON 文件。归档路径必须落在持久卷上，否则容器重建即丢失唯一副本；同时确认 `audit_log_retention_days` 已被合规要求确认过再触发。
+  归档会删除数据库中的原始记录，只留下归档文件。归档路径必须位于持久存储上，否则容器重建会丢失唯一副本；触发前确认保留天数符合合规要求。
 </Callout>
 
 <Callout type="warn">
-  **Roadmap：** 没有定时自动归档，必须手动触发；也没有 S3/Azure/Blob 等远程归档目标，归档输出只写入本地 `audit_log_archive_path` 配置的路径。
+  **Roadmap：** 没有定时自动归档，必须手动触发；归档目标只能是本地路径，不能直接写入对象存储；也没有归档恢复流程。
 </Callout>
 
-<Callout type="warn">
-  **Roadmap：** 暂无归档日志恢复工作流。归档路径下的月度 JSON 文件可供手动检查。
-</Callout>
+## 统计与限制
 
-### 归档状态查询
+审计日志页顶部有四张统计卡：日志总量（全部时间）、今日数量、失败数量，以及近 7 天的活跃用户数，用于快速判断系统活动。
 
-`GET /api/v1/admin/audit-logs/stats/retention` 返回：已配置的保留天数（`retention_days`）、截止日期（`cutoff_date`）、待归档日志数（`logs_to_archive`）、最旧日志时间（`oldest_log_date`）与 `next_archive_date`。
-
-<Callout type="warn">
-  `next_archive_date` 是接口**按「次日 03:00」计算出来的展示值**，背后没有对应的 Celery Beat 定时任务——归档始终是手动触发的。不要把它当作「系统会在该时间自动归档」的承诺（`app/core/celery.py` 的 `beat_schedule` 里没有归档任务）。
-</Callout>
-
-## 统计接口
-
-`GET /api/v1/admin/audit-logs/stats` 返回聚合统计：总日志数、今日日志数、失败日志数、近 7 天活跃用户数、Top 5 动作、Top 5 用户。
-
-<Callout type="warn">
-  **Roadmap：** 暂无审计报告生成器（用户活动、管理员操作、安全事件、资源变更、失败操作等报告），以上统计端点提供当前可用的聚合数据。
-</Callout>
-
-<Callout type="warn">
-  **Roadmap：** 暂无审计日志实时监控仪表盘。站点设置中的 `audit_alert_enabled`、`audit_alert_webhook` 及失败登录阈值等配置项当前未被任何监控或通知代码消费（见[站点设置](./site-settings.mdx)的「审计告警」小节）。
-</Callout>
-
-## API 端点参考
-
-| 方法 | 路径 | 说明 | 权限 |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/admin/audit-logs` | 查询审计日志列表（支持筛选） | `audit:read` |
-| `GET` | `/api/v1/admin/audit-logs/{id}` | 获取单条审计日志详情 | `audit:read` |
-| `GET` | `/api/v1/admin/audit-logs/export?format=csv\|json` | 导出审计日志（最多 10,000 条） | `audit:export` |
-| `GET` | `/api/v1/admin/audit-logs/stats` | 获取审计统计聚合 | `audit:read` |
-| `GET` | `/api/v1/admin/audit-logs/stats/retention` | 获取保留与归档状态 | `audit:read` |
-| `POST` | `/api/v1/admin/audit-logs/archive` | 触发手动归档任务（仅返回 `task_id`） | `audit:export` |
-| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | 触发手动归档任务（存储设置页使用，返回 `task_id` + `status`） | `audit:export` |
-| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | 查询归档任务状态与结果 | `audit:export` |
+**未实现（Roadmap）：** 审计报告生成器、实时监控仪表盘、失败登录或批量删除的自动告警。需要安全告警时使用[自动通知](./notifications.mdx)中的安全事件与外部渠道。
 
 ## 最佳实践
 
-### 审计日志配置
-
-- 启用所有操作的审计日志记录
-- 同时记录成功与失败操作
-- 包含足够的上下文信息
-- 保护日志完整性
-- 定期审查日志
-- 适当归档日志
-- 监控异常行为
-- 为关键事件设置告警
-
-### 日志分析
-
-- 定期审查日志
-- 寻找模式与趋势
-- 调查异常事件
-- 生成定期报告
-- 与团队分享发现
-- 记录事件与处置
-- 使用日志满足合规要求
-
-### 安全
-
-- 限制日志访问权限
-- 加密归档日志
-- 使用安全存储
-- 监控日志访问行为
-- 审计审计者自身
-- 维护日志完整性
-- 遵守相关法规
+- 定期审查登录失败、权限相关和批量删除类事件。
+- 关键操作后按资源标识筛选，确认变更内容符合预期。
+- 为审计日志查看与导出权限设置专人，不要下发到日常业务账号。
+- 归档前确认归档路径位于持久存储并有备份，归档后保留归档文件的访问记录。
+- 用审计日志满足合规要求时，先确认保留天数覆盖监管期限。
 
 ---
 
 参见：
-- [角色与权限](./roles-permissions.mdx) — `audit:read` / `audit:export` 权限
+- [角色与权限](./roles-permissions.mdx) — 审计日志查看与导出权限
 - [通知](./notifications.mdx) — 安全事件通知渠道
+- [站点设置](./site-settings.mdx) — 审计日志保留与归档配置

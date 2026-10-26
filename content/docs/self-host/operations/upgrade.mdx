@@ -6,6 +6,21 @@ icon: RefreshCw
 
 升级前先阅读目标版本 CHANGELOG，确认数据库迁移、工作流定义、模型适配器和部署 manifest 变化。
 
+## 破坏性变更：统一投递队列
+
+消息集成的出站队列已从按渠道分表改为单表：
+
+- `integration_deliveries` 取代 `feishu_agent_deliveries` 与 `wechat_agent_deliveries`。API 启动时把旧表数据复制到新表，然后**删除旧表**（PostgreSQL 咨询锁 `integration-deliveries-schema` 保证只有一个进程执行）。
+- 启动迁移同时为新表补 `error_detail` 列，为 `feishu_agent_receipts` 补 `attachments` 列；`wechat_agent_receipts` 作为新表由建表阶段创建。
+- **API 与 Worker 必须同版本部署。** 旧版本 Worker 仍会向已删除的旧表写入，投递记录丢失并报错；旧版本 Beat 也不会加载新的集成调度。
+- 顺序固定为：先让 API 完成 schema 迁移（健康检查通过），再启动或升级 Worker 与 Beat。
+- 升级后**重启 Beat 一次**，让它以 `IntegrationScheduler` 启动；此后调度条目由它每 2 秒从 PostgreSQL 对账，启停微信/飞书能力后无需再重启。
+- 不再有独立的 `wechat-receiver` 服务或进程：微信轮询由 `default` 队列的周期任务完成，飞书长连接由消费 `agent` 队列的 Worker 持有。旧部署若还运行着专用的 `wechat_poll` Worker，先停 Beat、排空其积压或等待 90 秒认领过期，再删除该工作负载。移除接收服务**不代表**可以去掉 Sandbox Worker——Agent 的代码工具仍然依赖它。
+
+<Callout type="error" title="先备份，再升级">
+  旧表在迁移后被删除，回滚镜像无法恢复其中的投递历史。升级前备份 PostgreSQL，并确认没有旧版本 Worker 仍在运行。
+</Callout>
+
 ## Compose 升级
 
 Compose 引用的都是预构建镜像、没有 `build:` 段，且 `up -d --force-recreate` 是停止/重建而非滚动发布，所以请安排在维护窗口内执行。生产环境不要依赖 `latest`，改为固定不可变 tag 或 digest。
@@ -15,14 +30,18 @@ Compose 引用的都是预构建镜像、没有 `build:` 段，且 `up -d --forc
 ```bash
 cd /opt/clouisle        # 换成实际安装目录（安装器默认为 /opt/clouisle）
 docker compose pull
-docker compose up -d --force-recreate
+# 先停 Worker 与 Beat，避免旧版本进程在 schema 迁移期间写入旧表
+docker compose stop worker beat
+docker compose up -d --force-recreate api
+until curl --fail -s http://localhost:8000/api/v1/health >/dev/null; do sleep 2; done
+docker compose up -d --force-recreate worker sandbox-worker beat frontend
 
 docker compose ps
 docker compose logs --tail=50 api worker sandbox-worker beat frontend
 curl --fail http://localhost:8000/api/v1/health
 ```
 
-`worker`、`sandbox-worker`、`beat` 都要确认日志无启动错误，`beat` 保持单副本。
+`sandbox-worker` 不参与投递队列迁移，可以保留运行；`worker`、`sandbox-worker`、`beat` 都要确认日志无启动错误，`beat` 保持单副本。
 
 自建镜像时从**仓库根目录**构建三个镜像并推送到同一 tag：
 
@@ -39,21 +58,32 @@ docker push "$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
 
 ## Kubernetes 升级
 
-同一 release 和 namespace 执行 `helm upgrade`（更新 `images.backend`、`images.sandboxWorker`、`images.frontend` 的 tag，保留现有 Secret）；或审阅新生成的 manifest 后 apply。用 manifest 时逐个更新工作负载并观察 rollout：
+同一 release 和 namespace 执行 `helm upgrade`（更新 `images.backend`、`images.sandboxWorker`、`images.frontend` 的 tag，保留现有 Secret）；或审阅新生成的 manifest 后 apply。无论哪种方式，都要让 API 先完成 schema 迁移再更新 Worker 与 Beat：
 
 ```bash
+# 1. 停掉会写旧投递表的消费者
+kubectl -n clouisle scale deployment/worker --replicas=0
+kubectl -n clouisle scale deployment/beat --replicas=0
+
+# 2. 先更新并等待 API
 kubectl -n clouisle set image deployment/api api="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle rollout status deployment/api
+
+# 3. 再更新其余工作负载
 kubectl -n clouisle set image deployment/worker worker="$REGISTRY/clouisle-backend:$IMAGE_TAG"
 kubectl -n clouisle set image daemonset/sandbox-worker sandbox-worker="$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
 kubectl -n clouisle set image deployment/beat beat="$REGISTRY/clouisle-backend:$IMAGE_TAG"
 kubectl -n clouisle set image deployment/frontend frontend="$REGISTRY/clouisle-frontend:$IMAGE_TAG"
+kubectl -n clouisle scale deployment/worker --replicas=2
+kubectl -n clouisle scale deployment/beat --replicas=1
 
-kubectl -n clouisle rollout status deployment/api
 kubectl -n clouisle rollout status deployment/worker
 kubectl -n clouisle rollout status daemonset/sandbox-worker
 kubectl -n clouisle rollout status deployment/beat
 kubectl -n clouisle rollout status deployment/frontend
 ```
+
+用 `helm upgrade` 时，`worker` 与 `beat` 的 Pod 在同一 rollout 中重建；如果 API 尚未就绪，可先用 `--set worker.enabled=false --set beat.enabled=false` 升级 API，就绪后再补一次 `helm upgrade` 打开两者。
 
 API 的滚动策略是 `maxUnavailable: 0` / `maxSurge: 1`，因此新 Pod 就绪后旧 Pod 才会退出；数据库结构变更发生在 API 启动时（Tortoise ORM，无 Alembic），旧副本仍在新结构上运行，所以 schema 变更必须向后兼容。
 
@@ -68,6 +98,7 @@ API 的滚动策略是 `maxUnavailable: 0` / `maxSurge: 1`，因此新 Pod 就�
 - 所有基础设施与应用服务在运行，`beat` 恰好一个副本。
 - 经公共代理访问 `GET /api/v1/health` 成功。
 - 登录、Agent 对话/流式输出、文件上传、知识库检索、工作流执行均正常。
+- 消息集成正常：管理端 **Delivery Log**（`/deliveries`）能看到新投递记录，微信轮询恢复出队，飞书长连接由 `agent` 队列 Worker 重新建立。
 - `worker`、`sandbox-worker`、`beat` 日志无启动错误。
 - 备份与监控任务继续运行。
 
@@ -79,6 +110,10 @@ API 的滚动策略是 `maxUnavailable: 0` / `maxSurge: 1`，因此新 Pod 就�
 ## 回滚
 
 回滚镜像前确认数据库结构变更是否可逆。若不可逆，不要只切回旧镜像；恢复备份到隔离环境验证。工作流版本可在产品 UI 单独恢复，但这不等同于服务回滚。
+
+<Callout type="error" title="跨过投递队列切换的版本不可直接回滚">
+  `integration_deliveries` 迁移会删除 `feishu_agent_deliveries` 与 `wechat_agent_deliveries`。切回切换前的镜像后，这些旧版本代码会向不存在的表写入，消息集成直接失败。需要回到旧版本时，只能把升级前的 PostgreSQL 备份恢复到新实例，再让所有服务指向它；不要只 `rollout undo` 应用工作负载。
+</Callout>
 
 ```bash
 # Compose：把 Compose 文件/环境里的镜像 tag 改回上一版，然后重建

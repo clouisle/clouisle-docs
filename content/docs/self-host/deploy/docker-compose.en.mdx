@@ -64,7 +64,13 @@ Configure the external reverse proxy so `/api/*` goes to `api:8000` and `/` goes
 
 There is no Nginx service. The `api` healthcheck runs `GET http://localhost:8000/api/v1/health` inside the container; `worker` and `sandbox-worker` wait for `api` to become **healthy**, while `beat` and `frontend` only wait for `api` to be started (`service_started`). `db`, `redis`, and `qdrant` each have their own healthcheck (`pg_isready`, `redis-cli ping`, `/healthz`), and every application service waits for those to pass.
 
-`api` owns the `uploads_data` volume (mounted at `/app/uploads`). `worker` and `sandbox-worker` do not mount it: they use `UPLOAD_STORAGE_MODE=remote` with `API_INTERNAL_BASE_URL=http://api:8000` to read and write files through the internal gateway. `sandbox-worker` additionally runs with `user: "0"`, `cap_add: [SYS_ADMIN]`, and `seccomp=unconfined` so bwrap can create user and mount namespaces.
+`api` owns the `uploads_data` volume (mounted at `/app/uploads`). `worker` and `sandbox-worker` do not mount it: they use `UPLOAD_STORAGE_MODE=remote` with `API_INTERNAL_BASE_URL=http://api:8000` to read and write files through the internal gateway. `sandbox-worker` also mounts the `sandbox_data` named volume at `/var/lib/clouisle/sandbox` for session workspaces and checkpoints; only one sandbox worker may use that volume, so never share it with `--scale`.
+
+The sandbox security and resource settings are not optional: `user: "0"`, `cap_drop: [ALL]`, `cap_add: [SYS_ADMIN, SETFCAP, NET_ADMIN]`, `seccomp=unconfined`, `no-new-privileges:true`, plus `pids_limit: 512`, `cpus: 2`, and `mem_limit: 2g`. `SYS_ADMIN` and `SETFCAP` create namespaces, and `NET_ADMIN` only lets the trusted proxy enable isolated loopback for a task; task capabilities are dropped again before the payload runs. `stop_grace_period: 35s` leaves in-flight tasks time to write their checkpoint.
+
+Compose has no standalone `wechat-receiver` service: WeChat polling is a periodic task on the `default` queue consumed by `worker`, and the Feishu long connection is supervised inside the `agent`-queue consumer in `worker`.
+
+The `clouisle-backend` image bundles `ffmpeg`/`ffprobe`, so WeChat audio/video transcoding and duration probing run inside these containers with nothing extra to install.
 
 <Callout type="warn">
   Production deployments must set strong random values for `POSTGRES_PASSWORD` and `INTERNAL_API_TOKEN`. The Compose file uses the `${VAR:?required}` form, so `docker compose up` fails immediately when either is unset. `INTERNAL_API_TOKEN` must be shared by `api`, `worker`, and `sandbox-worker`.
@@ -85,10 +91,9 @@ Tortoise ORM creates and migrates tables automatically at API startup (no Alembi
 docker compose logs -f worker
 docker compose restart api
 docker compose up -d --scale worker=4
-docker compose up -d --scale sandbox-worker=2
 docker compose down
 ```
 
-`beat` must stay at one replica. `docker compose down -v` deletes data volumes; complete a backup before running it.
+`beat` must stay at one replica. `docker compose down -v` deletes data volumes; complete a backup before running it. Never run `--scale sandbox-worker=2`: both containers would share one `sandbox_data` volume, which is designed for a single worker. For more sandbox capacity, raise `SANDBOX_WORKER_CONCURRENCY` or deploy separate sandbox workers per node with their own volumes.
 
 The `worker` consumes the `default,agent,knowledge,workflow` queues, so `--scale worker=4` grows all four task classes together. To grow one class only, add a worker service subscribed to a single queue (for example `-Q agent`); the `sandbox` queue is consumed independently by `sandbox-worker`. Queue-to-task mapping: [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).

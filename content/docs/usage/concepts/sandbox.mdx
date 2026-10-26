@@ -1,49 +1,20 @@
 ---
 title: 代码沙箱
-description: 在隔离的 Bubblewrap 命名空间中安全运行 Python 与 JavaScript 代码
+description: 在隔离环境中安全运行 Python 与 JavaScript 代码
 icon: CodeXml
 ---
 
-代码沙箱是 Clouisle 的安全隔离执行环境，用于在工作流、Agent 和工具中运行用户提供的 Python 与 JavaScript 代码。沙箱任务进入专用 Celery Worker（独立消费 `sandbox` 队列，与主 Worker 的四个队列分开），每个任务在独立的 Bubblewrap 用户+挂载命名空间中执行，并由超时、输出限制与磁盘检查约束失控任务。
+代码沙箱是 Clouisle 的隔离执行环境，用于在工作流、Agent 和工具中运行用户提供的 Python 与 JavaScript 代码。每个任务都在独立的运行环境中启动，只挂载当前任务的工作目录，并由超时、输出限制与磁盘配额约束失控任务。
 
-<Callout type="warn">
-官方部署的 sandbox-worker 以 **root**（`user: "0"` / `runAsUser: 0`）运行，并在运行时默认 cap 集之上叠加 **`CAP_SYS_ADMIN`**，同时使用 `seccomp=unconfined`（保留 `no-new-privileges`）——**它不是 rootless 容器**。隔离来自**每个任务**的 Bubblewrap 用户+挂载命名空间，而不是 Worker 自身被降权；逃逸后果与加固方式见下文「加固：收敛 Worker 的 `CAP_SYS_ADMIN`」。
-</Callout>
+### 隔离方式
 
-### 隔离架构与 Bubblewrap 挂载布局
+- **一次任务一个隔离环境**：任务运行在全新的隔离空间中，看不到宿主机的其他进程、文件或网络配置，也不会复用上一个任务的临时文件。
+- **系统目录只读**：系统运行时和依赖目录以只读方式挂载，任务不能修改系统二进制、已安装依赖或系统配置。
+- **只有工作目录可写**：任务只能写入自己的 `/workspace` 目录及其临时目录；任务结束后临时目录随任务清理，会话过期后整个工作目录自动清理。
+- **进程随任务回收**：任务超时或被取消时，沙箱内启动的所有子进程一起结束，不会残留在后台。
+- **独立的运行环境**：任务只拿到经过过滤的进程环境，而不是平台的完整环境。
 
-```text
-Agent/工作流 → API → Celery 队列 (sandbox) → 沙箱 Worker
-                                                  ↓
-                                         Bubblewrap 进程
-                                                  ↓
-                              /workspace → 当前任务/会话目录
-```
-
-当开启文件系统隔离（`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`）时，沙箱启动器将命令包裹在 `bwrap` 进程中执行：
-
-```text
-bwrap \
-  --unshare-user --unshare-pid --unshare-ipc --unshare-uts \
-  --die-with-parent --hostname clouisle-sandbox \
-  --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /etc /etc \
-  --dir /proc --dev /dev \
-  --bind <host_job_dir> /workspace \
-  --bind <host_job_dir>/tmp /tmp \
-  --chdir /workspace \
-  -- <command> <args...>
-```
-
-1. **命名空间与生命周期隔离**：
-   - **多重隔离**：`--unshare-user`、`--unshare-pid`、`--unshare-ipc`、`--unshare-uts` 创建独立的用户、进程树（映射为 PID 1）、IPC 通信域与主机名（`clouisle-sandbox`）。
-   - **进程级联回收**：`--die-with-parent` 保证 Worker 主管进程退出或超时后，沙箱内所有衍生子进程被内核立即回收。
-2. **只读系统根与工作目录映射 (`RUNTIME_READONLY_ROOTS`)**：
-   - **系统目录只读**：`/usr`、`/bin`、`/sbin`、`/lib`、`/lib64`、`/etc` 通过 `--ro-bind` 只读挂载，防止修改系统二进制、Python site-packages 或 OS 配置。
-   - **独立工作空间**：宿主任务目录映射为标准的 `/workspace`，内部配备独立的 `/tmp` 子挂载（`--bind <workspace>/tmp /tmp`），隔离临时文件。
-   - **逻辑路径自动重写**：`_logical_workspace_path` 与 `_map_workspace_value` 自动将任务参数和环境变量中的物理路径重写为 `/workspace/...`。
-3. **运行时与中日韩（CJK）字体支持**：
-   - **预置运行时**：预装 Python 3.13（基于 `uv` 管理）与 Node.js 22。
-   - **CJK 字体支持**：`clouisle-sandbox-worker` 镜像预装 `fontconfig`、`fonts-wqy-zenhei` 与 `fonts-wqy-microhei` 并刷新字体缓存；`/usr/share/fonts` 通过只读挂载暴露给沙箱，使用 `matplotlib`、`seaborn`、`Pillow` 生成图表时可正常渲染中日韩字符，杜绝方块乱码（豆腐块）。
+沙箱不会静默降级为「无隔离执行」：隔离环境启动失败时任务直接失败，而不是退回到宿主进程运行。
 
 ### 支持的运行时
 
@@ -52,101 +23,57 @@ bwrap \
 | Python | Python 3.13，包含标准库和任务配置的依赖 |
 | JavaScript | Node.js 22，包含核心模块和任务配置的依赖 |
 
+官方部署的沙箱镜像预装中日韩字体，使用 `matplotlib`、`seaborn`、`Pillow` 生成图表时可以正常显示中文，不会出现方块乱码。
+
 ### 使用场景
 
-- **代码工具**：在 **管理后台** > **功能** > **代码** 中创建可复用的代码工具，可安装精确固定版本的包并声明 `/workspace` 下的产物，保存后被 Agent 和工作流调用（见 [自定义 HTTP 与代码工具](../guides/tools/custom-tools.mdx)）。
-- **工作流代码节点**：在工作流图中直接嵌入代码，接收输入变量并将结果返回给下游节点（见 [工作流节点](../guides/workflow/nodes.mdx)）。
-- **Agent 级执行**：Agent 通过函数调用触发代码工具，由 LLM 根据任务需要决定何时运行代码。
+- **代码工具**：在管理后台**能力** > **代码**中创建可复用的代码工具，安装精确固定版本的依赖并声明 `/workspace` 下的产物，保存后供 Agent 和工作流调用（见[自定义 HTTP 与代码工具](../guides/tools/custom-tools.mdx)）。
+- **工作流代码节点**：在工作流图中直接嵌入代码，接收输入变量并把结果传给下游节点（见[工作流节点](../guides/workflow/nodes.mdx)）。
+- **Agent 调用**：Agent 通过函数调用触发代码工具，由模型根据任务需要决定何时运行。
 
 ### 执行边界
 
-沙箱任务限制由 `SandboxLimits` 统一定义，实际生效值取「任务配置」与「调用侧超时」中先到的一个：
+每个任务都受以下限制，实际生效值取任务配置与调用方超时中先到的一个：
 
 | 限制 | 默认值 | 允许范围 | 说明 |
 | --- | --- | --- | --- |
-| `timeout_seconds` | `30` | `1-600` | 单次任务的执行超时（秒）；超时后按进程组 SIGTERM → SIGKILL 回收 |
-| `disk_mb` | `1024` | `0-102400`（并受 `SANDBOX_MAX_DISK_MB` 默认 `8192` 约束） | 工作空间磁盘配额 |
-| `max_stdout_kb` | `256` | `16-8192` | 标准输出上限，超出部分截断并追加 `...<truncated>` |
-| `max_stderr_kb` | `256` | `16-8192` | 标准错误上限，同上 |
+| 执行超时 | `30` 秒 | `1-600` | 超时后任务及其子进程被回收 |
+| 磁盘配额 | `1024MB` | 受部署上限约束 | 工作目录可用空间 |
+| 标准输出上限 | `256KB` | `16-8192KB` | 超出部分被截断，并在末尾标注已截断 |
+| 标准错误上限 | `256KB` | `16-8192KB` | 同上 |
 
-调用侧还有一层独立的超时：直接执行接口 `POST /api/v1/tools/execute-code` 的 `timeout` 默认 `30`、范围 `1-60`；Agent 对话中调用代码工具时，外层上限来自 `STREAM_TOOL_TIMEOUT_CODE`（默认 `60` 秒）。已保存工具的 `limits.timeout_seconds` 优先于调用侧传入值（只在配置缺省时才用传入值补位），两边先触发的一方决定结果：沙箱内超时会让任务以执行超时失败，外层超时则表现为工具调用超时。
+调用方还有一层独立超时：直接执行代码的默认超时为 `30` 秒，Agent 对话中调用代码工具的外层上限为 `60` 秒。已保存工具的超时优先于调用时传入的值，两边谁先到期谁生效：沙箱内超时表现为「执行超时」，外层超时表现为「工具调用超时」。
 
-产物路径必须位于 `/workspace` 内，单产物默认上限 `10MB`、产物总量默认上限 `10MB`（`SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` / `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB`）。边界明细见 [工具与 Skills 的沙箱边界](./tool.mdx)。
+产物路径必须位于 `/workspace` 内，写到其他位置会被拒绝。单个产物默认上限 `10MB`，产物总量默认上限 `10MB`。
 
-### 安全模型
+### 出站网络
 
-- 任务负载在全新的 Bubblewrap **用户+挂载命名空间**内执行，绝不会运行在 Worker 自身的命名空间里。
-- 项目提供的部署让 Sandbox Worker 以 **root** 运行，并在运行时默认 cap 集上**叠加 `CAP_SYS_ADMIN`**：镜像的非 root 用户 effective capabilities 恒为空，而特权 Worker 即使在宿主禁止非特权用户命名空间时也能创建用户命名空间。Worker 保持 `allowPrivilegeEscalation=false`，且仅对 sandbox-worker 使用 `seccomp=unconfined`。
-- 禁止 `seccomp=unconfined` 的集群需要提供允许 namespace/mount 系统调用的 Localhost seccomp profile。
-- 任务命名空间内只有当前工作空间及其临时目录可写；依赖缓存和必要运行时目录只读挂载。
-- 子进程只接收过滤后的环境变量，而不是 Worker 的完整进程环境。
-- 会话过期后自动清理工作目录。
+沙箱出网由**设置** > **安全**中的沙箱出口白名单控制，与同一页面的出站网络白名单是两套独立策略：把内网主机加入出站网络白名单不会放行沙箱。
 
-### 宿主内核要求 [#kernel-requirements]
+- 只接受精确主机名，大小写不敏感；通配符、IP 地址和网段在保存时被拒绝。
+- 默认放行 `pypi.org`、`files.pythonhosted.org`、`pypi.python.org`、`registry.npmjs.org`；最多 `200` 条，重复项去重。
+- 空白名单阻断全部外网。任务只能通过 HTTPS 的 `443` 端口访问名单内主机，HTTP、其他端口和直接访问 IP 都被拒绝。
+- 自定义 Python 包索引与 Node 源必须使用 HTTPS，主机名必须在名单内。
+- 修改后对下一个任务生效，无需重启服务；已运行的任务保持启动时的策略。
+- 关闭沙箱出口白名单只影响**新任务**：新任务可以访问任意目标、协议与端口；文件系统隔离、超时、磁盘与输出限制不随开关关闭。名单保留，重新开启即恢复。
 
-Bubblewrap 通过 `unshare(CLONE_NEWUSER)` 创建新的用户命名空间。**项目提供的部署**（Docker Compose、Helm、Kubernetes）让 Worker 以 root + `CAP_SYS_ADMIN` 运行，用户命名空间创建走特权路径，即使宿主限制非特权用户命名空间也能正常工作——**无需修改宿主 sysctl**。
+读取策略失败时按「空白名单」处理，即阻断全部外网。宿主或集群层面的网络策略仍是外层兜底。
 
-自定义部署若保持 Worker **非 root**，则依赖宿主内核允许非特权用户命名空间，否则所有沙箱任务都会失败，报错为：
+### 宿主与节点要求 [#kernel-requirements]
 
-```text
-bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.
-```
+沙箱依赖宿主或节点允许创建隔离的进程空间。官方部署已按特权方式运行沙箱节点，通常不需要调整节点内核；自定义部署如果无法启动隔离环境，任务会全部失败并提示无法创建命名空间。这类问题属于节点内核或安全配置，处理方式见[故障排查](../../self-host/operations/troubleshooting.mdx)。
 
-部分常见宿主发行版默认限制该能力，且 `seccomp=unconfined` **无法**解决——限制发生在容器 seccomp profile 更底层的宿主内核：
+### 失败与排查
 
-| 发行版 | 限制 | 修复 |
-| --- | --- | --- |
-| Ubuntu 23.10+ | AppArmor 禁止非特权进程创建用户命名空间（`kernel.apparmor_restrict_unprivileged_userns=1`） | `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` |
-| Debian / 旧内核 | 用户命名空间克隆被禁用（`kernel.unprivileged_userns_clone=0`） | `sysctl -w kernel.unprivileged_userns_clone=1` |
-
-检查当前状态并验证用户命名空间确实可创建：
-
-```bash
-sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null
-unshare -U true && echo "user namespaces OK"
-```
-
-使修改持久化：
-
-```bash
-echo 'kernel.apparmor_restrict_unprivileged_userns=0' > /etc/sysctl.d/99-clouisle-userns.conf
-sysctl --system
-```
-
-注意事项：
-
-- sysctl 是**宿主/节点级**设置。在 Kubernetes 中无法按 Pod 设置：需要对每个节点生效（自管节点写入 `/etc/sysctl.d/`，托管集群使用自定义节点镜像或等效的节点初始化配置）。
-- 允许非特权用户命名空间是 rootless 容器（Bubblewrap、Flatpak、Podman）的标准前提。
-
-### 加固：收敛 Worker 的 `CAP_SYS_ADMIN` [#harden-cap-sys-admin]
-
-沙箱任务运行在全新的 Bubblewrap 用户+挂载命名空间内，无法直接触及 Worker 容器的 capabilities。但如果任务成功逃出 Bubblewrap，落点就是**容器内 root + `CAP_SYS_ADMIN`**。默认 Docker daemon 下容器与宿主共享初始用户命名空间，该 capability 是宿主 userns 级别的，经典逃逸链（cgroup `release_agent`、重挂 `/proc` 写入 `kernel.core_pattern`、sysctl 写入）在原理上可达。
-
-- **Docker Compose**：启用 daemon 用户命名空间重映射（`/etc/docker/daemon.json` 中 `"userns-remap": "default"`），让每个容器进入嵌套用户命名空间——`CAP_SYS_ADMIN` 只作用于容器自身的 userns，宿主逃逸链全部失效。沙箱 Worker 仍能在重映射后的命名空间内特权创建自己的 Bubblewrap userns，沙箱功能不受影响。启用后需重设既有命名卷属主，且 daemon 上所有容器都会被重映射。
-- **Kubernetes**：不适用 daemon 级重映射；依赖 NetworkPolicy 限制沙箱出网、及时升级 Bubblewrap 并关注其 CVE，或在集群提供节点级用户命名空间支持时使用该能力。
-
-### 运行时开关与降级行为
-
-沙箱运行时由 `SANDBOX_RUNTIME_ENABLED` 控制，默认 `true`。设为 `false` 时不走沙箱网关，代码会在 API/Worker 进程内执行，不具备沙箱隔离，仅适用于本地调试。当前配置中**没有** `SANDBOX_LEGACY_FALLBACK_ENABLED` 开关：沙箱任务或网关失败不会静默回退到进程内执行。
-
-| 环境变量 | 默认值 | 作用 |
-| --- | --- | --- |
-| `SANDBOX_RUNTIME_ENABLED` | `true` | 启用沙箱运行时；关闭后进程内执行，无隔离 |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true`（代码默认） | 把可执行载荷包进 Bubblewrap 挂载命名空间 |
-| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `bwrap`；官方部署 `/usr/bin/bwrap` | Bubblewrap 可执行文件名或绝对路径 |
-
-<Callout type="warn">
-文件系统隔离开启时，找不到 `bwrap`、工作空间根目录不存在或任务 `cwd` 逃出工作空间，任务会失败；沙箱启动器不会降级成未隔离执行。
-</Callout>
-
-### 相关配置
-
-沙箱环境变量集中在 [环境变量参考](../../self-host/configuration/environment-variables.mdx)。启用文件系统隔离需要 `SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true` 且 `SANDBOX_FILESYSTEM_ISOLATION_BINARY` 指向 Bubblewrap 可执行文件（Compose/Helm 默认 `/usr/bin/bwrap`）。Docker Compose 和 Helm 中的 sandbox-worker 默认使用 root + `CAP_SYS_ADMIN` + `seccomp=unconfined` 的安全配置；部署时若出现 bwrap 用户命名空间错误，见 [故障排查](../../self-host/operations/troubleshooting.mdx)。
-
----
+- **执行超时**：任务在超时时间内没有结束，输出可能不完整；缩小输入或调高工具的超时配置。
+- **输出被截断**：标准输出或标准错误超过上限，末尾会出现截断标记；调试时把关键信息写到产物文件。
+- **产物未生成**：确认写入路径在 `/workspace` 内，且单个文件与总量都没有超过上限。
+- **无法安装依赖**：包源主机不在沙箱出口白名单内，或使用了 HTTP。改用 HTTPS 并让管理员添加主机名。
+- **任务直接失败而不是降级**：隔离环境不可用时不会退回无隔离执行，属于部署问题，按[故障排查](../../self-host/operations/troubleshooting.mdx)检查沙箱节点。
 
 参见：
+
 - [工具与 Skills](./tool.mdx) — 内置工具与沙箱边界
 - [自定义 HTTP 与代码工具](../guides/tools/custom-tools.mdx) — 配置代码工具
 - [工作流节点](../guides/workflow/nodes.mdx) — 代码节点集成
-- [环境变量参考](../../self-host/configuration/environment-variables.mdx) — Sandbox 环境变量
+- [自托管架构](../../self-host/architecture.mdx) — 沙箱节点与部署要求

@@ -1,98 +1,82 @@
 ---
-title: Agent Run View and Web Embedding
-description: Open an Agent in the Chat / Run pages, or embed it into third-party sites with the official embed.js SDK
+title: Standalone Runs and Web Embedding
+description: Use an Agent from the in-app run page, or embed a published Agent in third-party sites with embed.js
 icon: Share2
 ---
 
-Once an Agent is configured and published, Clouisle offers two delivery channels:
+After an Agent is configured and published, Clouisle offers two distribution options:
 
-1. **In-app run pages**: full conversational UIs for authenticated users. Agents use **Chat** (`/chat/{agent_id}`); workflows use **Run** (`/run/{workflow_id}?type=workflow`).
-2. **Web embedding**: embed a published Agent or workflow into an external website using a team API key (`clou_...`), in bubble, fullscreen, or mobile form.
+1. **In-app run page**: the full chat interface for signed-in users. Agents use **Chat** (`/chat/{agent_id}`); workflows use **Run** (`/run/{workflow_id}?type=workflow`).
+2. **Web embedding**: use a team API key to embed a published Agent or workflow in an external website, as a bubble, fullscreen, or mobile view.
 
----
+Embedding always authenticates as an API key, so visitors do not need a Clouisle account. That is why the target **must be published** and why the key should only reach the objects you select for it.
 
-## 1. In-App Run Pages
+## In-app run pages
 
-The run pages drop the Studio's editor sidebar and drawers and focus on the task at hand:
+The run page drops the orchestration sidebar and configuration drawer and focuses on the task:
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│ 🤖 Financial Analyst Agent                           [Team: Finance]   │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│  🤖 Financial Analyst                                                  │
-│  Upload quarterly earnings reports or ask financial modeling questions │
-│                                                                        │
-│  [Analyze Q3 Revenue]  [Model Cashflow]  [Compare Competitors]         │
-│                                                                        │
-│  👤 User: Analyze the uploaded Q3 report.                              │
-│                                                                        │
-│  🤖 Financial Analyst:                                                 │
-│  💭 Thought for 2.4s (Reading file: Q3_Financials.pdf)...              │
-│  Here is the summary of Q3 financial performance...                    │
-│                                                                        │
-├────────────────────────────────────────────────────────────────────────┤
-│  [📎] Ask a question or drop a spreadsheet...                   [Send] │
-└────────────────────────────────────────────────────────────────────────┘
-```
+- **Undistracted canvas** for complex interactions, large documents, and multi-round iteration.
+- **Required variables first**: when the Agent defines required variables, a structured input bar appears before the conversation starts.
+- **Full capability**: file attachments, image viewer, document preview, `ask_user` forms, and message version branching.
 
-### Opening a run page
+To open one: **Apps** (`/app/apps`) > hover an app card > the **...** menu in the top-right corner:
 
-1. Go to the **Apps** page (`/app/apps`).
-2. Hover an app card and open its **...** menu:
-   - For an **Agent**, select **Chat** to open `/chat/{agent_id}` in a new tab.
-   - For a **workflow**, select **Run** to open `/run/{workflow_id}?type=workflow` in a new tab.
-3. You can also navigate directly to `/run/{id}`: this unified run route serves an Agent by default and switches to a workflow with `?type=workflow`.
+- For an Agent, choose **Chat** to open `/chat/{agent_id}` in a new tab.
+- For a workflow, choose **Run** to open `/run/{workflow_id}?type=workflow`.
 
-### Features
+You can also visit `/run/{id}` directly: it treats the target as an Agent by default and as a workflow with `?type=workflow`.
 
-- **Distraction-free canvas**: optimized for deep interaction, document analysis, and iterative multi-turn conversations.
-- **Dynamic variable prompting**: if the Agent defines required variables (e.g. `client_id`, `locale`), the run page shows a structured input banner before the session starts.
-- **Full capabilities**: attachments, image lightbox, document previews, `ask_user` forms, and multi-version message branching.
+## Web embedding: prepare an API key
 
----
+The embed page accepts only API keys that start with `clou_`; it does not use account sessions.
 
-## 2. Web Embedding: Enable and Configure
+1. Go to **API Keys** (`/app/api-keys`) and select **Create Key**.
+2. Enter a **Name**, for example "Website embed".
+3. Optionally tick the Agents under **Allowed Agents** and the workflows under **Allowed Workflows**. Leaving them empty means no restriction — for embedding you **should always tick** the intended objects, otherwise the key can reach every embeddable object in the team.
+4. Optionally set **Expires At** (empty means never) and **Rate Limit** (requests per minute, `0` for unlimited; embed requests are currently not throttled by this value).
+5. Copy the key immediately after saving — it cannot be viewed again. If it is lost, create a new one and replace it.
 
-Embedding renders the same app/workflow run page inside an iframe, so the target **must be published first**.
+<Callout type="warn">
+The key ends up in your website source, so any visitor can see it. Only tick the Agents / workflows you actually want public, and rotate the key regularly. If it leaks, deactivate it and update the code on your site.
+</Callout>
 
-### Enabling embedding
+## Web embedding: enable and configure
 
-1. Open your Agent in the **Agent Studio** (`/app/apps/{agent_id}`).
-2. Confirm the Agent is **Published** — when it is not, the drawer shows a yellow warning and saving stays disabled.
-3. Click the **Embed** button on the top toolbar to open the embed configuration drawer.
-4. Toggle **Enable Embedding** on.
-5. Paste a team API key (`clou_...`) into the snippet field; it is inserted into the generated code below.
+1. Open the target object in the Agent orchestration page (`/app/apps/{agent_id}`) or the workflow orchestration page.
+2. Confirm the object is **Published** — otherwise the embed drawer shows a warning at the top and cannot save.
+3. Select the **Embed** button in the top toolbar.
+4. Turn on **Enable Embedding**.
+5. Paste the key from the previous step into **API Key**; it is inserted into the code snippet automatically.
+6. Choose an **Embed Mode** (Bubble / Fullscreen / Mobile) and adjust the appearance.
+7. Select **Preview** to check it, **Save** to store the configuration, then **Copy Code** and paste it into your site.
 
-### Drawer options
+### Options
 
 | Option | Description | Default |
 | --- | --- | --- |
-| **Enable embedding** | Allow this app to be embedded in external sites via iframe | Off |
-| **Allowed domains** | Restrict which origins may load the widget; empty allows every domain. Wildcard subdomains supported; separate multiple values with commas or newlines | Empty (allow all) |
-| **Show header** | Show the app icon and name at the top of the embed | On |
-| **Show history** | Show a history sidebar in the embed (stored in the browser) | On |
-| **Allow new** | Allow visitors to start a new chat/run | On |
-| **Theme** | Widget theme: `auto` / `light` / `dark` | `auto` |
-| **Primary color** | Brand accent color, `#RGB` or `#RRGGBB` | Empty (bubble uses `#6366f1`) |
-| **Bubble position** | Floating bubble placement: `bottom-right` / `bottom-left` | `bottom-right` |
-| **Bubble greeting** | Message shown beside the bubble before it is first opened | Empty |
+| **Enable Embedding** | Allows the object to be embedded via iframe; when off, every embed URL is rejected | Off |
+| **Allowed Domains** | Only these origins may load the widget; empty allows every domain. Supports `example.com`, `*.example.com`, and ports, separated by commas or newlines | Empty (all allowed) |
+| **Show Header** | Shows the app icon and name at the top of the embed | On |
+| **Show History** | Shows a history sidebar in the embed (stored in the visitor's browser) | On |
+| **Allow New** | Lets visitors start a new chat or run | On |
+| **Theme** | Auto / light / dark; auto follows the visitor's system setting | Auto |
+| **Primary Color** | Brand accent color, `#RGB` or `#RRGGBB`; in bubble mode it also colors the button | Empty |
+| **Bubble Position** | Bottom right / bottom left | Bottom right |
+| **Greeting Message** | One-line prompt shown next to the bubble until it is opened | Empty |
 
-<Callout type="warn" title="Allowed domains">
-  Empty means every origin is allowed. Once populated, the backend validates the request's `Origin` header (falling back to `Referer`) and rejects other origins with `403 embed_domain_not_allowed`. `https://example.com`, `*.example.com` (matches subdomains), and values with a port are accepted; malformed values fail validation on save. Requests without either header are allowed (handy for local testing).
+<Callout type="warn" title="Allowed Domains">
+An empty list allows every origin. Once filled in, only the listed hostnames are accepted: `https://example.com`, `*.example.com` (root and subdomains), and forms with a port are all valid. Format is validated on save and invalid values fail immediately. Requests from other origins are rejected with "This domain is not allowed to embed this resource"; requests with no origin information at all are allowed so local testing works.
 </Callout>
 
-The configuration is stored on the Agent/workflow as `embed_config` (fields: `enabled`, `show_header`, `show_history`, `allow_new`, `allowed_domains`, `theme.mode`, `theme.primary_color`, `bubble.position`, `bubble.icon`, `bubble.greeting`). `bubble.icon` has no editor control today, so setting it has no visible effect.
+Appearance settings are stored on the object and apply to new page loads immediately; already-open pages need a refresh.
 
----
+## Web embedding: put the code on your site
 
-## 3. Integration Code
+The three tabs at the bottom of the drawer (Bubble / Fullscreen / Mobile) decide which snippet is generated. All three point to the same embed page (Agent: `/embed/agent/{id}`, workflow: `/embed/workflow/{id}`).
 
-The three tabs at the bottom of the drawer (**Bubble / Fullscreen / Mobile**) decide which snippet is generated; all three target the same iframe page, `/embed/agent/{agent_id}` or `/embed/workflow/{workflow_id}`.
+### Bubble mode (recommended)
 
-### Option A: Bubble mode (recommended)
-
-Bubble mode loads the official SDK `/embed.js` and calls `Clouisle.init(...)`:
+Bubble mode loads the official `embed.js` and calls `Clouisle.init`:
 
 ```html
 <script src="https://<your-domain>/embed.js"></script>
@@ -110,28 +94,28 @@ Bubble mode loads the official SDK `/embed.js` and calls `Clouisle.init(...)`:
 </script>
 ```
 
-`Clouisle.init` options (`id` and `token` are required — the SDK logs an error and renders nothing if either is missing):
+`Clouisle.init` parameters:
 
-| Option | Type | Default | Description |
+| Parameter | Values | Default | Notes |
 | --- | --- | --- | --- |
-| `type` | `'agent' \| 'workflow'` | `'agent'` | Target type; determines the iframe path |
-| `id` | `string` | — | Agent / workflow UUID, **required** |
-| `token` | `string` | — | Team API key (`clou_...`), **required** |
-| `mode` | `'bubble' \| 'fullscreen' \| 'mobile'` | `'bubble'` | Presentation mode |
-| `theme` | `'light' \| 'dark' \| 'auto'` | `'auto'` | Embed page theme; `auto` follows the system |
-| `primaryColor` | `string` | Empty | Bubble button color (bubble mode only); foreground is picked for contrast |
-| `position` | `'bottom-right' \| 'bottom-left'` | `'bottom-right'` | Screen edge for the bubble and chat window |
-| `greeting` | `string` | Empty | Tooltip beside the bubble; clicking it opens the chat |
-| `container` | `string` (CSS selector) | `body` | Fullscreen mode only; a missing container logs an error and aborts |
+| `type` | `'agent'` / `'workflow'` | `'agent'` | Which kind of object is embedded |
+| `id` | object ID | Required | Agent or workflow ID |
+| `token` | `clou_` key | Required | Pre-filled by the copy snippet; if either `id` or `token` is missing the SDK logs an error and renders nothing |
+| `mode` | `'bubble'` / `'fullscreen'` / `'mobile'` | `'bubble'` | Presentation mode |
+| `theme` | `'light'` / `'dark'` / `'auto'` | `'auto'` | Light/dark theme of the embed page |
+| `primaryColor` | Hex color | Empty | Bubble button background; foreground switches between black and white automatically |
+| `position` | `'bottom-right'` / `'bottom-left'` | `'bottom-right'` | Which edge the bubble sticks to |
+| `greeting` | Text | Empty | Prompt shown next to the bubble |
+| `container` | CSS selector | `body` | Fullscreen / mobile only; a missing container logs an error and aborts |
 
-The bubble instance exposes `Clouisle.open()`, `Clouisle.close()`, and `Clouisle.destroy()`. Calling `init` again first destroys the previous instance. The SDK also listens for the iframe's `clouisle:close` message to collapse the bubble.
+The bubble instance can be controlled with `Clouisle.open()`, `Clouisle.close()`, and `Clouisle.destroy()`. Calling `init` again destroys the previous instance, and a close action from inside the embed also collapses the bubble.
 
-### Option B: Fullscreen / mobile mode (plain iframe)
+### Fullscreen and mobile (plain iframe)
 
-Fullscreen and mobile do not need JS — the drawer emits an `iframe` pointing at `/embed/...`:
+These modes need no JavaScript; the drawer generates an `iframe`:
 
 ```html
-<!-- Fullscreen: fills a container on the page -->
+<!-- Fullscreen: place inside a container on the page -->
 <iframe
   src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&mode=fullscreen"
   style="width: 100%; height: 100%; border: none;"
@@ -140,7 +124,7 @@ Fullscreen and mobile do not need JS — the drawer emits an `iframe` pointing a
 ```
 
 ```html
-<!-- Mobile: covers the viewport -->
+<!-- Mobile: fill the viewport -->
 <iframe
   src="https://<your-domain>/embed/agent/550e8400-e29b-41d4-a716-446655440000?token=clou_a1b2c3d4e5f6...&mode=mobile"
   style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; border: none; z-index: 9999;"
@@ -148,49 +132,58 @@ Fullscreen and mobile do not need JS — the drawer emits an `iframe` pointing a
 ></iframe>
 ```
 
-Fullscreen can also be initialized through the SDK with a container: `Clouisle.init({ type: 'agent', id: '...', token: '...', mode: 'fullscreen', container: '#chat' })`.
+Fullscreen mode can also be driven by the SDK with a container: `Clouisle.init({ type: 'agent', id: '...', token: '...', mode: 'fullscreen', container: '#chat' })`.
 
-### iframe query parameters
+### URL parameters
 
-The SDK and the drawer build URLs against `/embed/{type}/{id}` with these parameters:
+The embed URL accepts these parameters, useful when editing a snippet by hand:
 
-| Parameter | Description |
+| Parameter | Notes |
 | --- | --- |
-| `token` | Team API key; alternatively send an `Authorization: Bearer <key>` header |
-| `mode` | `fullscreen` (default when absent) or `bubble`; `mobile` and `fullscreen` both render edge-to-edge in the container |
-| `theme` | `light` / `dark`; absent or `auto` follows the system |
-| `color` | Primary color (the SDK includes it, but the embed page does not read it, so it does not affect the iframe's internal palette) |
+| `token` | API key; required |
+| `mode` | `fullscreen` (default) or `bubble`; `mobile` and `fullscreen` both fill the container |
+| `theme` | `light` / `dark`; missing or `auto` follows the system |
+| `color` | The SDK passes the primary color, but the embed page currently ignores it, so it does not affect internal colors |
 
 <Callout type="info">
-  Embed history is stored in the visitor's browser. With `show_history` off the embed hides the history sidebar; with `allow_new` off visitors cannot start a new conversation.
+The embed page stores history in the visitor's browser. Turning off **Show History** hides the sidebar, and turning off **Allow New** prevents visitors from starting new conversations.
 </Callout>
 
----
+<Callout type="info">
+The above covers website integration. To call the same embedding capabilities (chat, runs, uploads, history) from your own backend or a native client, see the [Embed API](/api/embed).
+</Callout>
 
-## 4. Security and Access Control
+## Access and security
 
-- **API keys only**: `/api/v1/embed/**` accepts only `clou_...` API keys (via the `token` query parameter or `Authorization: Bearer`), never user JWTs.
-- **Keys belong to a user**: every API key is bound to the user who created it (`APIKey.user`), and the embedded session runs as that user.
-- **`scopes` are not enforced**: the `scopes` field is stored and returned, but the authorization code never reads it, so it cannot narrow access.
-- **Narrow access via bindings**: an API key is bound to accessible objects through the `agents` / `workflows` many-to-many relations. A key with bindings can reach **only** those objects; a key with **no** bindings can reach everything (backward compatibility) — so always bind an embed key to its target Agent/workflow.
-- **Three server-side checks**: the target must match the key's binding (otherwise `403 api_key_no_agent_access`), must be published (otherwise `404 agent_not_found`), and must have embedding enabled (otherwise `403 embed_not_enabled`), on top of the domain check.
-- **Rate limiting**: the key's `rate_limit` (default `1000`/minute; `0` means unlimited) is **not currently enforced** in the request path; embedded chats are bounded by provider rate limits and team model quotas.
-- **Isolated scope**: embedded sessions cannot reach team model management, site settings, or admin-only endpoints.
+- **API keys only**: the embed page never uses an account session. Without a key it cannot load (it keeps showing a loader); with an invalid, deactivated, or expired key, requests are rejected and report an invalid or expired key.
+- **The key belongs to its creator**: embed sessions run as the user who created the key, so the knowledge bases they can read and the tools they can call follow that user. Do not create embed keys from an over-privileged personal account.
+- **Key binding narrows access**: with **Allowed Agents / Allowed Workflows** ticked, the key reaches only those objects; empty means unrestricted. Always tick them.
+- **Layered checks**: the target must match the key binding, be published, and have embedding enabled, and then pass the domain check. The corresponding messages are "This API key does not have access to the requested Agent", "Agent not found", "Embedding is not enabled for this resource", and "This domain is not allowed to embed this resource".
+- **Rate limit**: the key's rate limit currently does not apply to embed requests; effective throughput is bounded by the team model quota and the provider's own limits.
+- **Permission isolation**: embed sessions cannot reach team model management, site settings, or other admin features.
 
-## API Endpoints
+## Troubleshooting
 
-The embed endpoints live under `/api/v1/embed` and accept API-key authentication only:
+### The embed spins forever or reports an invalid key
 
-```http
-# Agent
-GET  /api/v1/embed/agents/{agent_id}/info
-POST /api/v1/embed/agents/{agent_id}/chat/stream
-POST /api/v1/embed/agents/{agent_id}/chat/runs
-GET  /api/v1/embed/agents/{agent_id}/chat/runs/{run_id}/stream
-GET  /api/v1/embed/agents/{agent_id}/conversations/{conversation_id}/messages
-POST /api/v1/embed/agents/{agent_id}/upload/file
+1. Check that the snippet's `token` is complete (starts with `clou_`) and is not an account session token.
+2. Check whether the key was deactivated or expired; expired keys require a new key and an updated snippet.
+3. Confirm the target is published and **Enable Embedding** is on.
+4. Confirm your site's domain is listed under **Allowed Domains**.
 
-# Workflow
-GET  /api/v1/embed/workflows/{workflow_id}/info
-POST /api/v1/embed/workflows/{workflow_id}/run
-```
+### The bubble does not appear
+
+1. The `embed.js` URL must point at the Clouisle deployment you actually use.
+2. Both `id` and `token` must be present.
+3. Re-initializing on the same page replaces the previous instance; only the last one stays.
+
+### Visitors lose their history
+
+Embed history lives in the visitor's browser: clearing browser data, switching devices, or using a private window loses it. For cross-device history, use the in-app run page instead.
+
+## Related pages
+
+- [Embed API](/api/embed) — embedded chat, workflow runs, uploads, and history endpoints
+- [API Keys](/usage/guides/administration/api-keys) — create, bind, deactivate, and rotate keys
+- [Create and Orchestrate an Agent](/usage/guides/agent/create-agent) — orchestration, publishing, and tool configuration
+- [Conversations and Chats](/usage/guides/agent/conversation) — how citations, attachments, and artifacts appear in a session

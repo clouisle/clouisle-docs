@@ -33,6 +33,10 @@ icon: Wrench
 | GET | `/api/v1/tools/shared-with-me?team_id={team_id}` | List tools shared with a team |
 | POST | `/api/v1/tools/mcp/list-tools` | Discover an MCP server's tool definitions |
 | POST | `/api/v1/tools/database/test-connection` | Test database connectivity |
+| GET | `/api/v1/tools/web-search/engines` | List the site-enabled search engines (identifiers only) |
+| GET | `/api/v1/admin/tools/web-search/config` | Read the site web search configuration (secrets are reported as flags) |
+| PUT | `/api/v1/admin/tools/web-search/config` | Update the site web search configuration |
+| POST | `/api/v1/admin/tools/web-search/test` | Run one search against the saved site configuration |
 
 ## Authentication
 
@@ -94,11 +98,18 @@ curl -X GET "https://your-domain.com/api/v1/tools?category=search" \
             "required": true
           },
           {
-            "name": "max_results",
+            "name": "num_results",
             "type": "integer",
             "description": "Maximum number of results",
             "required": false,
             "default": 5
+          },
+          {
+            "name": "search_engine",
+            "type": "string",
+            "description": "auto or a site-enabled engine",
+            "required": false,
+            "default": "auto"
           }
         ],
         "is_enabled": true,
@@ -255,7 +266,8 @@ Execute a tool once by name with arguments. **Note:** There is no standalone `PO
   "name": "web_search",
   "arguments": {
     "query": "artificial intelligence",
-    "max_results": 5
+    "num_results": 5,
+    "search_engine": "auto"
   }
 }
 ```
@@ -267,6 +279,10 @@ Execute a tool once by name with arguments. **Note:** There is no standalone `PO
 | `name` | string | Yes | Tool name |
 | `arguments` | object | No | Tool arguments |
 
+<Callout type="info" title="web_search arguments">
+  `web_search` takes `query`, `num_results` (default `5`, max `10`), and `search_engine` (`auto` or an enabled engine). The test page lists only site-enabled engines; a disabled engine or a missing credential yields `data.success: false` with an error message and no automatic fallback.
+</Callout>
+
 ### Request Example
 
 ```bash
@@ -277,7 +293,8 @@ curl -X POST "https://your-domain.com/api/v1/tools/test" \
     "name": "web_search",
     "arguments": {
       "query": "artificial intelligence",
-      "max_results": 5
+      "num_results": 5,
+      "search_engine": "auto"
     }
   }'
 ```
@@ -293,11 +310,16 @@ curl -X POST "https://your-domain.com/api/v1/tools/test" \
     "name": "web_search",
     "success": true,
     "result": {
+      "query": "artificial intelligence",
+      "success": true,
+      "search_engine": "tavily",
       "results": [
         {
           "title": "Artificial Intelligence - Wikipedia",
           "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
-          "snippet": "Artificial intelligence (AI) is intelligence demonstrated by machines..."
+          "content": "Artificial intelligence (AI) is intelligence demonstrated by machines...",
+          "score": 0.93,
+          "citation_id": "web_..."
         }
       ]
     },
@@ -674,7 +696,7 @@ DELETE /api/v1/tools/{tool_id}/share/{team_id}
 
 ## Tool Configuration (Credentials)
 
-Tool configurations store credentials (API keys, tokens) for builtin or database tools, either globally (superusers only) or per team.
+Tool configurations store credentials (API keys, tokens) for **builtin tools**, either globally (superusers only) or per team. Custom tools keep credentials on the tool record instead, and web search now uses the site-level configuration.
 
 ```
 GET    /api/v1/tools/config?team_id={team_id}
@@ -687,15 +709,15 @@ DELETE /api/v1/tools/config/{tool_name}?team_id={team_id}
 | Parameter | Location | Required | Description |
 | --- | --- | --- | --- |
 | `team_id` | Query | No | Team UUID; omit to operate on the global configuration (superusers only) |
-| `tool_name` | Path | Yes (get/put/delete) | Tool name, e.g. `web_search` |
+| `tool_name` | Path | Yes (get/put/delete) | Tool name |
 
 Create body:
 
 ```json
 {
-  "tool_name": "web_search",
+  "tool_name": "example_tool",
   "credentials": {
-    "TAVILY_API_KEY": "tvly-..."
+    "API_KEY": "..."
   }
 }
 ```
@@ -705,7 +727,7 @@ Update body contains only `credentials`:
 ```json
 {
   "credentials": {
-    "TAVILY_API_KEY": "tvly-updated"
+    "API_KEY": "..."
   }
 }
 ```
@@ -716,6 +738,100 @@ Permissions and behavior:
 - Without `team_id`, both reads and writes are limited to superusers.
 - Reading a team configuration for a known builtin tool name that has no record yet creates an empty configuration automatically; an unknown name returns `404`.
 - Deleting returns `data: null`.
+
+<Callout type="warn">
+  The generic tool-config endpoints do **not** accept `web_search`: `GET/PUT/DELETE /api/v1/tools/config/web_search` return `400 web_search_site_managed`, and the list endpoint filters the record out. Search credentials live only in the site configuration described below.
+</Callout>
+
+## Site Web Search Configuration
+
+The site owns exactly one web search configuration; teams and Agents can only choose among enabled engines.
+
+### Read the configuration
+
+```
+GET /api/v1/admin/tools/web-search/config
+```
+
+Permission: `admin:capability:read`.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "default_engine": "tavily",
+    "tavily_enabled": true,
+    "bocha_enabled": false,
+    "searxng_enabled": false,
+    "deepseek_enabled": false,
+    "tavily_api_key_configured": true,
+    "bocha_api_key_configured": false,
+    "deepseek_api_key_configured": false,
+    "searxng_base_url": "",
+    "searxng_auth_token_configured": false,
+    "legacy_credentials_present": false
+  },
+  "msg": "success"
+}
+```
+
+Secrets appear only as `*_configured` booleans; the endpoint never returns plaintext. `legacy_credentials_present` signals archived legacy team/Agent credentials from an upgrade. When the site has never saved a configuration, `default_engine` reads back as the fallback `tavily`, all four `*_enabled` flags and every `*_configured` flag are `false`, and `searxng_base_url` is an empty string.
+
+### Update the configuration
+
+```
+PUT /api/v1/admin/tools/web-search/config
+```
+
+Permission: `admin:capability:update`. Request fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `default_engine` | string | Yes | `tavily`, `bocha`, `searxng`, or `deepseek`; must be an enabled engine |
+| `tavily_enabled` | boolean | Yes | Enable Tavily |
+| `bocha_enabled` | boolean | Yes | Enable Bocha |
+| `searxng_enabled` | boolean | Yes | Enable the self-hosted SearXNG |
+| `deepseek_enabled` | boolean | Yes | Enable DeepSeek Search |
+| `tavily_api_key` | string/null | No | Write-only, at most `1024` characters |
+| `bocha_api_key` | string/null | No | Write-only, at most `1024` characters |
+| `deepseek_api_key` | string/null | No | Write-only, at most `1024` characters |
+| `searxng_base_url` | string/null | No | Instance root, at most `2048` characters; may include a reverse-proxy subpath but not `/search`, a query string, a fragment, or userinfo |
+| `searxng_auth_token` | string/null | No | Write-only; optional bearer, requires an HTTPS base URL |
+
+Secret partial-update semantics: **omitted or `null` keeps** the stored value, **an empty string `""` clears** it, and a non-empty string replaces it. `searxng_base_url` also supports clearing with an empty string. The body is strict (`extra="forbid"`), so unknown fields fail validation.
+
+Save-time validation:
+
+- Enabling `tavily` / `bocha` / `deepseek` without its secret → `web_search_engine_not_configured`.
+- Enabling `searxng` without a base URL → `web_search_searxng_base_url_required`; a token with a non-HTTPS base URL → `web_search_searxng_https_required`.
+- An invalid `default_engine` or one that points at a disabled engine → `web_search_default_engine_invalid` / `web_search_default_engine_disabled`.
+- A malformed SearXNG base URL → `web_search_searxng_base_url_invalid`; changing the base URL while a token is stored requires replacing or clearing that token in the same request, otherwise `web_search_searxng_token_confirmation_required`.
+- An enabled SearXNG URL passes the SSRF check on save and on every request.
+
+### Test the saved configuration
+
+```
+POST /api/v1/admin/tools/web-search/test
+```
+
+Permission: `admin:capability:execute`.
+
+```json
+{
+  "query": "Shanghai weather today",
+  "engine": "auto"
+}
+```
+
+`query` is `1-1000` characters and must not be blank; `engine` defaults to `auto` and may name a specific engine. The response `data` mirrors a tool run: `query`, `success`, `search_engine`, and `results` (`title`, `url`, `content`, `score`, `citation_id`), with `error` and `success: false` on failure. It uses the **saved** site configuration and never accepts ad-hoc secrets.
+
+### List available engines
+
+```
+GET /api/v1/tools/web-search/engines
+```
+
+Permission: `tool:read`. Returns only the identifiers of site-enabled engines, for example `["tavily", "deepseek"]`; `auto`, credential state, and the SearXNG URL never appear here. Agent and workflow engine dropdowns are built from this endpoint.
 
 ## MCP & Database Tool Diagnostics
 
@@ -851,7 +967,7 @@ for tool in tools:
 result = test_tool(
     "YOUR_TOKEN",
     "web_search",
-    {"query": "artificial intelligence", "max_results": 5}
+    {"query": "artificial intelligence", "num_results": 5, "search_engine": "auto"}
 )
 print(f"Search results: {result['results']}")
 ```
@@ -913,7 +1029,7 @@ tools.forEach(tool => {
 const result = await testTool(
   'YOUR_TOKEN',
   'web_search',
-  { query: 'artificial intelligence', max_results: 5 }
+  { query: 'artificial intelligence', num_results: 5, search_engine: 'auto' }
 );
 console.log('Search results:', result.results);
 ```

@@ -1,367 +1,306 @@
 ---
-title: Teams & Members
-description: Create teams, manage member roles, authorize models, and transfer ownership
+title: Teams and Members
+description: Create teams, manage member roles, review model authorization, and transfer ownership
 icon: UsersRound
 ---
 
-A team is Clouisle's resource isolation boundary: agents, workflows, knowledge bases, tools, and skills all belong to a team. Every in-team operation must pass two layers — a **global permission code** and a **team membership role gate**.
+A team is Clouisle's resource isolation boundary: Agents, workflows, knowledge bases, tools, and Skills all belong to a team. Every operation inside a team must pass two layers of checks: **global role permissions** and the **team member role**.
 
-This page covers creating teams, adding/changing/removing members, leaving, transferring ownership, and deleting a team, plus the exact failure reason for each step. For the full role model see [Roles & Permissions](./roles-permissions.mdx) and the [Permissions & Roles Reference](/reference/permissions).
+This page covers creating teams, adding/changing/removing members, leaving, transferring ownership, and deleting a team, plus what each step shows when it fails. For the full role model see [Roles & Permissions](./roles-permissions.mdx) and the [permissions and roles reference](../../../reference/permissions.mdx).
 
-## Create a Team
+## Creating a Team
 
 <Callout type="info">
-  Creating a team requires the global `admin:team:create` permission and happens on the dashboard **Teams** page (`/teams`). Members and Viewers cannot see that entry (`/teams` requires `admin:team:read`).
+  Creating a team requires team management permission in the Admin area. The entry point is **Admin** → **Teams**. Ordinary members cannot see it.
 </Callout>
 
 1. Go to **Admin** → **Teams**.
 2. Click **Create Team** and fill in:
-   - **Team Name** (required, globally unique; a duplicate returns `team_name_exists`)
+   - **Team Name** (required, globally unique; a duplicate reports that the team name already exists)
    - **Description** (optional)
-   - **Team Avatar** (optional, uploaded from your machine; JPEG/PNG/GIF/WebP/SVG/ICO, recommended 200×200, max 10 MB; the upload result is stored in `avatar_url`)
-3. Save; this calls `POST /api/v1/admin/teams`.
-4. The creator automatically becomes the team's **owner** (a `TeamMember` row with `role=owner` is written too).
+   - **Team Avatar** (optional, uploaded from your machine; JPEG/PNG/GIF/WebP/SVG/ICO, 200×200 recommended, 10 MB limit)
+3. Save.
+
+The creator automatically becomes the team **owner**.
 
 <Callout type="warn">
-  **Not implemented / Roadmap**: assigning another owner at creation, adding initial members, invite/join settings, and resource quotas are not part of the creation flow. Members join afterwards via **Add Member**; ownership moves via **Transfer Ownership**.
+  **Not implemented / Roadmap**: specifying another owner at creation, adding initial members, invite/join settings, and resource quotas are not part of the creation flow. Members join afterwards through **Add Member**; ownership moves through **Transfer Ownership**.
 </Callout>
 
-After creating it, select it in the team switcher. Confirm the current team when creating new agents, workflows, and knowledge bases — otherwise the resource lands in the wrong team and can only be fixed by cross-team sharing (tools only) or by recreating it.
+After creation, select the team in the team switcher. When creating Agents, workflows, or knowledge bases, confirm the current team — otherwise the resource lands in the wrong team and can only be corrected by recreating it.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/team-management.png" alt="Team management page" />
   <figcaption>Team management page</figcaption>
 </figure>
 
-## The Two Team Surfaces
+## The Two Team Views
 
-The team switcher exposes two entries with completely different permissions and capabilities:
+The team switcher offers two entry points with completely different permissions and capabilities:
 
-| Entry | Route | Requires | Purpose |
+| Entry | Location | Requires | Purpose |
 | --- | --- | --- | --- |
-| **Manage All Teams (Admin)** | `/teams` | global `admin:team:read` | List every team (paginated, searchable by name/description, `page_size=50` by default), create, edit, delete, bulk delete; backend is `GET/POST/DELETE /api/v1/admin/teams` |
-| **Manage Current Team** | `/app/team` | the page itself only requires membership (`team:read`); the entry link appears only for a superuser or a team owner/admin holding `team:manage` | Member management, basic team info editing, leaving, transferring ownership, viewing authorized models (read-only) |
+| **Manage all teams (system admin)** | **Admin** → **Teams** (`/teams`) | Team viewing permission in the Admin area | List every team (paged, searchable by name/description), create, edit, delete, bulk delete |
+| **Manage current team** | `/app/team` | Membership in the team; the entry link only appears for Super Admins or team owners/admins | Member management, editing team basics, leaving, transferring ownership, viewing authorized models (read-only) |
 
-The **model authorization tab on `/app/team` is read-only**: it shows the team's authorized models, enabled state, and today's usage/limit, and states that authorization is assigned by a system administrator. Every model-authorization write requires a superuser (see below).
+The **Model Authorization** tab on `/app/team` is **read-only**: it shows the models authorized for the team, their enable state, and today's usage/limits, and notes that a system administrator assigns them. Every write operation on model authorization requires a Super Admin (see below).
 
 ## Team Details and Members
 
 ### Team Overview
 
-The `/app/team` header shows the team avatar, name, a `Default Team` badge (`is_default`), and a badge with **your role inside this team**. The members tab lists username, email, role, and join date, with local filtering by username/email.
+The `/app/team` header shows the team avatar, name, a **default team** badge, and a badge for **your role in this team**. The Members tab lists avatar, username, email, and role, and filters locally by username/email.
 
 <Callout type="warn">
-  **Not implemented / Roadmap**: team details do not show resource quotas (agent/workflow/storage limits) or usage activity (conversations, runs, API calls), and there is no per-team notification setting or separate resources tab.
+  **Not implemented / Roadmap**: team details do not show resource quotas (Agent/workflow/storage limits) or usage activity (conversation counts, run counts, API calls), and there are no team-level notification settings or separate resource tabs.
 </Callout>
 
 ### Model Authorization
 
-Model authorization is a **superuser-only** capability; every write endpoint requires `get_current_active_superuser`:
+Model authorization is **Super Admin only**: team members can only view it. Authorizing, bulk authorizing, changing quotas, and revoking are done by an administrator in **Admin** → **Teams**, or reviewed (read-only) on the **Model Authorization** tab under **Manage current team**.
 
-| Operation | Endpoint | Permission |
-| --- | --- | --- |
-| List the team's authorized models | `GET /api/v1/teams/{team_id}/models` | team membership (or superuser) |
-| Authorize a model | `POST /api/v1/teams/{team_id}/models` | superuser |
-| Bulk authorize | `POST /api/v1/teams/{team_id}/models/batch` | superuser |
-| Change quota / enabled state / priority | `PUT /api/v1/teams/{team_id}/models/{model_id}` | superuser |
-| Revoke an authorization | `DELETE /api/v1/teams/{team_id}/models/{model_id}` | superuser |
-| Bulk revoke | `DELETE /api/v1/teams/{team_id}/models/batch` | superuser |
-| List models available to authorize | `GET /api/v1/teams/{team_id}/available-models` | superuser |
+Configurable values include daily/monthly token limits, daily/monthly request limits, enable state, and priority. Granting or revoking sends an in-app notification to the team. See [Managing Team Models](../models/manage-models.mdx) for details.
 
-The dashboard team detail's **Model Authorization** tab offers the same operations, with buttons gated on `is_superuser || admin:model:update`. Configurable fields include daily/monthly token limits, daily/monthly request limits, `is_enabled`, and `priority`. Granting or revoking sends a `team.model_granted` / `team.model_revoked` notification to the team. See [Manage team models](../models/manage-models.mdx) for details.
-
-## Add Members
+## Adding Members
 
 <Callout type="info">
-  Requires the global `team:manage` permission and `owner`/`admin` inside that team (`require_team_admin=True`). Members and Viewers get 403 `team_admin_required`.
+  Requires team management permission and that you are **Owner** or **Team Admin** in this team. Ordinary and read-only members cannot see the add button, and forced attempts are rejected.
 </Callout>
 
-1. Open the **Members** tab of `/app/team` and click **Add Member** (shown only when you can manage the team).
-2. In the "username or email" field, enter the target user's **complete username or email**.
-3. Pick a role: **Admin**, **Member**, or **Viewer** (**Owner** is not offered).
-4. Confirm; this calls `POST /api/v1/teams/{team_id}/members`.
+1. Open the **Members** tab of `/app/team` and click **Add Member** (shown only when you have management capability).
+2. Enter the target user's **full username or email** in "Username or email".
+3. Choose a role: **Admin**, **Member**, or **Viewer** (**Owner** is not offered).
+4. Confirm.
 
-Matching rules and backend validation:
+Matching and validation:
 
 | Case | Result |
 | --- | --- |
-| Exact username match, or case-insensitive exact email match | user found |
-| Nothing matches | `user_not_found`, HTTP 404 |
-| Only a fragment (e.g. the prefix `john`) | no match, 404 — there is **no fuzzy search or user picker** |
-| The user is already a member | `already_team_member` |
-| Role set to `owner` | `cannot_add_as_owner` |
-| Role set to `admin` but the target lacks global `team:manage` | `operation_not_permitted`, HTTP 403 (`permission: team:manage`) |
+| Exact username match, or case-insensitive exact email match | User found |
+| No match | Reports that the user does not exist — there is **no fuzzy search or picker** |
+| Only a fragment (e.g. the prefix `john`) | No match; the same "user does not exist" message |
+| The user is already a member | Reports that they are already a team member |
+| Attempting to choose Owner | Not allowed; Add Member cannot assign Owner |
+| Choosing Admin while the target lacks global team management permission | Operation rejected |
 
-<Callout type="error" title="Grant the global role before making someone a team admin">
-  Adding a user who lacks global `team:manage` as a team `admin` is rejected outright. The order must be: first grant them the **Team Admin** role (or any role with `team:manage`) in **Admin** → **Users**, then set them as team `admin`.
+<Callout type="error" title="Grant the global role before team Admin">
+  Adding a user who lacks global team management permission as a team **Admin** is rejected outright. The order must be: first give them the **Team Admin** role (or any role that includes team management) under **Admin** → **Users**, then set them to **Admin** in the team.
 </Callout>
 
-On success the new member receives a `team.member_added` notification and the team gets a summary notification; membership is **effective immediately** — there is no invitation/accept flow.
+After a successful add: the new member receives a team notification and the team receives a summary notification; membership takes effect **immediately** and there is no invite/accept flow.
 
-## Change Member Roles
+## Changing a Member's Role
 
 <Callout type="info">
-  Only the team **owner** (or a superuser) can change roles. A team `admin` gets 403 `team_owner_required`.
+  Only the team **Owner** (or a Super Admin) can change roles. A team **Admin** cannot change member roles.
 </Callout>
 
-1. Find the target member in the list and open the **...** menu.
-2. Choose **Change Role** and pick **Admin** / **Member** / **Viewer**.
-3. Save; this calls `PUT /api/v1/teams/{team_id}/members/{user_id}`.
+1. Find the member in the list and open the **...** menu.
+2. Choose **Change Role** and select **Admin** / **Member** / **Viewer**.
+3. Save.
 
-Backend validation order:
+Validation rules:
 
 | Case | Result |
 | --- | --- |
-| Caller is not the owner (and not a superuser) | `team_owner_required`, HTTP 403 |
-| Target is currently `owner` | `cannot_change_owner_role` — the owner's role cannot be modified; use Transfer Ownership |
-| New role is `owner` | `cannot_promote_to_owner` — promoting to owner only happens via Transfer Ownership |
-| New role is `admin` but the target lacks global `team:manage` | `operation_not_permitted`, HTTP 403 |
-| Target is not a member of the team | `team_member_not_found`, HTTP 404 |
+| Caller is not Owner (or Super Admin) | Operation rejected |
+| Target member is currently Owner | The Owner's role cannot be changed; use Transfer Ownership |
+| New role is Owner | Not allowed; promoting to owner requires Transfer Ownership |
+| New role is Admin while the target lacks global team management permission | Operation rejected |
+| Target is not a team member | Reports that the member does not exist |
 
-On success the target receives a `team.role_changed` notification.
+A successful change notifies the target user.
 
 <Callout type="warn">
-  Member role changes are **not audited**: team audit coverage is limited to `create_team` / `update_team` / `delete_team` / `add_team_member` / `remove_team_member` plus the team model authorization actions.
+  Role changes are **not written to the audit log**: team auditing covers creating/updating/deleting teams, adding/removing members, and team model authorization only.
 </Callout>
 
-**The frontend hides the menu as well**: `canActOnMember` requires "you are not the target" and "you are the owner, or the target is not an admin". So a team `admin` never sees the action menu for other admins or the owner, and nobody sees it on their own row.
+**The interface also hides buttons**: you cannot act on yourself, and a team Admin cannot see the menus for other Admins and the Owner.
 
-## Remove Members
+## Removing Members
 
-`DELETE /api/v1/teams/{team_id}/members/{user_id}` has two paths:
+| Scenario | Notes |
+| --- | --- |
+| Removing someone else | Requires team management permission and Owner/Admin; the menu is also subject to the "cannot act on another Admin/Owner" rule above |
+| Removing yourself | Any member can do this; it is equivalent to leaving the team |
 
-| Scenario | Required permission | Notes |
-| --- | --- | --- |
-| Remove someone else | global `team:manage` + team owner/admin | the frontend menu is likewise limited by `canActOnMember` |
-| Remove yourself | `team:read` only | self-removal needs no management permission (equivalent to leaving) |
+Shared limits: **the Owner can never be removed** (including by themselves); a target who is not a member reports that the member does not exist.
 
-Shared limits: **an owner can never be removed** (`cannot_remove_owner`, including by themselves); if the target is not a member you get `team_member_not_found` (404).
+After removal: the user immediately loses access to all team resources; only the membership is deleted — **their conversations, API keys, and personal resources are not deleted** (conversations become inaccessible because team access is gone). Both the team and the removed user receive notifications. They can be added again later.
 
-After removal the user immediately loses access to all of that team's resources; only the membership row is deleted, so **their conversations, API keys, and personal resources are not deleted** (conversations simply become inaccessible without team access). The team receives a `team.member_removed` notification and so does the removed user. They can be added again later.
-
-## Leaving Teams
+## Leaving a Team
 
 1. `/app/team` → **Settings** tab → danger zone, click **Leave Team**.
-2. Confirm in the dialog; this calls `POST /api/v1/teams/{team_id}/leave` (requires only `team:read`).
+2. Confirm in the dialog.
 
 <Callout type="error">
-  **An owner cannot leave**: the endpoint returns `owner_cannot_leave`, and the frontend shows "As the team owner, you cannot directly leave the team. Please transfer ownership first." You must transfer ownership to leave. Also, the **default team** (`is_default=true`) hides the leave button in the UI — but that is frontend behaviour; the endpoint itself does not reject on `is_default`.
+  **An owner cannot leave**: the danger zone says "As the team owner, you cannot leave the team directly — transfer ownership first." You must transfer ownership first. The **default team** also hides the leave button — that is interface behavior, not a permission issue. Changing the default team is done by an administrator in site settings.
 </Callout>
 
-After leaving you lose access to that team's resources; existing conversations are preserved. The team list refreshes and the page returns to `/app`.
+After leaving you lose access to the team's resources; existing conversations are kept. The team list refreshes and the page returns to `/app`.
 
-## Transfer Ownership
+## Transferring Ownership
 
 <Callout type="info">
-  Requires global `team:manage` and `owner`/`admin` inside the team, and you must be the **owner** (or a superuser). A team admin gets 403 `team_owner_required`.
+  Requires team management permission and that you are **Owner** in this team (or a Super Admin). A team Admin does not see this menu item.
 </Callout>
 
-1. Open the member list on `/app/team`, find the target member, **...** → **Transfer Ownership** (only owners see this item).
-2. Confirm in the dialog; this calls `POST /api/v1/teams/{team_id}/transfer-ownership?new_owner_id={user_id}`.
+1. Open the member list at `/app/team`, find the target member, then **...** → **Transfer Ownership** (only the Owner sees this item).
+2. Confirm in the dialog.
 
-Backend rules (in order):
+Rules (applied in order):
 
-1. The target must be a member of the team, otherwise `team_member_not_found` (404).
-2. The target must **already hold global `team:manage`**, otherwise `operation_not_permitted` (403). Again: grant the global role first.
-3. If the target is the current owner → `cannot_promote_to_owner` (400).
-4. The previous owner's membership role is **demoted to `admin`**, the target becomes `owner`, and `Team.owner` is updated accordingly.
-5. Both owners receive a `team.ownership_transferred` notification.
+1. The target must be a team member, otherwise it reports that the member does not exist.
+2. The target must **already hold global team management permission**, otherwise the operation is rejected. Likewise, grant the global role first, then transfer.
+3. The target is the current Owner → operation rejected.
+4. The original Owner's member role is **downgraded to Admin**, the target becomes **Owner**.
+5. The old and new Owner each receive a notification.
 
 <Callout type="warn">
-  Transferring is instant and irreversible from your side: the former owner keeps only admin rights and **cannot revert it themselves** (changing roles requires being the owner). Confirm the target before proceeding.
+  The transfer is immediate and irreversible: the former Owner keeps only Admin rights and **cannot change it back** (changing roles requires Owner). Confirm the target before proceeding.
 </Callout>
 
-## Edit Team Info
+## Editing Team Information
 
-Requires the global `team:update` permission and `owner`/`admin` inside the team (`PUT /api/v1/teams/{team_id}`).
+Requires team management permission and that you are Owner/Admin in the team.
 
-- `/app/team` → **Settings** tab: change team name, description, and avatar (inputs are disabled when you lack the permission).
-- The dashboard `/teams` edit dialog: the same fields, requiring `admin:team:update`.
+- `/app/team` → **Settings** tab: change the team name, description, and avatar (inputs are disabled when validation fails).
+- The edit dialog in **Admin** → **Teams**: the same fields, requiring team edit permission in the Admin area.
 
-Fields and constraints: `name` is required and globally unique (duplicate → `team_name_exists`); `description` is optional; `avatar_url` is written by the upload component. There is **no** team slug, alias, or domain field.
+Fields and constraints: the name is required and globally unique (a duplicate reports that the team name already exists); the description is optional; the avatar is written by the upload component. There is **no** team slug, alias, or domain field.
 
-## Delete a Team
+## Deleting a Team
 
 <Callout type="error">
-  Deleting a team is irreversible and only possible from the dashboard `/teams`, requiring `admin:team:delete`. A team owner has **no** delete entry on `/app/team`.
+  Deleting a team is irreversible and destructive, and can only be done in **Admin** → **Teams**. A team Owner has **no** delete entry under `/app/team`.
 </Callout>
 
-1. In the `/teams` list open the target team's **...** menu → **Delete Team** (the default team does not show the item).
-2. Confirm in the dialog; this calls `DELETE /api/v1/admin/teams/{team_id}`. The dialog only asks for confirmation — **you do not type the team name**.
-3. The default team (`is_default=true`) is rejected: `cannot_delete_default_team`.
+1. In the team list, open the target team's **...** → **Delete Team** (not shown for the default team).
+2. Confirm in the dialog — it only asks for confirmation, you do **not** type the team name.
+3. The default team is rejected: the default team cannot be deleted.
 
-Deletion impact (model FK cascades, verified in `models/*.py`):
+Deletion impact:
 
-| Deleted | Preserved |
+| Deleted | Kept |
 | --- | --- |
-| The team record and all `TeamMember` rows | Members' user accounts |
-| The team's agents, workflows, knowledge bases, tools, skills, assets | Audit logs (for compliance) |
-| Team model authorizations (`TeamModel`), tool configs, notifications, import sessions | Members' account data (API keys belong to the user, not the team) |
-| Agent conversations and their messages (cascading with the agents) | — |
+| The team record and all member relationships | Members' user accounts |
+| The team's Agents, workflows, knowledge bases, tools, Skills, assets | Audit logs (compliance) |
+| Team model authorizations, tool configuration, notifications, import sessions | Members' account data (API keys belong to the user, not the team) |
+| Agent conversations and their messages (cascading with the Agent) | — |
 
 ## Team Roles and Permissions
 
-A team role is one of four fixed values — `owner` / `admin` / `member` / `viewer` — and carries **no permission codes**; it only acts as the team gate. Actual capability = global role permissions ∩ team gate.
+Team roles are four fixed values — **Owner** / **Admin** / **Member** / **Viewer** — and **carry no permission list of their own**; they act only as team gates. Effective capability is the intersection of global role permissions and the team gate.
 
 ### Gate Rules
 
-- `TEAM_MANAGEMENT_PERMISSIONS` = `team:update`, `team:manage`, `team:delete`, `tool:delete`: these actions require both the global permission code **and** `owner`/`admin` in that team.
-- A team `viewer` may only use `team:read`, `agent:read`/`agent:chat`, `workflow:read`/`workflow:run`/`workflow:execute`, `kb:read`/`kb:test`, `tool:read`/`tool:execute`, `skill:read`/`skill:execute`, `conversation:read`; every other write returns 403 `operation_not_permitted`.
-- A superuser (`is_superuser`) bypasses membership and the team gate entirely.
+- Team management actions (editing team info, managing members, deleting tools, and so on) require both the corresponding global permission **and** Owner/Admin in the team.
+- A team **Viewer** can only view and execute (chat, run workflows, search knowledge bases, execute tools and Skills); every other write is rejected.
+- Super Admins bypass membership and team gates entirely.
 
 ### Team Management Permissions
 
-| Action | Owner | Team Admin | Member | Viewer |
+| Operation | Owner | Team Admin | Member | Viewer |
 | --- | :-: | :-: | :-: | :-: |
-| View team and members | ✓ | ✓ | ✓ | ✓ |
+| View the team and members | ✓ | ✓ | ✓ | ✓ |
 | Edit team info (name/description/avatar) | ✓ | ✓ | ✗ | ✗ |
 | Add members | ✓ | ✓ | ✗ | ✗ |
 | Change member roles | ✓ | ✗ | ✗ | ✗ |
-| Remove members | ✓ | ✓ (not other admins/owner) | ✗ | ✗ |
+| Remove members | ✓ | ✓ (not other Admins/Owner) | ✗ | ✗ |
 | Leave the team | ✗ (transfer first) | ✓ | ✓ | ✓ |
 | Transfer ownership | ✓ | ✗ | ✗ | ✗ |
-| Delete the team | ✗ (needs dashboard `admin:team:delete`) | ✗ | ✗ | ✗ |
+| Delete the team | ✗ (Admin area) | ✗ | ✗ | ✗ |
 
 ### In-Team Resource Permissions
 
-| Action | Owner | Team Admin | Member | Viewer |
+| Operation | Owner | Team Admin | Member | Viewer |
 | --- | :-: | :-: | :-: | :-: |
-| Create agents / workflows / knowledge bases | ✓ | ✓ | ✓ | ✗ |
-| Edit **others'** agents / workflows / knowledge bases | ✓ | ✓ | ✗ | ✗ |
-| Delete agents, publish agents and workflows | ✓ | ✓ | ✗ | ✗ |
-| Chat with agents, run workflows | ✓ | ✓ | ✓ | ✓ |
-| Create/edit your own tools and skills | ✓ | ✓ | ✓ | ✗ |
-| Edit **others'** tools / skills | ✓ | ✓ | ✗ | ✗ |
-| Delete tools | ✓ | ✓ | ✗ (team gate rejects, even though Member holds `tool:delete`) | ✗ |
-| Search/test knowledge bases, upload/rename/delete documents | ✓ | ✓ | ✓ | read-only search |
-| Execute tools and skills | ✓ | ✓ | ✓ | ✓ |
+| Create Agents / workflows / knowledge bases | ✓ | ✓ | ✓ | ✗ |
+| Edit **others'** Agents / workflows / knowledge bases | ✓ | ✓ | ✗ | ✗ |
+| Delete Agents, publish Agents and workflows | ✓ | ✓ | ✗ | ✗ |
+| Chat with Agents, run workflows | ✓ | ✓ | ✓ | ✓ |
+| Create/edit your own tools and Skills | ✓ | ✓ | ✓ | ✗ |
+| Edit **others'** tools / Skills | ✓ | ✓ | ✗ | ✗ |
+| Delete tools | ✓ | ✓ | ✗ | ✗ |
+| Search/test knowledge bases, upload/rename/delete documents | ✓ | ✓ | ✓ | Read-only search |
+| Execute tools and Skills | ✓ | ✓ | ✓ | ✓ |
 
 <Callout type="warn" title="API keys are not part of a team">
-  An API key belongs to a person via `user_id`: for non-superusers the list endpoint only returns their own keys, and `ensure_api_key_owner()` requires "owner or superuser". Team roles have **no effect** on API keys — a team owner/admin cannot see or revoke anyone else's key.
+  API keys belong to the individual: ordinary users see only their own keys, and team Owners/Admins cannot see or deactivate someone else's keys. Team member roles have **no effect** on API keys.
 </Callout>
 
 ### Default Team Role
 
-The site setting `default_team_id` names the default team and `default_team_role` names the membership role new users get there. It **accepts only `viewer` / `member` / `admin`** (any other value falls back to `member`, which is also the default value). Assignment runs on registration and on SSO auto-provisioning, and never overwrites an existing membership. **`owner` is never assigned automatically.**
+Site settings can specify a **default team** and a **default member role**. The default role accepts only **Viewer / Member / Admin** (any other value falls back to Member, which is also the default). It applies when users register or are auto-created through SSO; existing memberships are not overwritten. **Owner is never assigned automatically.**
 
 ### Custom Team Roles
 
-> **Not implemented.** Teams have exactly four fixed roles — `owner`, `admin`, `member`, `viewer` — each mapping to a fixed set of gate rules; you cannot add or remove permissions for a single team. For finer-grained permissions, use global custom roles instead (see [Roles & Permissions](./roles-permissions.mdx)).
+> **Not implemented.** Teams have only the four fixed roles Owner, Admin, Member, and Viewer, each mapping to a fixed set of gate rules; you cannot add or remove permissions per team. For finer-grained permissions, use global custom roles (see [Roles & Permissions](./roles-permissions.mdx)).
 
 ## Collaboration and Notifications
 
-Collaboration happens through shared resources: agents, workflows, knowledge bases, tools, and skills are shared inside the team, and members access them subject to the role gate. Workflow run history is visible to team members (permissions permitting), so you can see who ran what and when.
+Team collaboration happens through shared resources: Agents, workflows, knowledge bases, tools, and Skills are shared within the team, and members access them according to their role gate. Workflow run history is visible to team members (subject to permissions), including who ran what and when.
 
-Team-related automatic notifications (delivery channels are configured by administrators in site settings — see [Notifications & External Channels](./notifications.mdx)):
+Automatic team notifications (delivery channels are configured by an administrator in site settings — see [Notifications and External Channels](./notifications.mdx)):
 
-| Type | When | Recipients |
+| Event | Trigger | Recipients |
 | --- | --- | --- |
-| `team.member_added` | A member is added | the new member + the team |
-| `team.member_removed` | A member is removed | the removed user + the team |
-| `team.role_changed` | A member's role changes | the affected member |
-| `team.ownership_transferred` | Ownership is transferred | one each to the old and new owner |
-| `team.model_granted` / `team.model_revoked` | A model is authorized / revoked | the team |
+| Member joined | Adding a member | The new member + the team |
+| Member removed | Removing a member | The removed user + the team |
+| Role changed | Changing a member role | The affected user |
+| Ownership transferred | Transferring ownership | One each to the old and new Owner |
+| Model granted / revoked | Granting or revoking a model | The team |
 
-> **Not implemented / Roadmap**: there is no per-team notification configuration, and no @mentions, shared conversations, team activity feed, document comments, or in-app team messaging.
+> **Not implemented / Roadmap**: no per-team notification configuration, @mentions, shared conversations, team activity feed, document comments, or in-team messaging.
 
 ## Troubleshooting
 
 ### Cannot Access Team Resources
 
-1. Confirm the correct team is selected in the team switcher.
-2. Confirm you are a member of that team (if `/app/team` opens you are; otherwise `not_team_member`).
-3. Confirm your global roles carry the needed code; a team `viewer` can only read and execute.
-4. Confirm resource `visibility`: a `private` resource returns `agent_access_denied` / `tool_access_denied` to non-creators.
+1. Confirm the team switcher on the left has the correct team selected.
+2. Confirm you are a member of the team (being able to open `/app/team` means you are).
+3. Confirm your global role has the required capability; a team Viewer can only read and execute.
+4. Check whether the resource is **private**: private resources are invisible to non-creators and access is denied.
 
-### Cannot Change Role / No "Change Role" in the Menu
+### Cannot Change a Role / No "Change Role" Menu
 
-- Only the **owner** (or a superuser) can change roles; a team admin gets `team_owner_required`.
-- The frontend also hides it: you cannot act on yourself, and a team admin cannot see the menu for other admins or the owner.
-- An owner's role cannot be changed (`cannot_change_owner_role`); to change who owns the team, use Transfer Ownership.
-- To promote someone to team `admin`, they must already hold global `team:manage`.
+- Only the **Owner** (or a Super Admin) can change roles.
+- The interface also hides options: you cannot act on yourself, and a team Admin cannot see the menus for other Admins and the Owner.
+- The Owner's role cannot be changed; to replace the owner, transfer ownership.
+- To promote someone to team Admin, they must already hold global team management permission.
 
-### Adding a Member Returns 404 `user_not_found`
+### Adding a Member Reports "User Does Not Exist"
 
-The input must be the **complete username** or **complete email** (email is case-insensitive). Fragments, nicknames, and display names do not match — there is no fuzzy search.
+You must enter the **full username** or **full email** (email is case-insensitive). Fragments, nicknames, and display names do not match — the system performs no fuzzy search.
 
-### Adding a Member Returns 403 `operation_not_permitted`
+### Adding a Member Is Rejected
 
-The role was `admin` but the target lacks global `team:manage`. Grant the Team Admin global role first, then set them as team admin.
+The Admin role was chosen but the target lacks global team management permission. Give them the Team Admin global role first, then set them as team Admin.
 
-### Ownership Transfer Rejected
+### Transfer Ownership Is Rejected
 
-- `team_owner_required`: you are not the owner (or a superuser).
-- `team_member_not_found`: the target is not a team member; add them first.
-- `operation_not_permitted`: the target lacks global `team:manage`.
-- `cannot_promote_to_owner`: the target is already the owner.
+- You are not the Owner (or a Super Admin).
+- The target is not a team member — add them first.
+- The target lacks global team management permission.
+- The target is already the Owner.
 
-### Cannot Leave / No Leave Button
+### Cannot Leave the Team / No Leave Button
 
-An owner cannot leave (`owner_cannot_leave`), and the default team hides the button in the UI. Transfer ownership first; for the default team an administrator must change the default team in site settings.
+The Owner cannot leave, and the default team hides the button. Transfer ownership first; for the default team, an administrator must change the default team in site settings.
 
-### Cannot Delete a Team
+### Cannot Delete the Team
 
-- Requires `admin:team:delete`; the entry exists only on the dashboard `/teams`.
-- The default team is rejected: `cannot_delete_default_team`.
+- The entry exists only in **Admin** → **Teams** and requires team delete permission in the Admin area.
+- The default team cannot be deleted.
 
-### Permissions Unchanged After a Role Change
+### Permissions Did Not Change After a Role Change
 
-The frontend's cached permission snapshot may be stale: refresh the page or sign in again. The backend reads permissions from the database per request, so no cache expiry wait is needed.
+The frontend permission snapshot cached in the browser may be stale: refresh the page or sign in again. The backend evaluates every request live, so no cache expiry is involved.
 
-## API Endpoints
+## Related Documentation
 
-Team endpoints use JWT user-session authentication (**API keys are not accepted**).
-
-Platform side (`/api/v1/teams`):
-
-| Method | Path | Purpose | Permission / gate |
-| --- | --- | --- | --- |
-| GET | `/api/v1/teams/my` | List the current user's teams and roles | any signed-in user |
-| GET | `/api/v1/teams/{team_id}` | Team details (includes the member list) | `team:read` + membership |
-| PUT | `/api/v1/teams/{team_id}` | Change name/description/avatar | `team:update` + owner/admin |
-| POST | `/api/v1/teams/{team_id}/members` | Add a member (`identifier` or `user_id` + `role`) | `team:manage` + owner/admin |
-| PUT | `/api/v1/teams/{team_id}/members/{user_id}` | Change a member's role | `team:manage` + owner/admin, and the caller must be owner/superuser |
-| DELETE | `/api/v1/teams/{team_id}/members/{user_id}` | Remove a member (self = leave) | others: `team:manage` + owner/admin; self: `team:read` |
-| POST | `/api/v1/teams/{team_id}/leave` | Leave the team | `team:read`; owners are rejected |
-| POST | `/api/v1/teams/{team_id}/transfer-ownership?new_owner_id=…` | Transfer ownership | `team:manage` + owner/superuser; the target must hold global `team:manage` |
-
-Admin side (`/api/v1/admin/teams`):
-
-| Method | Path | Purpose | Permission |
-| --- | --- | --- | --- |
-| GET | `/api/v1/admin/teams` | List all teams (`page`/`page_size`, default 50; `search` matches name or description) | `admin:team:read` |
-| POST | `/api/v1/admin/teams` | Create a team (creator becomes owner) | `admin:team:create` |
-| DELETE | `/api/v1/admin/teams/{team_id}` | Delete a team | `admin:team:delete`; the default team is rejected |
-
-<Callout type="info">
-  There is no `GET /api/v1/teams` (list all teams) endpoint. To walk every team in the system, use the admin-side `GET /api/v1/admin/teams`.
-</Callout>
-
-### Common Error Codes
-
-| `msg_key` | HTTP | Meaning and fix |
-| --- | --- | --- |
-| `team_not_found` | 404 | The team does not exist |
-| `not_team_member` | 403 | The caller is not a member of that team |
-| `team_admin_required` | 403 | Team owner/admin required |
-| `team_owner_required` | 403 | Only the team owner (or a superuser) may do this |
-| `operation_not_permitted` | 403 | Missing global permission code (the response carries a `permission` field) |
-| `team_name_exists` | 400 | Duplicate team name |
-| `user_not_found` | 404 | The member identifier matched no user |
-| `already_team_member` | 400 | The user is already a team member |
-| `cannot_add_as_owner` | 400 | Cannot set `owner` through Add Member |
-| `cannot_change_owner_role` | 400 | The owner's membership role cannot be changed |
-| `cannot_promote_to_owner` | 400 | Cannot promote to owner via a role change or by transferring to yourself |
-| `cannot_remove_owner` | 400 | The owner cannot be removed (including self-removal) |
-| `owner_cannot_leave` | 400 | The owner must transfer ownership before leaving |
-| `team_member_not_found` | 404 | The target user is not a member of that team |
-| `cannot_delete_default_team` | 400 | The default team cannot be deleted |
-| `team_model_already_authorized` | 400 | That model is already authorized for this team |
-| `team_model_not_found` | 404 | The team model authorization does not exist |
-
-For complete request/response formats and code examples, see [Teams API](../../../api/teams.mdx).
-
-See also:
-- [Roles & Permissions](./roles-permissions.mdx) — global roles, team gates, and 403 troubleshooting
+- [Teams API](../../../api/teams.mdx) — endpoints, request/response shapes, and error codes
+- [Permissions and roles reference](../../../reference/permissions.mdx) — permission catalog and role matrix
+- [Roles & Permissions](./roles-permissions.mdx) — global roles, team gates, and failure troubleshooting
 - [User Management](./user-management.mdx) — user accounts and global role assignment
-- [Manage Team Models](../models/manage-models.mdx) — model authorization and quotas
+- [Managing Team Models](../models/manage-models.mdx) — model authorization and quotas

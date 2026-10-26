@@ -12,91 +12,239 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 
 ### Added
 
+#### Messaging Integrations
+- Sign-in providers, email, Webhook, and Feishu directory sync now live in one **Integrations** area; existing providers, identity connections, and callback URLs stay as they are, and secrets are encrypted and never shown again in the UI. See [Messaging integrations](./guides/integrations/index.mdx).
+- Integration management is split into sign-in and settings permissions so different administrators can own each; the global single sign-on policy moved to **Settings** > **Security**, and per-integration cards with enabled capabilities are under **Settings** > **Integrations**.
+- Feishu can optionally enable web sign-in: users sign in with their Feishu account and are matched on first sign-in without requiring a matching email; enabling the integration does not turn sign-in on by itself.
+- Feishu covers sign-in, contact and department sync, notifications (send a test message to a chosen linked user), read-only knowledge sync, and Agent chat; turning a capability off keeps synced data and existing links, and re-enabling resumes where it left off.
+- Feishu Agent chat supports two connection modes: a callback URL (signature check, 300-second window, 64 KiB per message) and a long connection. The long connection is maintained by the platform's own background task, with no extra service or command to deploy.
+- Feishu Agent replies arrive as Markdown interactive cards, and files and results generated earlier are still reachable after a disconnect or reconnect. `/agents`, `/use`, `/new`, `/stop`, `/status`, and `/help` work in English and Chinese, and structured questions can be answered in the chat. See [Feishu integration](./guides/integrations/feishu.mdx).
+- Feishu attachments are capped at 10 MiB for images, 30 MiB for MP4, and 30 MiB for other files; rejected uploads record the original error, status, and error code in the [delivery log](./guides/integrations/delivery-log.mdx).
+- Feishu identity linking is under **Account security** > **Connected accounts** > **Link Feishu**. Linking uses an expiring authorization session only you can use, requires confirmation in the same tab, and rejects conflicts; it never matches by email and never changes how you currently sign in.
+- The Agent used in Feishu chats is now chosen in personal settings, with the same effect as `/use`; the personal switch only pauses new messages, queued processing, and unsent replies — the Agent choice and conversation history are kept.
+- Added the WeChat iLink site integration with separate Agent chat and knowledge collection switches; personal QR authorization is independent, and a connection is always in exactly one of none, knowledge collection, or one published Agent.
+- WeChat knowledge collection handles text, links, documents, images, audio, and video frames sampled by timestamp; extracting image and audio content requires team authorization. Originals keep their type and filename and can only be downloaded through a protected path, and each attachment records its own success or failure. Self-hosted deployments already bundle the media tooling needed for video frames.
+- The WeChat Agent chat reuses durable runs: text, images, files, voice transcripts, and video are accepted, and generated images, video, and files are sent straight back to WeChat. Every delivery outcome is recorded, and messages with an uncertain outcome are never resent automatically.
+- WeChat messages are collected in arrival-order batches, slow down automatically when a backlog builds, and messages past their deadline are dropped rather than processed twice; no separate message-receiver service is needed. See [Architecture](../self-host/architecture.mdx).
+- WeChat commands support `/new` (`/新对话`), `/stop` (`/停止`), `/status` (`/状态`), `/help` (`/帮助`), `/agents` (`/智能体`), and `/use <n>` (`/使用 <编号>`); switches are refused while a chat is busy, and an accepted message stays bound to its original run.
+- Feishu and WeChat delivery records are now one shared delivery log, and upgrading migrates history and cleans up the old data automatically. Upgrade the API and background jobs together, never one side alone. See [Upgrading](../self-host/operations/upgrade.mdx).
+- Added the **Delivery log** page, filterable by integration (Feishu/WeChat), status (pending, sending, sent, error, unavailable, unknown), run, or filename; pages hold 1–100 rows (default 25), only administrators with integration-settings read access can open it, and raw errors appear inline for quick diagnosis.
+- Scheduled integration work now follows the configuration: enabling or disabling a capability takes effect in about two seconds with no restart, and a failed configuration read pauses integration delivery while ordinary maintenance keeps running.
+
+#### Agent Runtime and Chat
+- Agents can now ask the user questions instead of relying on text markers: one question or a set of questions can be asked, the conversation pauses at the question, and it resumes from the same point once answered. Each question is single-use, and required answers block progress.
+- The question capability is an Agent setting (off by default); like image and video generation it is a builtin — it does not appear in the tool list and cannot be attached manually.
+- Streaming, non-streaming, edit, and regenerate now share one execution path, so context building, compression, model turns, usage accounting, heartbeat and disconnect handling, tool event order, and final message assembly behave the same everywhere.
+- Tool calls run in shared and exclusive batches: read-only builtins that can run concurrently do so, everything else stays serial, and events and records still follow the model's original call order.
+- A model turn that stops early continues automatically (up to 8 consecutive continuations), truncated tool calls are paired up, and each run still ends at the total time limit.
+- Chat context is summarized once it reaches 90% of the budget, keeping a recent verbatim window and reporting saved tokens; the compression is visible in the conversation. See [Conversations](./guides/agent/conversation.mdx).
+- Cache-hit usage reported by providers is recorded and counted consistently in statistics, messages, and quotas.
+- Streaming under high concurrency uses fewer resources: incremental content ships in 20 ms or 6-token batches, a heartbeat goes out every 15 seconds, the event buffer after a run shrinks from 24 hours to 10 minutes, and a 64-entry buffer cap prevents overload.
+- After switching conversations, background generation resumes on screen; the run page shows a status chip and reconnect button, and queued steering messages appear above the composer.
+- Added unified source citations: knowledge base retrieval, web search, and assets all use the same markers, popovers open from the text, and plain knowledge base retrieval appears as an expandable thought step.
+- Document attachments are read on demand with bounded read and search, support continuing past oversized content, and no longer truncate; the old truncating parse path and its text-length settings are gone.
+- Added an asset list with filename search, media-type filters, and paging (10 results by default, 30 maximum); permissions, expiry, and current-branch visibility are checked before results are returned.
+- Input attachments, generated media, and sandbox artifacts now share one asset reference format; tool replay stores only references and metadata, then reloads and rechecks permission before the next turn.
+- System prompts come from one capability-aware builder shared by chat and workflow Agent nodes; workflow agents gained sandbox, Markdown, and language guidance with locale normalization.
+- Prompt generation matches what is actually available: question and citation switches are carried over, callable tool names are preserved, knowledge base modes and memory read/write boundaries are explained, disabled capabilities are no longer suggested, and a provider quota failure is reported as a model quota error.
+
+#### Models and Providers
+- Provider icons and names are now consistent across all 23 providers; custom OpenAI-compatible gateways infer a family icon from the model name (gpt/o-series, gemini, claude, LongCat, BAAI, and more) and show a neutral gateway mark when nothing matches.
+- Provider names use a custom display name when set and fall back to the built-in name otherwise; icons and names apply to model management, the platform catalog, team pages, knowledge base model pickers, and Agent/workflow selectors. See [Model providers](../reference/model-providers.mdx).
+- Provider connectivity tests validate targets against an address allowlist (on by default, up to 200 entries) and only probe fixed paths, with a clear error when blocked; a failed configuration read blocks saving an empty list.
+- Models are resolved by entry ID only — no more provider-plus-model lookups and no default fallback to gpt-4; the same provider and model name can now use different keys or endpoints.
+- Media generation expanded: a workflow media node, OpenAI Responses images, more Volcengine media models, and MiniMax, plus conversation images reusable as media references. See [Workflow nodes](../reference/workflow-nodes.mdx).
+- Embedding usage prefers the numbers reported upstream over local estimates, and memory vector deletion, vector-dimension changes, and custom endpoints are fixed.
+
+#### Knowledge Bases and Retrieval
+- Added cross-team knowledge base sharing: the target team gets read-only access, shares count toward shared totals, and shared bases are selectable in Agent orchestration; changes are audited with before/after details, and sharing with your own team is rejected. See [Creating a knowledge base](./guides/knowledge/create-knowledge-base.mdx).
+- Markdown chunking improved: table headers repeat across chunks, section hierarchy is preserved, table continuation and list boundaries are fixed, and separators typed by users (newlines, tabs) are decoded before splitting. See [Chunking](./guides/knowledge/chunking.mdx).
+- Batched document processing sends one summary notification when the batch finishes; a recovery banner covers lost progress after a refresh, and batch identifiers stay out of the address bar so links do not grow.
+- Retrieval results are more stable: knowledge base content is the source of truth, semantic and keyword results are merged, reranked together, fused across knowledge bases, and assembled within a context budget; when hybrid search or reranking is unavailable the user sees a clear message. See [Retrieval](./guides/knowledge/retrieval.mdx).
+- AUTO mode understands the question in conversation context; unavailable hybrid search degrades with a clear diagnostic, and rerank failures are reported as retrieval errors instead of raw provider exceptions.
+- Added optional shadow observation: a second retrieval strategy can run in parallel for comparison, off by default, with its results and stage metrics recorded separately and never affecting live answers.
+- Added a retrieval lab for instant A/B comparison and saved evaluations: datasets and cases support per-item create, edit, and delete, JSON/CSV export re-imports unchanged, edit conflicts are surfaced, and a dataset holds at most 1000 cases.
+- Parameter sweeps are supported: up to 32 parameter sets and 5000 evaluations per sweep, resumable after interruption, and recommended parameters must pass a verification run before being applied.
+- Retrieval evaluation permissions are split into platform and team levels that can be granted separately; optional model pre-labeling is off by default and turned on when needed. See [Permissions](../reference/permissions.mdx).
+- Memory now works on two tracks: Agents write explicitly while background extraction runs asynchronously; memory search supports a day-based time window, 1–10 results, and entity-type filters, ranked with a 30-day half-life recency decay. See [Memory](./guides/agent/memory.mdx).
+
+#### Tools
+- Added custom database tools covering PostgreSQL, MySQL, MongoDB, and key-value cache databases, with timeout and maximum-row settings and a connection test before saving. See [Custom tools](./guides/tools/custom-tools.mdx).
+- SQL read-only validation now parses statements per database dialect instead of matching keywords, so legitimate queries are no longer blocked; discovered table names are safely quoted before sampling.
+- Added a builtin RSS reader that omits empty fields to save tokens; web page fetching gained readability extraction and rejects local files and non-HTTP(S) addresses. See [Built-in tools](./guides/tools/built-in.mdx).
+- Added site-managed web search: administrators choose Tavily, Bocha, SearXNG, or DeepSeek as the engine and switch each one on or off; keys are encrypted, never shown after saving, and Agents and teams no longer hold their own search credentials.
+- Keyless search engines are gone, and a failed search never silently switches providers; SearXNG supports reverse-proxy subpaths and an optional HTTPS bearer token with a 30-second timeout. See [Site settings](./guides/administration/site-settings.mdx).
+- Agent orchestration and workflow web search nodes list only site-enabled engines and re-check site configuration when they run; the tool test page gained an engine selector.
+- Workflow tool nodes convert numeric, boolean, and JSON parameters to their declared types, so invalid values fail at the node instead of reaching the tool as strings.
+- The cross-team tool sharing dialog shows an empty state when no other team is available, displays the selected team name, and renames its button to **Share**.
+- Tool failures no longer return raw exception text: known business errors show a localized message and everything else shows a generic localized fallback.
+
+#### Workflows
+- The pause node gained an "all approvals" strategy (off by default): each approver's decision is recorded, the node continues after everyone approves, ends on any rejection, and clears each approver's pending notification.
+- Pause descriptions support variables: unavailable variables render empty instead of leaving braces, and file values show the uploaded filename.
+- Pause requests cover all 11 parameter types, the canvas test-run drawer can fill and submit them directly, and waiting runs in history can be cancelled.
+- Iteration and loop variables resolve by scope: loop bodies reference the current item, index, and results by their short names with innermost-first precedence, and file and image variables stay lists.
+- The workflow run page now uses a chat-style layout with a vertical rail timeline; node details expand to show inputs and typed outputs, drag-and-drop uploads and scroll-loaded history are supported, and multiple output nodes stack. See [Orchestration](./guides/workflow/orchestrate.mdx).
+- Workflow Agent nodes align with chat: unified attachment mapping, preserved structured output, consistent variable contracts, and more detailed run records.
+- Agent and workflow monitoring is visible only to the creator, team admins, and superusers; only the creator can write to a private workflow. See [Run monitoring](./guides/agent/monitor.mdx).
+
+#### Sandbox and Network
+- Every sandbox task gets its own workspace view: the real workspace is mounted as `/workspace`, the working directory, commands, and environment paths all map into it, and root scans such as `find /` stay inside the workspace. See [Sandbox](./concepts/sandbox.mdx).
+- Added three independent network restriction switches — model address allowlist, external request protection, and sandbox network allowlist — all on by default; turning one off keeps the saved lists for later, and the sandbox switch only affects new tasks. See [Security](./concepts/security.mdx).
+- Audit logs record field-level before/after changes for 22 resource types; long values are truncated to 500 characters, and passwords, tokens, and emails are masked before writing. See [Audit logs](./guides/administration/audit-logs.mdx).
+- Human verification is hardened: click-captcha answers and options are checked on the server and never sent to the browser, and changing an email requires verification with throttled resends.
+
+#### Deployment, Storage, and UI
+- Added configurable object storage: local storage by default, switchable to S3-compatible storage (endpoint, bucket, region, and keys, with path-style and HTTPS on by default); knowledge base documents and Skill packages use the same storage. See [Storage](../self-host/operations/storage.mdx).
+- Distributed uploads are supported: background jobs no longer mount the upload directory and read and write files through an authenticated interface; workflow upload paths are now permission-checked too.
+- Added a one-command Kubernetes installer and a single-file manifest with secret placeholders that never changes the cluster implicitly, plus a Sealos option; Kubernetes workloads wait for the database before starting. See [Kubernetes](../self-host/deploy/kubernetes.mdx).
+- Site settings gained configurable theme colors covering main surfaces and accent colors.
+- Added interactive tours: a 10-step platform tour plus tours for models, knowledge bases, API keys, app configuration, capabilities, and the workflow editor, with prerequisite locking, cross-page chaining, replay-all, and progress saved locally.
+- Added legal settings: ICP filing number, terms of service, and privacy policy can appear on sign-in and registration pages, and registration can require accepting them.
+- Quick actions now open the target page's create dialog and clear the address-bar parameters afterward; the workspace root now goes straight to the app list.
+- High-priority notifications open as a workbench dialog, announcements stay outside notification paging, and notification detail Markdown is height-capped with internal scrolling. See [Notifications](./guides/administration/notifications.mdx).
+
 #### Admin Observability
-- Rebuilt the admin observability console with six focused views for run outcomes, on-demand traces, model/tool/retrieval dependencies, queues, infrastructure, and alerts.
-- Added bounded tool and knowledge retrieval spans to durable AgentRun details, plus tool and retrieval success-rate and latency aggregates in the Dependencies view.
-- Agent dependency traces retain at most 128 spans per run and display when the cap truncates a trace; historical runs are not backfilled.
-- Added translations for every persisted AgentRun lifecycle status in both locales and a raw-status fallback for future values.
-- Added bounded PostgreSQL, Redis, Celery worker, and Qdrant connectivity probes for infrastructure dependencies, including measured latency and explicit unhealthy/unconfigured states.
-- Added single-leader terminal AgentRun summary reconciliation every minute, repairing stale status, timing, model, and token fields in bounded batches without replaying runs; fixed the ORM query that dropped terminal summaries.
-- Model dependency cards now resolve existing telemetry UUIDs to configured model names and provider labels, including custom gateway names, while keeping same-named models separate.
-- Reduced queue snapshot latency by collecting active tasks, reserved tasks, scheduled tasks, and active queues concurrently with independent Celery inspectors; preserved existing cache and failure behavior.
-- Reduced infrastructure snapshot latency by collecting health probes and slow-query statistics concurrently and shortening Celery reply collection to 0.5 seconds; retained existing probe deadlines, failure behavior, and caching.
-- Added Redis-backed API instance discovery with per-instance reporter leases, host-scoped resource samples, readable names, and stale/offline aging; infrastructure now lists retained instances across backends rather than only the serving process.
-- Added a two-month calendar range picker to observability, with rolling presets at the bottom of its popover, inclusive local-day selection, URL persistence, and consistent UTC filtering for overview, runs, and dependency statistics.
-- Added the same calendar range picker to the dashboard with 7/30/90-day and all-time shortcuts; custom dates consistently filter trends, rankings, model usage, workflow summaries, and conversation/message/token summaries and averages, while unrelated cumulative indicators retain their definitions.
+- The observability console is rebuilt around six views — overview, runs, dependencies, queues, infrastructure, and alerts — for run outcomes, trace details, model/tool/retrieval dependencies, and operations status. See [Observability](../reference/observability.mdx).
+- Run details now include bounded tool and knowledge retrieval records, and the Dependencies view aggregates tool and retrieval success rates and latency.
+- Each run keeps at most 128 dependency records, the detail marks a trace as truncated beyond that, and historical runs are not backfilled.
+- Every run lifecycle status is translated in both languages, and unknown future statuses safely fall back to the raw value.
+- Infrastructure dependencies gained bounded connectivity checks covering the database, cache, background jobs, and vector search, showing measured latency and distinguishing unavailable from unconfigured.
+- Added a per-minute run wrap-up check that fixes stale status, timing, model, and token figures in batches without replaying runs; the query that dropped wrap-up summaries is fixed.
+- Model dependency cards resolve telemetry models to configured model names and provider display names, including custom gateway names, while same-named models stay separate.
+- The queue view now reads all task states together, cutting load time while keeping existing cache and failure behavior.
+- Infrastructure health and slow-query statistics are collected concurrently, shortening the wait while keeping existing probe deadlines, failure fallback, and caching.
+- Added instance discovery: multi-instance deployments list every retained instance with readable names, host resource samples, and stale/offline states, so the infrastructure panel no longer shows only the instance that served the request. See [High availability](../self-host/operations/high-availability.mdx).
+- Observability gained a two-month calendar range picker with rolling presets at the bottom of the popover, local-day selection that survives reloads, and consistent time-basis filtering for overview, runs, and dependency statistics.
+- The dashboard uses the same calendar range picker with 7/30/90-day and all-time shortcuts; custom dates filter trends, rankings, model usage, workflow summaries, and conversation/message/token figures, while other cumulative indicators keep their definitions.
 
 #### Sandbox Security
-- Added a persisted Security setting for exact sandbox egress hostnames; updates apply to new jobs without restarting workers.
+- Added a security setting for exact sandbox egress hostnames; saved changes apply to new tasks immediately with no restart.
 
 #### Sandbox Lifecycle Audit
-- Added audit events for sandbox task start, completion, failure, cancellation, and recovery. Entries capture available task/session/worker context and safe error codes without recording code, arguments, output, or raw exception text.
+- Added audit events for sandbox task start, completion, failure, cancellation, and recovery, capturing available task, session, and execution context plus safe error codes — never code, arguments, output, or raw exception text.
 
 #### Models and Workflows
-- Added the TypeSafe AI (`typesafe`) decision-model provider and the `decision` model type, which evaluates a state against typed `choice` (up to 255 options), `score` (2–10 ordered levels), or `noul` (true/false) questions and returns typed answers with probability distributions and confidence.
-- Added the Decision workflow node: it asks one typed question, routes on the returned answer (or the highest-probability score level), and supports a fallback branch plus an optional confidence threshold. The node outputs `answer`, `selected_handle`, `confidence`, `probabilities`, and usage.
+- Added the TypeSafe AI decision model provider and the "Decision" model type: it answers typed questions about a given state — choice (up to 255 options), ordered score (2–10 levels), or true/false — returning a structured answer with probability distribution and confidence. See [Model providers](../reference/model-providers.mdx).
+- Added the Decision workflow node: it asks one typed question, branches on the answer (or the highest-probability score level), supports a fallback branch and an optional confidence threshold, and outputs the answer, chosen branch, confidence, probabilities, and usage.
 
 #### Chat and File Previews
-- Added a unified artifact list with file counts, expandable results, authenticated downloads, and shared previews for common document, media, and code formats.
-- Added DOCX thumbnails, page synchronization, responsive fit-to-width, and zoom controls; added read-only PDF and spreadsheet preview controls.
-- Added the Agent **Hide Artifact List** setting, off by default, to hide the generated files list below assistant messages in chat.
+- Added a unified artifact list with file counts and expandable results, plus shared previews and authenticated downloads for common document, media, and code formats.
+- Added Word document thumbnails, page synchronization, fit-to-width, and zoom controls, plus read-only PDF and spreadsheet previews.
+- Added the Agent **Hide Artifact List** setting (off by default) to hide generated files below assistant messages. See [Agent configuration](../reference/agent-config.mdx).
 
 #### Memory and RAG
-- Added optional background memory extraction controls in the admin `memory` site-settings category, including model selection, debounce cooldown, and pending-turn trigger limits.
-- Added the bounded `get_memory_subgraph` Agent tool for relationship-aware memory retrieval.
+- Added a "Memory" site-settings category where administrators configure the extraction model, debounce cooldown, and pending-turn threshold.
+- Added a bounded memory subgraph tool for relationship-aware memory retrieval.
+
+### Changed
+
+#### Messaging Integrations
+- Notification channels are now email, Webhook, and Feishu only; DingTalk, WeChat Work, and Slack were removed. Feishu notifications are delivered asynchronously and report per-channel status for each linked active recipient. See [Notifications](./guides/administration/notifications.mdx).
+- Delivery log and audit log share multi-select filters, URL-preserved search, page-size controls, and loading states; raw errors wrap onto their own lines instead of hiding behind a hover.
+- The Feishu Agent setup page always shows the required permissions, event subscription, and publication/approval steps, and notes that a working long connection does not mean messages are ready.
+- Personal WeChat settings are compacted into header authorization and refresh, inline purpose actions, and responsive two-column forms; the Agent activity and collection history panels and their requests are removed.
+- WeChat receipt deduplication now happens before attachment preparation and run submission; adjacent ordinary messages in one response merge into one prompt, one run, and one reply.
+
+#### Agent and Chat
+- Agent input no longer includes an automatic asset directory — asset discovery is on demand — and native PDF input requires explicit page selection.
+- Chat attachments and asset viewing go through authorized private storage and are serialized for the modalities and file types the selected model actually supports.
+- Tool activity collapses into an expandable execution trace, the thought process is separated from the final answer, and each tool call expands independently.
+- The chat empty state centers the welcome content and composer vertically with the footer pinned to the bottom; once messages exist the composer anchors to the bottom again.
+
+#### Tools
+- Site search keys are write-only (never shown after saving); legacy Agent and team private keys are archived encrypted and are not promoted to site configuration.
+- The tool test form selects an enabled search engine, and the server re-checks site configuration before running.
+
+#### Workflows
+- Workflow results render output nodes only: live runs concatenate the streamed text of every output node, history stacks each output node in execution order, and intermediate nodes are no longer shown.
+
+#### Interface and Internationalization
+- Backend static messages and response codes are fully localized: all 93 response codes have English and Chinese copy, a "model disabled" message was added, and chat validation, pending-interaction prompts, and notification detail links follow the user's language.
+
+#### Dependencies and CI
+- Upgraded Next.js 16.3, React 19.3, Mermaid 12, Radix, TypeScript, and related client and integration libraries with only the necessary adaptations and preserved exception details; the frontend and backend coverage gate is now 95%, release notes come from stable tags, and the image publishing flow was simplified.
 
 #### Admin Observability
 
-- Aligned console tabs and filters with the shared dashboard Tabs, Select, and Input components; standardized control heights.
-
+- Console tabs and filters now use the project's shared components, with consistent control heights.
 
 #### Agent Studio
 
-- On phones, the Agent preview opens in a full-screen, drawer-like overlay instead of compressing the editor and chat side by side.
+- On phones, the Agent preview opens as a full-screen drawer instead of squeezing the editor and chat side by side.
 
 #### Assets and Media
-- Persisted generated images and videos as scoped Assets and exposed conversation/workflow-scoped media references for model use.
-- Updated CSV handling for GBK/GB18030 content and removed duplicate spreadsheet viewer downloads.
+- Generated images and videos are persisted as scoped assets with conversation and workflow media references for models. See [Media](./guides/agent/media.mdx).
+- CSV handling for GBK/GB18030 was updated, and the duplicate download entry in the spreadsheet viewer was removed.
 
 #### Agent Retrieval and Chat Timeline
-- Agents with no knowledge-base associations now persist and run with `rag_mode: off`; the Agent editor hides the RAG selector until a knowledge base is selected.
-- Chat thought-process rendering preserves the emitted order of retrieval, compression, reasoning, tool, and generation steps.
-- RAG context remains `null` when retrieval did not run and `[]` when retrieval ran but returned no contexts.
-
-#### Dependencies and Tooling
-- Updated backend and frontend dependency manifests and lockfiles to current compatible releases.
-- Made the Python lint policy explicit for stable Ruff upgrades and audited the complete Bun production dependency closure.
-- Replaced the sandbox tests' Redis-server process with an in-process fake and removed the Redis server install from backend CI.
-- Added `MIT-0` to the approved permissive-license policy.
+- Agents without a knowledge base now save and run with knowledge base retrieval off; the Agent editor hides the retrieval mode selector until a knowledge base is selected.
+- The chat thought process renders in the order the retrieval, compression, reasoning, tool, and generation steps were actually emitted.
+- "Not retrieved" is shown when retrieval did not run, and "no results" when it ran without matches.
 
 ### Fixed
 
+#### Messaging Integrations
+- Fixed Feishu replies that were never sent after a completed receipt — the recovery task now sends them; the first WeChat Agent dispatch is no longer delayed by retry backoff; receipt completion, reply sending, and session release now happen as one unit.
+- Fixed Feishu image, file, and rich-text messages being silently rejected: accepted resources become private conversation assets and durable inputs, and oversized files and failures always get a clear reply.
+- Feishu and WeChat replies split at paragraph, line, and sentence boundaries within 3500 bytes per message; long tables repeat header rows, long code blocks repeat their language marker, and oversized headers fall back to bounded plain text.
+- Fixed a failed `/skip` being treated as a waiting run's answer, WeChat link host checks matching only substrings, and Feishu failure logs leaking provider response bodies.
+
+#### Agent and Chat
+- Fixed misaligned message IDs after editing, duplicate thinking placeholders when switching conversations, sending not pinning to the bottom immediately, reading-position jumps after loading older messages, overflowing Mermaid previews, and drift while drag-resizing.
+- Fixed branch and version integrity, historical message metadata, and continued-conversation context, plus chat history refresh flicker, prompt load failures, and tool calls still showing as running after completion.
+
+#### Models and Embeddings
+- Fixed memory vector deletion failing when the collection is missing, vector-dimension changes, and custom endpoint compatibility; embedding quota errors and audit diffs are now complete.
+
+#### Knowledge Bases and Retrieval
+- Fixed batch dispatch failures that were not rolled back, inconsistent chunk deletion, non-transactional chunk changes, mismatched keyword index identities, and unsplit startup statements.
+- Fixed shadow retrieval data leaking into production, AUTO retrieval having no bound, multi-knowledge-base candidates not fusing globally, and evaluation averages counting unlabeled cases.
+
+#### Tools
+- Fixed API tool tests mishandling booleans and empty parameters, model discovery bypassing the address allowlist, and external request protection in database connection tests, knowledge base link import and preview, and workflow HTTP nodes (loopback, private, link-local, multicast, and cloud metadata targets are rejected).
+
+#### Workflows
+- Fixed run links re-triggering on refresh, waiting runs lacking a cancel action, only one result showing for multiple output nodes, file variables turning into strings, and iteration scope resolution errors.
+
+#### Permissions and Audit
+- Fixed team admins being able to write to private workflows they do not own, and an incorrect dashboard statistics scope.
+- Statistics security fixes: Agent statistics use the same access check as everywhere else, workflow runs and statistics apply the visibility filter (including creator-less legacy private workflows), and the recent-conversations entry that exposed other users' conversation titles was removed.
+- Permission remediation: superusers hold every permission, the workbench checks scoped permissions, tool deletion and knowledge base/tool visibility are checked explicitly, and admin pages deny access by default.
+- Statistics aggregation now shares a concurrency budget with an upper bound on simultaneous queries, so one request cannot exhaust the database connections; runs that were cut off count as finished and are reported separately.
+
+#### Authentication and SSO
+- Fixed new single sign-on users missing a default team (assignment now retries), sign-in failures not returning to the frontend, unverified profile email changes (with throttled resends), and wildcard origin support for embedded components, while keeping the backend sign-in error message.
+
+#### Interface and Internationalization
+- Fixed the public theme overriding a user's theme preference, long team-owner names wrapping, mobile header overlap, Markdown table and formula rendering, and dialog content overflow.
+
 #### Admin Observability
-- Kept the Dependencies view available when tool and retrieval spans have no token counts; those rows now report unavailable token usage instead of failing the response.
-- Migrated `model_name` and `message_started_at` on existing PostgreSQL `observability_runs` tables before Tortoise schema and index generation, preventing API startup and summary-query failures on older databases.
+- Fixed the Dependencies view failing when tool and retrieval records have no token counts; those rows now report unavailable instead of failing the whole view.
+- Fixed startup failures and overview query errors when upgrading older databases: existing run records get the model name and message start time before the new structure is generated.
 
 #### Sandbox Sessions
-- Routed session jobs to per-worker Celery queues and persisted a fenced worker/storage binding. Stale-generation messages are rejected; a command with uncertain completion is never automatically replayed.
-- Added sandbox-worker readiness heartbeats, same-disk supervised restart and checkpoint recovery, plus bounded atomic rebinding to a fresh workspace generation when the original worker storage is unavailable. AgentRun receives `WORKSPACE_RESET` and replans instead of reusing stale paths or process state.
-- Kept each sandbox worker's workspace and checkpoints on worker-local storage (Compose named volume; Kubernetes node-local hostPath DaemonSet). Same-node process replacement can restore checkpointed data; permanent loss of the node or disk cannot.
-- Used the platform's `ELOOP` errno constant when rejecting symlinked workspace paths.
-- Routed deferred cleanup and idle-eviction retries through separate Redis indexes so an unavailable owner queue cannot block later sessions; spread first-time session placement across ready workers and bounded binding/tombstone retention.
-- Rejected zero-valued sandbox worker recovery timeouts.
-- Routed isolated sandbox and dependency-install egress through a per-job HTTPS proxy with exact-host allowlisting; blocked hosts are reported in execution diagnostics.
-- Kept legacy code execution and workflow code nodes behind the sandbox gateway; disabled, unavailable, and failed runtimes fail closed without executing payloads on the caller.
-- Bounded Python and Node dependency installation to 300 seconds by default; timed-out install process groups are terminated and incomplete environments are discarded.
-- Bounded captured sandbox output in memory and applied per-process `prlimit` controls. Direct payloads drop all capabilities in Bubblewrap; the trusted egress bridge raises loopback in its isolated network namespace, then sets `no-new-privileges` and clears payload capabilities. Supplied workers receive `NET_ADMIN` for that setup and remain resource-capped.
+- Session tasks are now assigned per execution node with a recorded binding; messages from an expired batch are rejected, and a command with an uncertain outcome is never replayed automatically.
+- Added execution-node readiness heartbeats, same-node supervised restart, and checkpoint recovery; when the original node storage is unavailable, the session moves to a new workspace generation in a bounded, atomic step, is told to reset, and replans instead of reusing stale paths or process state.
+- Each execution node keeps its workspace and checkpoints on node-local storage (a named volume under Docker Compose, a node-local directory under Kubernetes); replacing a process on the same node restores checkpoint data, but losing the node or disk permanently cannot be recovered. See [Kubernetes](../self-host/deploy/kubernetes.mdx).
+- Symlinked workspace paths are rejected so isolation cannot be bypassed through a path.
+- Deferred cleanup and idle reclaim retries no longer share one channel, so an unavailable channel cannot block later sessions; first-time session placement spreads across ready nodes, with bounded binding and retention periods.
+- A zero recovery timeout is rejected so a bad setting cannot leave sessions unrecoverable.
+- Isolated sandbox and dependency-install egress goes through a per-task HTTPS proxy that allows exact hostnames only; blocked hosts appear in execution diagnostics.
+- Legacy code execution and workflow code nodes now sit behind the sandbox; a disabled, unavailable, or failed runtime fails closed without running the payload on the caller.
+- Python and Node dependency installation defaults to a 300-second limit; timed-out installs are terminated and incomplete environments are discarded.
+- Sandbox output is captured in memory up to a limit and each process gets resource limits; directly executed payloads keep no system privileges, and the trusted egress tightens permissions after the isolated network is ready. Self-hosted deployments must keep network management permission for the relevant background job. See [Security checklist](../self-host/operations/security-checklist.mdx).
 
 #### Asset Access and Previews
-- Protected generated images, generated videos, and sandbox artifacts with scope-aware authorization and authenticated client downloads.
-- Preserved explicit too-large, unauthorized, permission-denied, unsupported, and parse-failure preview states without falling back to unprotected URLs.
+- Generated images, generated videos, and sandbox artifacts now require scope-based authorization, and client downloads must be authenticated.
+- Explicit preview states for too-large, signed-out, no-permission, unsupported type, and parse failure are preserved, with no fallback to unprotected links.
 
 #### Chat Experience
-- Kept agent conversations pinned to the latest message as soon as a send begins, before streaming starts.
-- Deduplicated overlapping Agent conversation pages and preserved the loaded pagination position when refreshing the chat sidebar.
+- Agent conversations pin to the newest message as soon as a send begins, before streaming starts.
+- Overlapping conversation pages are merged, and the loaded pagination position survives a sidebar refresh.
 
 #### Dependency Compatibility
-- Adapted Redis, MCP, SMTP, sandbox session, React, Radix, TypeScript, and ICU message-format integrations to their refreshed APIs while preserving exception tracebacks.
+- Adapted cache, MCP, email, sandbox session, React, Radix, TypeScript, and ICU message format integrations to their new interfaces while preserving exception details.
 
 ## [0.2.9] - 2026-06-09
 
@@ -235,7 +383,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 
 #### Documentation
 - Corrected backend startup commands in the English README, Chinese guide README, and quick-start guide.
-- Documented explicit `celery_app` usage for Celery worker and beat startup commands.
+- Corrected the backend startup command guidance in the docs.
 
 ## [0.1.2] - 2026-03-04
 
@@ -245,7 +393,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 - Interactive memory graph visualization with D3.js force-directed layout
 - Memory management dashboard with full CRUD operations
 - LLM function calling for autonomous memory creation and updates
-- Semantic search with vector retrieval using Qdrant
+- Semantic search that finds results by meaning rather than exact words
 - Multi-tenant data isolation with user-based filtering
 - 10 entity types with color-coded nodes (person, preference, skill, project, goal, fact, concept, organization, location, custom)
 - 9 relation types with color-coded edges (prefers, works_on, knows, uses, works_at, located_in, has_goal, related_to, part_of)
@@ -395,7 +543,7 @@ First public release of Clouisle - an enterprise-grade knowledge base and AI Age
 - **Search Modes**:
   - Vector search (semantic similarity)
   - Full-text search (jieba Chinese tokenization)
-  - Hybrid search (RRF algorithm)
+  - Hybrid search (weighted fusion of semantic and keyword results)
 - **Dynamic Embedding**: Support for multiple embedding dimensions (768, 1024, 1536, 3072)
 
 #### Chat System
@@ -474,11 +622,11 @@ First public release of Clouisle - an enterprise-grade knowledge base and AI Age
 ### Technical Stack
 
 #### Backend
-- Python 3.13, FastAPI
-- Tortoise ORM with AsyncPG
-- Celery for background tasks
-- Redis for caching and pub/sub
-- Qdrant for vector storage
+- Async background processing
+- Caching and real-time push
+- Vector retrieval
+
+The concrete services, versions, and deployment requirements are documented in [Deployment architecture](../self-host/architecture.mdx).
 
 #### Frontend
 - Next.js 15, React 19

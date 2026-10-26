@@ -21,7 +21,7 @@ The Agent answers questions from the documents and returns sources; the retrieva
 
 ## Step 1: Create a Knowledge Base & Select Models
 
-<Callout type="info">The embedding model determines the index dimensions, so confirm it before processing documents.</Callout>
+<Callout type="info">Do not change the embedding model casually once chosen — confirm it before processing documents.</Callout>
 
 1. Create a knowledge base; it belongs to the team currently selected in the team switcher at the top.
 2. Select the `embedding` model and optionally a `rerank` model.
@@ -55,8 +55,8 @@ The Agent answers questions from the documents and returns sources; the retrieva
 ## Step 4: Create & Link the Agent
 
 1. Create an Agent and select the `chat` model.
-2. Link the knowledge base you just created, set the search mode to **Hybrid Search** (`hybrid`), set **Top K** to `5`, and keep **Similarity Threshold** at `0.3`.
-3. The **Retrieval Mode** selector only appears once a knowledge base is linked: **Agentic RAG** lets the model decide when to search, **Naive RAG** retrieves automatically on every message, and **Off** disables retrieval augmentation. With no knowledge base linked the selector is hidden and the Agent runs with `rag_mode: off`.
+2. Link the knowledge base you just created, set the search mode to **Hybrid Search**, set **Top K** to `5`, and keep **Similarity Threshold** at `0.3`.
+3. The **Retrieval Mode** selector only appears once a knowledge base is linked: **Agentic RAG** lets the model decide when to search, **Naive RAG** retrieves automatically on every message, and **Off** disables retrieval augmentation. With no knowledge base linked the selector is hidden and the Agent holds a plain conversation.
 4. Prompt: “answer based only on sources; state uncertainty when no answer can be found”.
 5. Preview and publish.
 
@@ -64,6 +64,7 @@ The Agent answers questions from the documents and returns sources; the retrieva
 
 - Document questions cite the correct documents.
 - Unanswerable questions do not produce unsupported claims.
-- Retrieval lab diagnostics are empty or explainable.
-- Rebuild the index after switching embedding models.
-- If recall fails, check Qdrant, PostgreSQL/pg_search, model credentials, and document status.
+- Retrieval lab diagnostics are empty, or their hints explain what happened.
+- After switching embedding models you must rebuild the index; old and new vectors are incompatible, so retrieval fails wholesale otherwise.
+- If nothing is recalled, check in order: whether documents finished processing and have chunks; whether the embedding and rerank models are available and authorized for the current team; whether the retrieval mode, Top K, and similarity threshold fit (too high a threshold filters everything out); and whether the knowledge base has been shared with the current team.
+- If it still returns nothing, ask your deployment administrator to confirm retrieval is running normally. Tuning methods and diagnostic fields are in [Retrieval & Quality Tuning](../guides/knowledge/retrieval.mdx).

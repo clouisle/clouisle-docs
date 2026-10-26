@@ -1,41 +1,59 @@
 ---
 title: Workflow
-description: Understand visual nodes, typed variables, triggers, and the version lifecycle
+description: Understand drafts and publishing, run statuses, human approval, and node traces
 icon: Workflow
 ---
 
-A Workflow orchestrates deterministic multi-step tasks with a directed node graph. The start node defines inputs, intermediate processing nodes transform data or call capabilities, and the output node defines the final result.
+A Workflow pins a multi-step task onto a directed node graph: the start node defines inputs, intermediate nodes transform data or call capabilities, and the output node decides the final result. Unlike an Agent, which figures things out as it goes, a workflow has its order, branches, and parallelism pre-arranged, so the same input follows the same path — which is what makes it suitable when results must be repeatable and auditable.
+
+### Drafts and publishing
+
+- The workflow you are editing is a **draft**. Save it and debug-run it whenever you like; a debug run executes the current draft and does not affect what is live.
+- Only a **published** version can run for real: run forms, triggers, and external calls all target the published version.
+- Every publish creates a version snapshot and marks it published; previously published versions move into history and can be reviewed or restored.
+- Restoring an old version does not erase history: the current version is archived as a backup and the target version is copied into a **new** published version, so old records remain.
+- The publish page offers two presentation modes: **Form & Result** shows only inputs, status, and the final result, suitable for exposing as an app; **Result & Details** shows the result first and lets viewers expand node-level traces, suitable for debugging and internal review.
+
+### What run statuses mean for you
+
+| Status you see | Meaning | What to do |
+| --- | --- | --- |
+| Queued | Submitted, not yet picked up | Wait; if nothing moves for a long time, capacity is short or the execution service is unavailable — contact operations instead of resubmitting |
+| Running | Nodes are executing in order | Wait for the result; cancel the run if you need to stop it |
+| Waiting for approval | Paused at an approval node, awaiting an approver | Open the run details and submit feedback; it will not continue otherwise |
+| Completed | Final output and each node's trace are available | Review or download the result |
+| Failed | Stopped at a node; its details show the error for that node | Fix the configuration and run again |
+| Cancelled / timed out | Cancelled on purpose, or exceeded the run time limit | Run again if you need the result |
+
+Nodes have their own statuses too: waiting, running, completed, failed, and **skipped** (a branch whose condition did not match). Run status and node status mean different things — check the right level when troubleshooting instead of mixing them.
+
+### Waiting for approval
+
+- When a run reaches an approval node the whole run pauses at "waiting for approval" and downstream nodes do not execute.
+- After an approver submits feedback, the run continues from the pause point; **completed nodes are not re-run**, and earlier model calls and tool results are reused.
+- You can require every approver to agree before continuing, or let any single approval pass it; any rejection ends the run.
+- The approval prompt and the fields to fill in are set when the workflow is orchestrated, so approvers see exactly what the author asked for.
+- It is safe to close the page while waiting — the state and the pending task stay in the run record.
+
+### Node traces
+
+Run details show the whole run's inputs and final output, plus each node's inputs and outputs, status, duration, tokens, errors, and the branch taken. Parallel branches appear in the trace at the same time, so you can tell whether a run was slow at a node, failed at a node, or took a different branch at a condition.
+
+- **Comment nodes** are canvas documentation only; they do not execute and do not appear in traces.
+- **Iteration** and **Loop** are container nodes whose inner subgraphs have their own start and exit: iteration runs once per array item, and a loop repeats until its condition is met. Loop counts are capped and force-terminated beyond the cap.
+- Full node and field descriptions are in the [Workflow node reference](/reference/workflow-nodes).
 
 ### Two ways to start
 
 - **User input**: generates an interactive run form, suitable for manual initiation.
-- **Trigger**: starts via API call, `cron` schedule, or Webhook, suitable for integrations and automation.
+- **Trigger**: started by an external call, a schedule, or a webhook, suitable for integrations and automation.
 
-Each Workflow can have only one start node, and the start node cannot be deleted (the canvas rejects the delete and shows a toast).
+Each workflow has exactly one start node, and it cannot be deleted (the canvas rejects the delete and shows a toast).
 
-### Typed data flow
-
-The current definition format is `schema_version: 2`. Node outputs keep native objects and arrays and are no longer implicitly converted to JSON strings; `schema_version: 1` definitions pass JSON strings between nodes and are not compatible. Variable references are made with the editor's variable picker; the pre-publish validation checklist reports nonexistent references, missing inputs, and type mismatches (`Type mismatch: expected X, got Y`) as issues to review before debugging and publishing.
+### Note on legacy workflows
 
 <Callout type="warn">
-**Legacy definition handling (partly not implemented).** v1 and v2 are incompatible (v1 passes JSON strings between nodes), and the code records the intent that "a legacy definition must be re-saved before it can run" — but **neither the backend nor the editor actually enforces that check today**: the backend's `WORKFLOW_SCHEMA_VERSION` constant is declared but never used for validation, and the corresponding editor logic is just a comment, so the run button is not disabled by the version number. When you open a historical Workflow, **save it manually** before running, otherwise you may get results that do not match v1 semantics.
+Early workflows passed textual data between nodes, which is incompatible with how data flows today. When you open a legacy workflow, **save it once manually before running**; otherwise you may get results that differ from what you expect. The pre-publish checklist flags references to nonexistent variables, missing required inputs, and type mismatches — resolve those before running.
 </Callout>
 
-### Nodes and containers
-
-Nodes fall into four categories: model (LLM or media generation), logic (conditions, classification, iteration/loop, human approval), transformation (code, templates, files, variables), and extension (sub-workflows, Agents, tools, knowledge retrieval, and the `answer` node that defines the final result). Iteration loops over arrays; loops repeat until a condition is met; both are container nodes whose inner subgraphs have their own start and exit nodes. Comment nodes (`comment`) on the canvas are documentation only and are excluded from execution planning (`NON_EXECUTABLE_NODE_TYPES = {"comment"}`). See the [Workflow node reference](/reference/workflow-nodes) for the full fields.
-
-### Running, debugging, and observability
-
-Drafts can be **debugged** (`POST /api/v1/workflows/{id}/debug`, which executes the current draft rather than the published version); only a published Workflow can run for real, and the run endpoint rejects anything else outright. Statuses exist on two levels with different meanings — do not mix them when troubleshooting:
-
-- **Run statuses**: `pending`, `running`, `waiting` (awaiting human approval), `success`, `failed`, `cancelled`, `timeout`.
-- **Node statuses**: `pending`, `running`, `waiting`, `success`, `failed`, `skipped` (condition not matched or skipped).
-
-The run drawer shows inputs, results, node traces, Tokens, duration, errors, and the matched branch; a run awaiting approval stays in `waiting` until feedback is submitted (see [Orchestrate a Workflow](../guides/workflow/orchestrate.mdx)). A real run is asynchronous: the endpoint only returns a `run_id` and the task is dispatched to the `workflow` queue for the main worker (see [System Architecture](./architecture.mdx)), so with no consumer on that queue the run stays in `pending` forever.
-
-### Publishing, versions, and restore
-
-Publishing automatically creates a version snapshot and marks that version published. Restoring an old version first archives the current version as a backup (flagged `archived_reason=rollback_backup`), then copies the target version into a **new** published version, so version history is never erased and no existing version record is overwritten. The publish page offers two presentation modes: **Form & Result** (inputs, status, and final result only) or **Result & Details** (result first, with expandable node-level traces).
-
-Related content: [Orchestrate a Workflow](../guides/workflow/orchestrate.mdx), [Versioning](../guides/workflow/versioning.mdx), [Workflow API](/api/workflow).
+Related content: [Orchestrate a workflow](../guides/workflow/orchestrate.mdx), [Triggers](../guides/workflow/triggers.mdx), [Debugging runs](../guides/workflow/debugging.mdx), [Versioning](../guides/workflow/versioning.mdx), [Workflow API](/api/workflow).

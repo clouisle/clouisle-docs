@@ -24,6 +24,10 @@ icon: Settings
 | `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | 允许的前端 Origin；接受 JSON 数组或逗号分隔列表 |
 | `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | 浏览器 API 基路径 |
 | `BACKEND_INTERNAL_URL` | `http://localhost:8000` | 前端服务端访问 API；Compose 内为 `http://api:8000` |
+| `OBSERVABILITY_INSTANCE_ID` | 空 | API 容器/Pod 实例标识，用于可观测性的实例发现；空时取主机名。同一实例内所有 Gunicorn 进程必须共用同一值 |
+| `OBSERVABILITY_INSTANCE_NAME` | 空 | 实例显示名；空时回退到实例 ID |
+
+`OBSERVABILITY_INSTANCE_ID` 只在同一主机上有多个部署、主机名会冲突时才需要显式设置。API 实例每 10 秒上报一次，30 秒未更新视为 stale、60 秒视为 offline。
 
 `API_V1_STR`（默认 `/api/v1`）是后端挂载全部路由的前缀：`/health`、`/openapi.json`、`/embed/*`、`/admin/*` 等都在它之下。它必须与前端构建期 `NEXT_PUBLIC_API_URL`（前端镜像默认 `/api/v1`）和 Ingress/反向代理转发的路径一致；只改其中一处会让浏览器请求或 SSR 取数 404。它不是下一个环境变量的替代品——`NEXT_PUBLIC_API_URL` 是浏览器可访问的相对基路径，`BACKEND_INTERNAL_URL` 只用于 Next.js 服务端，三者职责不同。
 
@@ -61,14 +65,34 @@ Celery broker 与结果后端由 `REDIS_*` 派生（broker `redis://…/0`、bac
 | `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true`（代码默认，官方部署同样 `true`） | 在 Bubblewrap 挂载命名空间内执行可执行载荷 |
 | `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | 代码 `bwrap`；镜像/Compose/K8s `/usr/bin/bwrap` | Bubblewrap 可执行文件名或绝对路径 |
 | `SANDBOX_WORKER_CONCURRENCY` | `1` | Sandbox Worker 并发槽位数 |
-| `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | 任务和会话目录在 Worker 上的根路径 |
+| `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | 任务和会话目录在 Worker 上的根路径；官方部署统一为 `/var/lib/clouisle/sandbox/jobs` |
+| `SANDBOX_CHECKPOINT_ROOT` | 空 | 会话检查点目录；空时为工作区根目录的同级 `checkpoints`。官方部署显式设为 `/var/lib/clouisle/sandbox/checkpoints`，且必须位于工作区之外 |
+| `SANDBOX_WORKER_ID` | 空 | 逻辑 Worker ID；空时首次启动生成并写入保留磁盘。改动值会与磁盘身份冲突并拒绝启动，同一 ID 不得跨不同磁盘 |
+| `SANDBOX_NODE_ID` | 空 | 节点标识；K8s 用 `spec.nodeName` 注入，其他环境默认主机名 |
+| `SANDBOX_WORKER_INSTANCE_ID` | 空 | 本次进程的实例 ID；由 Worker 监督进程分配 |
+| `SANDBOX_WORKER_HEARTBEAT_SECONDS` | `5` | 心跳间隔（秒） |
+| `SANDBOX_WORKER_HEARTBEAT_TTL_SECONDS` | `20` | 心跳过期时间（秒），必须大于心跳间隔，否则启动即报错 |
+| `SANDBOX_WORKER_RECOVERY_SECONDS` | `30` | Worker 失联后开始恢复会话的等待时间（秒） |
+| `SANDBOX_RECOVERY_POLL_SECONDS` | `0.5` | 恢复轮询间隔（秒） |
+| `SANDBOX_SESSION_MAX_RESETS` | `1` | 单个会话允许的检查点恢复次数 |
+| `SANDBOX_SUPERVISOR_RESTART_SECONDS` | `1` | 监督进程重启子进程前的等待（秒） |
+| `SANDBOX_SUPERVISOR_MAX_RESTARTS` | `3` | 监督进程最大重启次数 |
+| `SANDBOX_WORKSPACE_IDLE_SECONDS` | `900` | 工作区空闲多久后清理（秒） |
+| `SANDBOX_CHECKPOINT_TIMEOUT_SECONDS` | `120` | 单轮检查点保存超时（秒） |
 | `SANDBOX_MAX_DISK_MB` | `8192` | 沙箱最大磁盘 |
 | `SANDBOX_SESSION_TTL_HOURS` | `24` | 会话保留 |
 | `SANDBOX_SESSION_CLEANUP_BATCH_SIZE` | `100` | 会话清理每批数量 |
 | `SANDBOX_DEFAULT_PYTHON_BINARIES` | `/usr/local/bin/python3`、`/usr/bin/python3`、`/bin/python3` | 沙箱 Python 解释器候选路径 |
 | `SANDBOX_RESULT_TTL_SECONDS` | `86400` | 结果保留 |
+| `SANDBOX_PACKAGE_INSTALL_TIMEOUT_SECONDS` | `300` | pip/npm 安装超时（秒），取值 `1`–`3600` |
+| `SANDBOX_TASK_MEMORY_MB` | `1024` | 单个任务内存上限（MB），取值 `1`–`8192` |
+| `SANDBOX_TASK_MAX_FILE_SIZE_MB` | `1024` | 单个任务可写文件大小上限（MB），取值 `1`–`8192` |
+| `SANDBOX_TASK_MAX_OPEN_FILES` | `256` | 单个任务可打开文件数，取值 `32`–`4096` |
+| `SANDBOX_TASK_MAX_CPU_SECONDS` | `600` | 单个任务 CPU 时间上限（秒），取值 `1`–`3600` |
 | `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` | `10` | 单产物限制 |
 | `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB` | `10` | 总产物限制 |
+
+`SANDBOX_WORKER_ID` 与检查点目录共同决定会话亲和：同一会话的下一次执行、检查点和过期清理都会路由回它首次落地的 `worker_id`。因此工作区与检查点必须放在持久磁盘上；节点或磁盘丢失后这些会话无法在别的节点上恢复。
 
 启用文件系统隔离（`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`）后，项目提供的部署以 root + `CAP_SYS_ADMIN` 运行 sandbox-worker，用户命名空间创建走特权路径，**无需修改宿主 sysctl**。仅当自定义部署保持 Worker 非 root 时，才依赖宿主内核允许非特权用户命名空间，否则所有沙箱任务报 `bwrap: No permissions to create new namespace`：Ubuntu 23.10+ 需 `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`，Debian 需 `sysctl -w kernel.unprivileged_userns_clone=1`（宿主/节点级设置，Kubernetes 中需对每个节点生效）。完整说明见 [代码沙箱 → 宿主内核要求](../../usage/concepts/sandbox.mdx#kernel-requirements)。
 
@@ -80,7 +104,9 @@ Celery broker 与结果后端由 `REDIS_*` 派生（broker `redis://…/0`、bac
 | `RETRIEVAL_SHADOW_ENABLED` | `false` | 混合检索影子运行 |
 | `RAG_QUERY_CONTEXTUALIZATION_ENABLED` | `false` | 查询上下文改写 |
 | `RAG_QUERY_CONTEXTUALIZATION_TIMEOUT_SECONDS` | `2.0` | 查询改写超时（秒） |
-| `TAVILY_API_KEY` | 空 | 网页搜索内置工具 |
+| `TAVILY_API_KEY` | 空 | 仅用于升级时的站点搜索配置迁移：站点里尚无 Tavily 密钥时用它初始化一次，写入后即加密保存在数据库；运行时不再读取该变量 |
+
+网页搜索（Tavily、Bocha、SearXNG、DeepSeek）的密钥、启用项与默认引擎都由站点级搜索配置管理：保存在全局 `ToolConfig`（`tool_name=web_search`、`team_id=NULL`）的加密 `credentials` 中，只写不回显，不是环境变量；`BOCHA_API_KEY`、`SEARXNG_AUTH_TOKEN`、`DEEPSEEK_API_KEY` 也没有对应的启动环境变量。入口与接口见[工具 API → 站点网页搜索配置](../../api/tools.mdx#站点网页搜索配置)。
 
 ## 流式超时
 
@@ -110,6 +136,20 @@ Celery broker 与结果后端由 `REDIS_*` 派生（broker `redis://…/0`、bac
 `DB_AGGREGATE_CONCURRENCY` 限制的是一个 API 进程内所有聚合 fan-out 共用的信号量，用于防止单次工作台统计请求占满 Tortoise 共享连接池（默认 `maxsize=5`）后把自己的其余查询排在自己后面。仪表盘、Agent 与工作流统计出现连接等待或超时时可下调；把连接池整体调大不是等价方案，默认部署约 17 个进程 × 池，PostgreSQL `max_connections` 为 100。取值与验证方法见[数据库维护与索引调优](../operations/database-maintenance.mdx)。
 
 Worker 消费的队列不是环境变量，而是启动命令的 `-Q` 参数，见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
+
+## 消息集成
+
+飞书与微信 iLink 没有独立进程，也没有 receiver 专用的环境变量：飞书长连接由消费 `agent` 队列的 Worker 持有单例接收器，微信轮询由 `default` 队列的周期任务驱动。需要调整的是轮询规模：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `WECHAT_POLL_BATCH_SIZE` | `64` | 单个轮询批次最多认领的绑定数，取值 `1`–`512` |
+| `WECHAT_POLL_CONCURRENCY` | `16` | 一个批次内并发轮询的绑定数，取值 `1`–`128` |
+| `WECHAT_POLL_MAX_BATCHES` | `8` | 固定批次数（PostgreSQL 中的可复用槽位），取值 `1`–`128`；同时决定最多有多少个批次任务在途 |
+
+三个值共同限定并发上界：批次数 × 批大小 = 单轮最多处理的绑定数。槽位与认领记录存在 PostgreSQL，所以增加 `WECHAT_POLL_MAX_BATCHES` 在 Worker 运行期间是安全的；调得过高的代价是同时占用的数据库连接和微信请求配额。批次在 30 秒处截止，认领 90 秒后可由其他 Worker 接管。排障步骤见[故障排查](../operations/troubleshooting.mdx#wechat-polling-paused)，用户侧说明见[微信 iLink](../../usage/guides/integrations/wechat.mdx)。
+
+飞书的 App ID/Secret、接收方式（HTTP 回调或长连接）与回调密钥都存在数据库的集成设置里，不是环境变量；修改后无需重启 Worker。
 
 ## 前端构建期
 

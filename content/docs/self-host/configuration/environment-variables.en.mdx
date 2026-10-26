@@ -24,6 +24,10 @@ Configuration has three layers: environment variables control startup-level conf
 | `BACKEND_CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed frontend Origins; accepts a JSON array or a comma-separated list |
 | `NEXT_PUBLIC_API_URL` | Compose `/api/v1` | Browser API base path |
 | `BACKEND_INTERNAL_URL` | `http://localhost:8000` | Frontend server-side access to API; `http://api:8000` inside Compose |
+| `OBSERVABILITY_INSTANCE_ID` | Empty | API container/Pod instance identifier used for observability instance discovery; hostname when empty. All Gunicorn processes in one instance must share it |
+| `OBSERVABILITY_INSTANCE_NAME` | Empty | Instance display name; falls back to the instance ID when empty |
+
+Set `OBSERVABILITY_INSTANCE_ID` explicitly only when several deployments share a host and their hostnames would collide. API instances report every 10 seconds; 30 seconds without an update counts as stale, 60 seconds as offline.
 
 `API_V1_STR` (default `/api/v1`) is the prefix under which the backend mounts every router: `/health`, `/openapi.json`, `/embed/*`, `/admin/*` and the rest all live below it. It must match the frontend build-time `NEXT_PUBLIC_API_URL` (frontend image default `/api/v1`) and the path the Ingress/reverse proxy forwards; changing only one of the three breaks browser calls or server-side fetching with a 404. It is not a substitute for either of the other two: `NEXT_PUBLIC_API_URL` is the browser-visible relative base path and `BACKEND_INTERNAL_URL` is used only by the Next.js server.
 
@@ -61,14 +65,34 @@ The Celery broker and result backend are derived from `REDIS_*` (broker `redis:/
 | `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true` (code default; official deployments also `true`) | Run executable payloads inside a Bubblewrap mount namespace |
 | `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | code `bwrap`; image/Compose/K8s `/usr/bin/bwrap` | Bubblewrap executable name or absolute path |
 | `SANDBOX_WORKER_CONCURRENCY` | `1` | Number of concurrent sandbox worker slots |
-| `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | Host-side root for job and session directories |
+| `SANDBOX_WORKSPACE_ROOT` | `/tmp/clouisle-sandbox/jobs` | Root for job and session directories on the worker; supplied deployments use `/var/lib/clouisle/sandbox/jobs` |
+| `SANDBOX_CHECKPOINT_ROOT` | Empty | Session checkpoint directory; empty means `checkpoints` beside the workspace root. Supplied deployments set `/var/lib/clouisle/sandbox/checkpoints` explicitly, and it must stay outside the workspace |
+| `SANDBOX_WORKER_ID` | Empty | Logical worker ID; generated on first start and stored on the retained disk when empty. Changing it conflicts with the disk identity and refuses to start, and one ID must never span different disks |
+| `SANDBOX_NODE_ID` | Empty | Node identifier; Kubernetes injects `spec.nodeName`, other environments default to the host name |
+| `SANDBOX_WORKER_INSTANCE_ID` | Empty | Instance ID of the current process; assigned by the worker supervisor |
+| `SANDBOX_WORKER_HEARTBEAT_SECONDS` | `5` | Heartbeat interval (seconds) |
+| `SANDBOX_WORKER_HEARTBEAT_TTL_SECONDS` | `20` | Heartbeat expiry (seconds); must exceed the interval or startup fails |
+| `SANDBOX_WORKER_RECOVERY_SECONDS` | `30` | Wait before recovering sessions of a worker that stopped heartbeating (seconds) |
+| `SANDBOX_RECOVERY_POLL_SECONDS` | `0.5` | Recovery poll interval (seconds) |
+| `SANDBOX_SESSION_MAX_RESETS` | `1` | Checkpoint recoveries allowed per session |
+| `SANDBOX_SUPERVISOR_RESTART_SECONDS` | `1` | Delay before the supervisor restarts a child process (seconds) |
+| `SANDBOX_SUPERVISOR_MAX_RESTARTS` | `3` | Maximum supervisor restarts |
+| `SANDBOX_WORKSPACE_IDLE_SECONDS` | `900` | Idle time before a workspace is cleaned up (seconds) |
+| `SANDBOX_CHECKPOINT_TIMEOUT_SECONDS` | `120` | Timeout for saving one round's checkpoint (seconds) |
 | `SANDBOX_MAX_DISK_MB` | `8192` | Maximum sandbox disk |
 | `SANDBOX_SESSION_TTL_HOURS` | `24` | Session retention |
 | `SANDBOX_SESSION_CLEANUP_BATCH_SIZE` | `100` | Session cleanup batch size |
 | `SANDBOX_DEFAULT_PYTHON_BINARIES` | `/usr/local/bin/python3`, `/usr/bin/python3`, `/bin/python3` | Candidate sandbox Python interpreter paths |
 | `SANDBOX_RESULT_TTL_SECONDS` | `86400` | Result retention |
+| `SANDBOX_PACKAGE_INSTALL_TIMEOUT_SECONDS` | `300` | pip/npm install timeout (seconds), `1`–`3600` |
+| `SANDBOX_TASK_MEMORY_MB` | `1024` | Memory limit per task (MB), `1`–`8192` |
+| `SANDBOX_TASK_MAX_FILE_SIZE_MB` | `1024` | Writable file size limit per task (MB), `1`–`8192` |
+| `SANDBOX_TASK_MAX_OPEN_FILES` | `256` | Open file limit per task, `32`–`4096` |
+| `SANDBOX_TASK_MAX_CPU_SECONDS` | `600` | CPU time limit per task (seconds), `1`–`3600` |
 | `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` | `10` | Per-artifact limit |
 | `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB` | `10` | Total artifacts limit |
+
+`SANDBOX_WORKER_ID` plus the checkpoint directory determine session affinity: the next execution, the checkpoint, and expiry cleanup of a session all route back to the `worker_id` where it first landed. Keep the workspace and checkpoints on persistent storage; once a node or its disk is lost those sessions cannot be recovered elsewhere.
 
 With filesystem isolation enabled (`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`), the supplied deployments run the sandbox worker as root with `CAP_SYS_ADMIN`, so user namespace creation is privileged — no host sysctl changes are required. Only custom deployments that keep the worker non-root depend on the host kernel permitting unprivileged user namespaces, otherwise every sandbox job fails with `bwrap: No permissions to create new namespace`: on Ubuntu 23.10+ run `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; on Debian run `sysctl -w kernel.unprivileged_userns_clone=1` (host/node-level settings; in Kubernetes they must be applied to every node). Full details: [Code Sandbox → Host Kernel Requirements](../../usage/concepts/sandbox.mdx#kernel-requirements).
 
@@ -80,7 +104,9 @@ With filesystem isolation enabled (`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`),
 | `RETRIEVAL_SHADOW_ENABLED` | `false` | Shadow-run hybrid retrieval |
 | `RAG_QUERY_CONTEXTUALIZATION_ENABLED` | `false` | Query contextualization rewrite |
 | `RAG_QUERY_CONTEXTUALIZATION_TIMEOUT_SECONDS` | `2.0` | Query rewrite timeout (seconds) |
-| `TAVILY_API_KEY` | Empty | Web search built-in tool |
+| `TAVILY_API_KEY` | Empty | Used only by the upgrade-time site search migration: it seeds the Tavily key once when the site has none, after which the key is stored encrypted in the database. Runtime never reads this variable |
+
+Web search (Tavily, Bocha, SearXNG, DeepSeek) keys, enabled engines, and the default engine are all owned by the site-level search configuration: they live in the encrypted `credentials` of the global `ToolConfig` (`tool_name=web_search`, `team_id=NULL`), are write-only, and are not environment variables; `BOCHA_API_KEY`, `SEARXNG_AUTH_TOKEN`, and `DEEPSEEK_API_KEY` have no startup variables either. See [Tools API → Site Web Search Configuration](../../api/tools.mdx#site-web-search-configuration).
 
 ## Streaming Timeouts
 
@@ -111,7 +137,21 @@ With filesystem isolation enabled (`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`),
 
 The queues a worker consumes are not an environment variable — they are the `-Q` flag on the start command, see [Deployment architecture → Celery queue layout](../architecture.mdx#celery-queue-layout).
 
-## Frontend Build-time
+## Messaging integrations
+
+Feishu and WeChat iLink run no separate process and have no receiver-specific environment variables: the Feishu long connection is held by a singleton receiver inside workers consuming the `agent` queue, and WeChat polling is driven by periodic tasks on the `default` queue. The only knobs are the polling bounds:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `WECHAT_POLL_BATCH_SIZE` | `64` | Maximum bindings claimed by one polling batch, `1`–`512` |
+| `WECHAT_POLL_CONCURRENCY` | `16` | Bindings polled concurrently inside one batch, `1`–`128` |
+| `WECHAT_POLL_MAX_BATCHES` | `8` | Number of fixed, reusable slots in PostgreSQL, `1`–`128`; also caps in-flight batch tasks |
+
+Together they bound concurrency: batches x batch size is the maximum bindings handled per round. Slots and claims live in PostgreSQL, so raising `WECHAT_POLL_MAX_BATCHES` is safe while workers run; set it too high and you spend database connections and WeChat request quota. A batch stops at 30 seconds and its claim can be taken over after 90 seconds. For troubleshooting see [Troubleshooting](../operations/troubleshooting.mdx#wechat-polling-paused); the user-facing overview is [WeChat iLink](../../usage/guides/integrations/wechat.mdx).
+
+The Feishu App ID/Secret, receive mode (HTTP callback or long connection), and callback secrets live in the database integration settings, not environment variables; changing them needs no worker restart.
+
+## Frontend build-time
 
 | Variable | Default | Description |
 | --- | --- | --- |

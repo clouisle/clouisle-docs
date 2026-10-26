@@ -1,76 +1,76 @@
 ---
 title: Triggers and Runs
-description: Start workflows manually, via API, and via Webhook
+description: Start workflows manually, via Webhook, and on a schedule — and embed the run page into external sites
 icon: Webhook
 ---
 
-Workflow trigger methods are configured in **Workflow Settings**. Drafts can be debugged before publishing; formal invocations require the workflow to be published.
+Trigger types are configured under **Workflow Settings** > **Trigger** > **Trigger Method**: **Manual**, **Webhook**, and **Scheduled Task**. Drafts can always be debugged; external triggers (Webhook, embed, schedule) require the workflow to be published.
 
-## Manual and API Runs
+## Manual Runs
 
-Select **Run** in the editor, fill in the input variables, and start. For API runs, use:
+Select **Run** in the editor to open the **Test Run** drawer, fill in the inputs, and select **Start Run**. Before publishing, only **Debug (use draft)** is available.
 
-```bash
-curl -X POST "$CLOUISLE_API/api/v1/workflows/<workflow_id>/run" \
-  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"inputs":{"query":"检查订单状态"}}'
-```
-
-The `inputs` in the request body defaults to an empty object. The response returns a run ID; use the run query interface to get the status and result.
+After publishing, users can also open the run page directly, fill in the inputs, and run it; the run page presentation is chosen at publish time (**Form and result** or **Result with details**). Run records live on the **Logs** page in the editor menu.
 
 ## Webhook
 
-1. In **Workflow Settings**, select **Webhook**.
-2. After saving, a Webhook Token and URL are generated.
-3. On the **Access API** page, copy the URL and call it with API Key Bearer authentication.
-4. The request JSON directly provides the workflow input fields.
-
-Webhook workflows must be published with the corresponding trigger enabled. The initial response contains the run ID, status, and `stream_url`; connecting to that URL shows node events via SSE.
-
-```bash
-curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
-  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"检查订单状态"}'
-```
-
-## Cron
-
-In **Workflow Settings** > **Trigger**, select **Scheduled Task**; the UI configures an interval, daily, weekly, monthly, or a custom Cron schedule. The frequency is converted into a standard cron expression (`minute hour day month weekday`, e.g. `0 9 * * 1-5` for weekdays at 9 AM), with interval presets of 5/10/15/30 minutes and 1/2/3/6/12 hours.
-
-<Callout type="warn" title="Saving the configuration does not make it run">
-  The backend **does** implement the scheduling logic: `workflow.check_scheduled` (`backend/app/services/workflow/tasks.py`) selects published workflows with `trigger_type=cron`, uses `croniter` to test whether the current minute matches the expression, and fires a run with empty inputs `{}` attributed to the workflow creator.
-
-  But no supplied deployment schedules it, for three separate reasons that all have to be solved:
-
-  1. **Not in the `include` list**: the `celery_app` `include` list in `backend/app/core/celery.py` does not contain `app.services.workflow.tasks`, so the task is not registered with the worker by default.
-  2. **Not in the Beat schedule**: the `beat_schedule` in the same file only holds usage resets, API-key/password expiry checks, sandbox session cleanup, and the lost-AgentRun sweep — there is no `workflow.check_scheduled`. The supplied Beat container (the `beat` service in Compose/Helm/K8s, command `python main.py beat`) runs only that table.
-  3. **Key mismatch**: the scheduling task reads `trigger_config["cron"]`, while the **Workflow Settings** form writes `trigger_config["cron_expression"]`. Even once scheduled, an expression saved through the UI is never matched.
-
-  No `task_routes` pattern matches the task either, so it lands on the `default` queue — confirm a worker consumes that queue, or set `options.queue` on the Beat entry.
-</Callout>
-
-### Enabling Cron in a custom deployment
-
-1. Add `app.services.workflow.tasks` to the `celery_app` `include` list, or import the module when the worker starts.
-2. Add a `beat_schedule` entry (once a minute is the intended cadence):
-
-```python title="app/core/celery.py"
-celery_app.conf.beat_schedule["workflow-check-scheduled"] = {
-    "task": "workflow.check_scheduled",
-    "schedule": crontab(minute="*"),
-}
-```
-
-3. Align the expression key: rename the UI-written `trigger_config.cron_expression` to `cron`, or write the expression under the `cron` key through the API.
-4. Confirm a worker that consumes the `default` queue is running, otherwise nothing picks up the dispatched task.
+1. In **Workflow Settings** > **Trigger**, set **Trigger Method** to **Webhook** and save.
+2. Saving generates a **Webhook URL**. To invalidate an old address, click **Regenerate** — the old URL stops working immediately.
+3. Open the **Access API** page and copy the Webhook URL together with the call sample it provides; replace `YOUR_API_KEY` in the sample with your own API key.
+4. Send the request: the body supplies the workflow's input fields directly — do **not** wrap them in another `inputs` object.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-trigger-settings.png" alt="Workflow trigger settings" />
   <figcaption>Workflow trigger settings</figcaption>
 </figure>
 
+Things to watch:
+
+- The workflow must be published and its trigger method must be Webhook; otherwise the request is rejected with **Invalid Webhook token**, **Workflow not published**, or **Webhook trigger disabled**.
+- Calls require API key authentication, and the key must have access to that workflow. Create and revoke keys on the **API keys** page in the user menu; see [API keys](../administration/api-keys.mdx).
+- The request immediately returns a run record; follow progress and results on the **Logs** page or in the run drawer.
+- A workflow containing a Pause node stops at that point waiting for input or approval instead of holding the connection open.
+
+Complete request and response fields are documented in the [Workflow API](../../../api/workflow.mdx).
+
+## Scheduled Tasks
+
+In **Workflow Settings** > **Trigger**, set **Trigger Method** to **Scheduled Task**, then choose a **Schedule Frequency**:
+
+| Frequency | What to fill in | Resulting expression |
+| --- | --- | --- |
+| **Run at interval** | **Execution Interval**: 5 / 10 / 15 / 30 minutes, 1 / 2 / 3 / 6 / 12 hours | Expressions such as `*/5 * * * *` or `0 */2 * * *` |
+| **Run daily** | Run time | `minute hour * * *` |
+| **Run weekly** | Weekday + run time | `minute hour * * weekday`, e.g. `0 9 * * 1-5` for weekdays at 9 AM |
+| **Run monthly** | Day of month + run time | The run time on that day each month |
+| **Custom Cron** | **Cron Expression** | Fill in `minute hour day month weekday` directly |
+
+Scheduled runs start with empty inputs, and the run record belongs to the workflow creator.
+
+<Callout type="warn" title="Scheduling depends on a scheduler service in your deployment">
+  Saving the plan only stores configuration. Scheduled triggers fire only when the deployment has a scheduler service enabled; the bundled default deployment does not enable it, so a saved plan will not run on its own there. If you need scheduled runs, ask your deployment administrator to enable the scheduler and to confirm it recognises the plan format the interface saves (otherwise nothing fires at the appointed time either). For the diagnostic path, see the background-task sections of [Troubleshooting](../../../self-host/operations/troubleshooting.mdx).
+</Callout>
+
+## Embedding the Run Page
+
+To embed a published workflow's run page into your own site or internal system:
+
+1. Select **Embed** in the editor toolbar (the **Embed Settings** dialog).
+2. Turn on **Enable Embedding**. The switch is unavailable until the workflow is published — publish first.
+3. Fill in **Allowed Domains**: `example.com`, `example.com:3000`, or a wildcard subdomain such as `*.example.com`, separated by commas or newlines. **Leaving it empty means no origin restriction** — any site can embed it, so do not leave it empty in production.
+4. Adjust **Show Header**, **Show History** (history is stored in the visitor's browser), and **Allow New** as needed, plus **Theme** (auto/light/dark) and **Primary Color**.
+5. Choose the **Bubble**, **Fullscreen**, or **Mobile** embed mode; bubble mode also offers a **Bubble Position** (bottom-right/bottom-left) and a **Greeting Message**.
+6. Paste a `clou_`-prefixed key into **API Key**; it is filled into the snippet below. Copy the snippet onto your site.
+7. Select **Save** and the snippet is ready to use.
+
+Things to watch:
+
+- The embed page reads the published version only; draft edits never appear in it.
+- Embedding authenticates with an API key that must have access to the workflow; revoking the key disables the embed.
+- Inputs and result presentation follow the presentation mode chosen when publishing. For the full option list, snippet parameters, and authentication details, see [Standalone Runs and Web Embedding](../agent/embed-and-share.mdx) and the [Embed API](../../../api/embed.mdx).
+
 ## Status and Cancellation
 
-Run statuses include `pending`, `running`, `waiting`, `success`, `failed`, `cancelled`, and `timeout`; `waiting` means the run stopped at a Pause node awaiting approval or extra variables. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted. See the [Workflow API](/api/workflow) for streaming run events.
+Run statuses include **Pending**, **Running**, **Awaiting input**, **Success**, **Failed**, **Cancelled**, and **Timeout**; **Awaiting input** means the run stopped at a Pause node awaiting approval or extra variables. The run drawer can cancel tasks still executing; some external API requests already sent cannot be interrupted.
+
+What each status means and the troubleshooting order are covered in [Workflow Debugging and Monitoring](./debugging.mdx).

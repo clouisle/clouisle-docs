@@ -113,6 +113,22 @@ client.create_collection(
 
 Multi-instance APIs share the upload directory (NFS or object storage); keep session state in Redis, never on local disk. Drain connections before stopping a process during rolling deploys so in-flight requests can finish.
 
+## Messaging integration availability
+
+Messaging integrations add no separate process; they scale with `worker` replicas:
+
+- **Feishu long connection**: every worker consuming the `agent` queue starts a receiver supervisor thread, but only the one holding the Redis lease (15-second TTL, 2-second reconciliation) actually owns the connection. When that holder exits, the lease expires and another worker takes over within about a dozen seconds, without duplicate messages.
+- **WeChat polling**: batch slots and claims live in PostgreSQL (`WECHAT_POLL_MAX_BATCHES`, default `8`; each batch stops at 30 seconds and its claim can be taken over after 90). Any number of `worker` replicas can participate safely, and a crashed batch is picked up by another replica.
+- **Beat**: still exactly one replica. It reconciles the integration schedule against PostgreSQL every 2 seconds and rebuilds entries after a restart, with no manual recovery.
+
+## Sandbox availability boundary
+
+`sandbox-worker` is **not** a stateless service you can scale for high availability: a session is bound to the `worker_id` and node disk where it first landed, and its checkpoints live on that same disk. The realistic options are:
+
+- Run one sandbox worker per node (a single instance in Compose, a DaemonSet in Kubernetes), so a node failure only affects sessions on that node.
+- Recover from the checkpoint when the process crashes or restarts; a session may be recovered once by default (`SANDBOX_SESSION_MAX_RESETS=1`).
+- Upload or export artifacts you need to keep to object storage instead of backing up the `hostPath`; sessions on a lost node or disk cannot be rebuilt elsewhere.
+
 ## Disaster recovery and multi-region
 
 Dump the primary daily with `pg_dump`, compress, and upload off-site; snapshot Qdrant per collection; Redis holds only cache/queue state so backup is optional. Recovery drills must cover Qdrant and uploads, recording RTO/RPO. For multi-region, use DNS failover (short TTL plus health checks) to switch primary/backup regions.
@@ -123,7 +139,7 @@ The backend exposes no built-in Prometheus `/metrics` endpoint; alert on externa
 
 ## Failover drills
 
-Regularly stop the primary to verify replica promotion, and stop one backend to verify traffic shift. Drill checklist: replica `pg_is_in_recovery()` returns `false`, LB health checks still return 200, no queue buildup.
+Regularly stop the primary to verify replica promotion, and stop one backend to verify traffic shift. Drill checklist: replica `pg_is_in_recovery()` returns `false`, LB health checks still return 200, no queue buildup; after stopping one `worker`, the Feishu long-connection lease moves to another replica within about a dozen seconds and WeChat polling batches keep progressing; stopping a sandbox node is expected to lose that node's sessions while the others stay unaffected.
 
 ## Best practices
 

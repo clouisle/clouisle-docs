@@ -272,13 +272,61 @@ Outputs: All top-level keys returned in the dictionary/object are mapped to indi
 
 #### Pause (`pause`)
 - Container: `node.data.pauseConfig`.
-- `mode`: `"approval"` (await human sign-off) or `"variables"` (await external form input).
-- Suspends workflow execution and fires an event notification, resuming when input or approval is received.
+- `mode`: `"approval"` (await human sign-off) or `"variables"` (await external form input); default `"variables"`.
+- `title`: request title; falls back to the node label when empty.
+- `description`: request description template with `{{variable}}` interpolation. It is resolved before the pause request is stored; unavailable references become empty strings and the raw `{{...}}` text is **never** shown to approvers. The same text feeds the pending notification.
+- `inputVariables`: fields collected in `variables` mode, each with `name`, `type`, `required`, `description`, plus optional `label` and `default`.
+- `approverIds`: optional approver list. When non-empty, only those users (still in the team and active) may submit; superusers keep an administrative override. When absent or empty, the fallback is the workflow creator plus team Owners/Admins.
+- `requireAllApprovals`: `approval` mode only, default `false`. With `false`, the first submission decides the outcome; with `true`, every approver must submit their own decision, the run resumes only when all approve, and any rejection fails it immediately. A duplicate submission by the same approver returns `workflow_pause_already_submitted`.
+
+Outputs:
+
+- `variables` mode: one output per declared field, taken from the submitted values.
+- `approval` mode: `decision` (`approved` / `rejected`), `approved` (boolean), `comment`, and `submitted_by`. When `decision` is not `approved`, the run fails with `workflow_approval_rejected`.
 
 #### Output Node (`answer`)
 - Container: `node.data.answerConfig`.
 - `outputs`: Final key-value dictionary presented to the caller (`string`, `number`, `boolean`, `array`, `object`).
 - `streaming`: Can bind directly to an upstream streaming LLM node's `response` to stream text back to client applications.
+
+---
+
+## Tool node (`tool`)
+
+Executes a configured built-in tool, custom HTTP/code/database tool, MCP tool, or Skill. Container: `node.data.toolConfig` (with `node.data.config` as a fallback).
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `toolId` / `tool_id` | UUID string | one of this or `toolName` | ID of a custom / MCP / Skill tool |
+| `toolType` | string | `"builtin"` | `builtin`, `custom`, `mcp`, `skill` |
+| `toolName` | string | `null` | Built-in tool name (required when `toolType: builtin`) |
+| `mcpToolName` | string | `null` | The specific tool to call inside the MCP server (used when `toolType: mcp`) |
+| `parameterMappings` / `inputs` | array | `[]` | One entry per parameter: `name`, `source` (`variable` / `constant`), `variableRef`, `constantValue`, `type` |
+| `arguments` | object | `null` | Legacy shape `{param: variableRef}`; converted to mappings on load |
+| `outputVariable` | string | `"result"` | Output variable name for the tool result |
+
+### Parameter type conversion
+
+Each mapping may declare a parameter `type`, and the executor converts text inputs once before calling the tool — this matters because constants entered in the UI are strings:
+
+| Declared type | Text conversion | Valid example |
+| --- | --- | --- |
+| `string` | Leave as-is | `"abc"` |
+| `integer` | `int(value)` | `"42"` → `42` |
+| `number` | `float(value)` | `"3.5"` → `3.5` |
+| `boolean` | `json.loads(value)` | `"true"` → `true` |
+| `array` | `json.loads(value)` | `"[1,2,3]"` → `[1,2,3]` |
+| `object` | `json.loads(value)` | `"{\"a\":1}"` → `{"a":1}` |
+
+Values already of the native type pass through untouched without re-parsing, but the type must match exactly — mapping a float to `integer` or an integer to `boolean` fails (`number` accepts both integers and floats). Parameters without a declared type are not converted. A failed conversion (non-numeric, invalid JSON, `NaN`/`Infinity`, type mismatch) fails the node with `invalid_tool_arguments` instead of handing a wrongly typed value to the tool. Declare `type` on a mapping if a constant like `"10"` must become a number.
+
+### web_search engine parameter
+
+When the built-in `web_search` tool is selected, the node automatically adds a `search_engine` parameter mapping and shows an engine dropdown: `auto` inherits the site default, and the other options list only site-enabled engines. Execution re-validates the site configuration, so a disabled engine fails outright. See [Built-in Tools](/en/usage/guides/tools/built-in).
+
+### Outputs and failures
+
+Outputs: `result` (tool return value), `status` (`success` / `error`), `executionTime` (milliseconds), plus the alias named by `outputVariable`; a failure also carries `error`. A missing tool, a private tool that does not belong to the current trigger user, or a cross-team tool without a share header all fail with `tool_not_found`. HTTP tools remain subject to the SSRF allowlist and database tools still enforce read-only validation.
 
 ---
 

@@ -4,8 +4,6 @@ description: 配置模型、提示词、变量、知识库、工具并发布 Age
 icon: Bot
 ---
 
-import { TypeTable } from 'fumadocs-ui/components/type-table';
-
 Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排区和实时预览：
 - **左侧编排区（Orchestration Editor）**：配置模型、系统提示词、变量、知识库、工具与运行参数。
 - **右侧即时预览面板（Live Preview Panel）**：在不离开页面或发布更改的情况下，与草稿 Agent 进行对话测试。
@@ -14,7 +12,7 @@ Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排�
 手机端隐藏并排预览，避免压缩编排区。点击顶部工具栏的 **预览**，即可在全屏抽屉式面板中打开对话；关闭预览即可返回编辑。
 
 <Callout type="info">
-  当前团队必须已授权一个启用的 `chat` 模型。创建需要 `agent:create`；发布需要 `agent:publish`。
+  当前团队必须已授权一个启用的对话模型。创建需要创建 Agent 的权限；发布需要发布 Agent 的权限。
 </Callout>
 
 ## 创建 Agent
@@ -25,22 +23,10 @@ Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排�
 4. 进入 Agent Studio 编排页后选择右上角 **Agent 设置**，配置模型、开场消息、建议问题与可见性。
 5. 可见性默认为**私有**（仅创建者可访问），可切换为**团队**。
 
-<TypeTable
-  type={{
-    name: { description: 'Agent 显示名称', type: 'string', required: true },
-    description: { description: 'Agent 用途和能力描述', type: 'string' },
-    team_id: { description: '所属团队 ID', type: 'string', required: true },
-    model_id: { description: 'LLM 模型（团队授权的 TeamModel）', type: 'string', required: true },
-    system_prompt: { description: '定义 Agent 行为的系统提示词', type: 'string' },
-    max_iterations: { description: '工具调用迭代上限（每次工具调用计一次迭代）', type: 'number', default: 5 },
-    visibility: { description: '可见性', type: "'private' | 'team'", default: 'private' },
-  }}
-/>
-
-**最大迭代次数（Max Iterations）** 是 Agent 的设置项 `max_iterations`：Agent 在一次回复里最多执行多少轮工具调用，默认 `5`，取值范围 `1-200`（后端校验）。设得过低会让复杂任务提前以 `max_iterations_reached` 结束；设得过高则可能在工具反复失败时消耗大量 Token。
+**最大迭代次数** 决定 Agent 在一次回复里最多执行多少轮工具调用：默认 `5`，可设 `1-200`。设得过低会让复杂任务提前结束，设得过高则可能在工具反复失败时消耗大量 Token。
 
 <Callout type="info">
-  Agent 不暴露逐采样参数（Temperature、Max Tokens、Top P、Frequency/Presence Penalty）。LLM 采样默认值配置在模型本身的 `default_params` 中。Agent 只配置 `model_id`、`system_prompt`、`max_iterations`、工具集和知识库关联。
+  Agent 不暴露逐次生成的采样参数（Temperature、Max Tokens、Top P、Frequency/Presence Penalty）。采样默认值配置在模型本身；Agent 只选择模型、编写系统提示词、设置最大迭代次数，并关联工具与知识库。字段级说明见 [Agent 配置参考](/reference/agent-config)。
 </Callout>
 
 <figure>
@@ -58,25 +44,14 @@ Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排�
 ## 配置知识库与 RAG
 
 1. 在**知识库**区域选择**添加**。
-2. 选择知识库以及 `vector`、`fulltext` 或 `hybrid` 检索方式。
-3. 设置 Top K（`1-100`，默认 `5`）和阈值（`0-1`，默认 `0.3`）。
+2. 选择知识库以及**向量**、**全文**或**混合**检索方式。
+3. 设置返回结果数（`1-100`，默认 `5`）和相似度阈值（`0-1`，默认 `0.3`）。
 4. 可选启用**重排序（Rerank）**以提高召回精度。
 5. 设置整体 RAG 模式：**关闭**、**自动（Auto）** 或 **智能体（Agentic）**。
 
-<TypeTable
-  type={{
-    rag_mode: { description: '整体 RAG 模式', type: "'off' | 'auto' | 'agentic'", default: '关联知识库时为 agentic；无知识库时为 off' },
+单知识库的检索方式默认**混合**；多个知识库按列表顺序进入检索上下文，编辑 Agent 时可拖动调整顺序。未关联知识库时 RAG 会自动关闭，编辑器也会隐藏 RAG 模式选择器；关联后才显示。
 
-    search_mode: { description: '单知识库检索方式', type: "'vector' | 'fulltext' | 'hybrid'", default: 'hybrid' },
-    top_k: { description: '单知识库返回结果数', type: 'number', default: 5 },
-    score_threshold: { description: '最低召回分数', type: 'number', default: 0.3 },
-    rerank: { description: '是否启用重排序', type: 'boolean', default: false },
-  }}
-/>
-
-知识库顺序通过 `knowledge_base_configs` 列表定义，编辑 Agent 时可调整排列顺序，该顺序在 Agent 检索上下文时生效。
-未关联知识库时，后端会将持久化的 `rag_mode` 规范化为 `off`，编辑器也会隐藏 RAG 模式选择器；关联知识库后才显示该选择器。
-
+检索模式的含义、混合检索的团队灰度与调参方法见[检索与质量调优](/usage/guides/knowledge/retrieval)。
 
 ## 添加工具和能力
 
@@ -84,7 +59,7 @@ Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排�
 
 | 工具类型 | 说明 | 前置条件 |
 | --- | --- | --- |
-| Web Search | 网络搜索，基于 Tavily | 工具配置中存储 `TAVILY_API_KEY` |
+| Web Search | 站点托管的网页搜索：可选择 Tavily、博查、SearXNG 或 DeepSeek，默认项使用站点默认引擎 | 管理员已在站点**能力** > **配置搜索**中启用并配置引擎 |
 | Calculator | 数学计算 | 无 |
 | Date/Time | 日期与时间查询 | 无 |
 | Unit Converter | 单位换算 | 无 |
@@ -92,44 +67,45 @@ Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排�
 | MCP | Model Context Protocol 工具 | 先在**能力**中配置 |
 | Skill | 预定义技能 | 无 |
 
-工具显示"需要配置"时，先前往**能力**完成凭据。自定义工具先在**能力**中创建和测试，再按 Agent 启用。
+<Callout type="warn" title="不要在 Agent 里配搜索密钥">
+  Agent 不保存搜索凭据，也不能覆盖搜索地址。网页搜索的引擎下拉只列出站点已启用的引擎；即使保存过某个引擎，执行时也会重新校验站点配置，引擎被禁用后该选择即无法运行。搜索凭据与引擎管理见[内置工具](/usage/guides/tools/built-in#网页搜索站点托管)。
+</Callout>
 
-<TypeTable
-  type={{
-    max_tool_call_iterations: { description: '最大工具调用迭代次数', type: 'number', default: 5 },
-    tool_timeout: { description: '单次工具调用超时', type: 'string', default: '30s' },
-  }}
-/>
+自定义工具先在**能力**中创建和测试，再按 Agent 启用。工具显示“需要配置”时，先前往**能力**完成凭据（网页搜索除外，它由站点统一配置）。
+
+工具调用的超时与迭代上限在 Agent 设置中调整：单次工具调用超时默认 `30` 秒，工具调用迭代上限与最大迭代次数一致（默认 `5`）。
 
 ## 配置附件、媒体与记忆
 
 启用附件、生图、生视频和跨会话记忆前，先在 Agent **编排**中开启对应能力：
 
-| 能力 | 配置路径 | 详细说明 |
+| 能力 | 配置位置 | 默认与限制 |
 | --- | --- | --- |
-| 附件 | **文件与图片** | 单文件 `10MB`（`1KB-50MB`），每条消息 `5` 个（`1-10`） |
-| 生图 | **生图** | 默认 `1024×1024`（`256-4096`），单次最多 `4` 张（`1-10`） |
+| 附件 | **文件与图片** | 单文件 `10MB`（`1KB-50MB`），每条消息 `5` 个（`1-10`）；支持 PDF、Word、PowerPoint、Excel、TXT、Markdown、CSV、JSON、HTML 和图片 |
+| 生图 | **生图** | 默认 `1024×1024`（`256-4096`），单次最多 `4` 张（`1-10`），允许参考图默认开启 |
 | 生视频 | **生视频** | 默认 `5` 秒（`1-30` 秒），宽高比 `16:9` |
-| 记忆 | **记忆** | 最大记忆数 `10`（`1-50`），自动提取默认开启 |
+| 记忆 | **记忆** | 每次最多注入 `10` 条记忆（`1-50`），自动提取默认开启 |
 
-媒体生成只覆盖**图片和视频**两种（没有音频/TTS 生成能力）。生图与生视频都会把 `generate_image` / `generate_video` 工具注入模型，并调用团队已授权的对应模型；关闭开关后模型看不到这些工具。
+另有两个展示开关在 **Agent 设置**里：**引用**（默认关闭）开启后在回复中附来源引用；**隐藏产物列表**（默认关闭）开启后隐藏助手消息下方的生成文件列表，只影响展示，不会删除生成的文件。
 
-关于上下文：长对话的压缩是**单次摘要**——请求超过触发预算时，把较早历史生成一条摘要替换掉，只保留最近一段原文；它只作用于当前会话，**不**等同于跨会话记忆。记忆是独立的**实体/关系图谱**，跨会话持久保存。
+媒体生成只覆盖**图片和视频**两种（没有音频/TTS 生成能力）。生图与生视频都会调用团队已授权的对应模型；关闭开关后模型看不到这些能力。
 
-详细配置请参阅[附件与媒体](./media)和[记忆与上下文](./memory)。
+关于上下文：长对话的压缩是**单次摘要**——请求超过预算时，把较早历史生成一条摘要替换掉，只保留最近一段原文；它只作用于当前会话，**不**等同于跨会话记忆。记忆是独立的**实体/关系**知识图谱，跨会话持久保存。
+
+详细配置请参阅[附件与媒体](./media.mdx)和[记忆与上下文](./memory.mdx)。
 
 ## 设置可见性与发布
 
 1. 选择**私有**或**团队**可见性。
-2. 选择**发布**。发布后状态变为 `published`，Agent 可接收消息。
+2. 选择**发布**。发布后状态变为**已发布**，Agent 可接收消息。
 3. 发布后可打开**公开页面**、**嵌入**和**访问 API**。
 
 <Callout type="info">
-  `public` 可见性仅保留用于历史记录，新 Agent 应使用 `private` 或 `team`。
+  **公开**可见性仅保留用于历史记录，新建 Agent 应使用**私有**或**团队**。
 </Callout>
 
 <Callout type="warn">
-  Agent 仅有 `draft` 和 `published` 两种状态。没有 `active`/`inactive` 或 `archived` 状态，也没有归档/恢复工作流。要让 Agent 停止使用，取消发布或删除（`DELETE /api/v1/admin/agents/{agent_id}`）。
+  Agent 仅有**草稿**和**已发布**两种状态。没有启用/停用或归档状态，也没有归档/恢复流程。要让 Agent 停止使用，取消发布或删除即可。
 </Callout>
 
 <figure>
@@ -144,63 +120,28 @@ Agent Studio（`/app/apps/{agent_id}`）在桌面端以双列布局显示编排�
 3. 有工具时验证工具参数、失败提示与最大迭代终止行为。
 4. 选择**发布**。
 
-要隐藏助手消息下方的生成文件列表，请在 **Agent 设置**中开启**隐藏产物列表**。该设置默认关闭；开启后只隐藏列表，不会删除生成的文件。
+展示类开关（**引用**、**隐藏产物列表**）见上文「配置附件、媒体与记忆」，它们只影响界面展示。
 
 ## 监控与统计
 
 每个 Agent 有独立的**监控**页（`/app/apps/{agent_id}/monitor`），在 Agent 侧边栏选择**监控**打开。页面按 `24h`、`7d`（默认）、`30d` 展示概览卡片、使用趋势、工具调用分布、**执行健康度**、**首 Token 延迟**和**用户干预**。
 
+| 指标 | 说明 |
+| --- | --- |
+| 会话与消息数 | 总会话数、总消息数、活跃用户数 |
+| Token 用量 | 输入 Token、输出 Token 与总用量 |
+| 平均响应时间与首 Token 延迟 | 端到端平均耗时；首 Token 的 `p50`/`p95`/`avg` |
+| 执行健康度与用户干预 | 运行结果分布、成功率与干预次数 |
+| 工具调用 | 各工具调用次数统计 |
+| 使用趋势 | 按时间聚合的使用量变化 |
+
 <Callout type="info">
   图表口径、成功率算法与限制见 [Agent 监控看板](./monitor)。
 </Callout>
 
-底层数据来自三个只读端点（`GET /api/v1/agents/{agent_id}/stats*`，`period`: `24h`、`7d`、`30d`、`all`）：
-
-| 指标 | 端点 | 说明 |
-| --- | --- | --- |
-| 会话与消息数 | `/stats` | 总会话数、总消息数、活跃用户数 |
-| Token 用量 | `/stats` | `prompt_tokens`、`completion_tokens`、`total_tokens` |
-| 平均响应时间与首 Token 延迟 | `/stats` | 端到端平均耗时；首 Token 的 `p50`/`p95`/`avg` |
-| 执行健康度与用户干预 | `/stats` | 运行结果分布、成功率与干预次数 |
-| 工具调用 | `/stats/tool-usage` | 各工具调用次数统计 |
-| 使用趋势 | `/stats/trends` | 按时间聚合的使用量变化 |
-
 <Callout type="warn">
-  未实现/路线图：逐 Agent 成本拆分、首 Token 之外的请求级响应时间百分位、统计导出（CSV/PDF）、定时使用报告。运维层面也没有 Prometheus `/metrics` 端点。
+  未实现/路线图：逐 Agent 成本拆分、首 Token 之外的请求级响应时间百分位、统计导出（CSV/PDF）、定时使用报告。运维层面也没有 Prometheus 指标端点。
 </Callout>
-
-## API 端点
-
-管理端点位于 `/api/v1/admin/agents`，需要 `admin:app:*` 权限。
-
-```ts
-// 列出所有 Agent（按状态、可见性、团队、创建者、关键词过滤）
-const agents = await api.get("/api/v1/admin/agents", { params: { status: ["published"] } });
-
-// 为团队创建 Agent
-const agent = await api.post("/api/v1/admin/agents", {
-    name: "Support Agent",
-    team_id: "team-123",
-    model_id: "model-456",  // TeamModel ID（团队授权的模型）
-    system_prompt: "You are a helpful assistant.",
-    rag_mode: "agentic"
-});
-
-// 更新 Agent（使用 PUT，不是 PATCH）
-const updated = await api.put(`/api/v1/admin/agents/${agent_id}`, {
-    name: "Support Agent v2"
-});
-
-// 发布 / 取消发布 / 复制
-await api.post(`/api/v1/admin/agents/${agent_id}/publish`);
-await api.post(`/api/v1/admin/agents/${agent_id}/unpublish`);
-await api.post(`/api/v1/admin/agents/${agent_id}/duplicate`);
-
-// 获取 Agent 统计（period: 24h, 7d, 30d, all）
-const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { period: "30d" } });
-```
-
-完整 API 请参阅 [Agents API](/reference/api/endpoints/agents)。
 
 ## 最佳实践
 
@@ -210,7 +151,7 @@ const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { peri
 - ✅ 部署前充分测试
 - ✅ 为任务选择合适的模型
 - ✅ 启用 RAG 以提高事实准确性
-- ✅ 通过统计端点监控使用量
+- ✅ 通过监控页观察使用量
 - ✅ 收集用户反馈并迭代
 
 - ❌ 使用模糊的系统提示词
@@ -227,7 +168,7 @@ const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { peri
 
 - ❌ 长任务使用同步处理
 - ❌ 给 Agent 加载过多知识库
-- ❌ 设置过高的 `max_tokens`
+- ❌ 设置过高的输出上限
 
 ## 故障排查
 
@@ -246,11 +187,11 @@ const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { peri
 
 ### 成本过高
 
-1. **审查用量**：通过 `GET /api/v1/agents/{agent_id}/stats` 查看 Token 用量和会话数，定位高用量 Agent。
+1. **审查用量**：在监控页查看 Token 用量和会话数，定位高用量 Agent。
 2. **优化提示词**：缩短系统提示词；减少上下文长度；简单任务使用更便宜的模型。
 
 <Callout type="warn">
-  未实现/路线图：逐 Agent Token 限制、每日用量上限、成本告警均不可用。使用量监控仅通过统计端点只读暴露。
+  未实现/路线图：逐 Agent Token 限制、每日用量上限、成本告警均不可用；监控页的使用量为只读展示。
 </Callout>
 
 ## 常见问题
@@ -264,10 +205,10 @@ const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { peri
 
 | 功能 | 状态 | 替代方案 |
 | --- | --- | --- |
-| 逐 Agent 采样参数（Temperature 等） | 未实现 | 在模型 `default_params` 中配置 |
+| 逐 Agent 采样参数（Temperature 等） | 未实现 | 在模型自身配置中设置 |
 | 团队/Agent 资源限额 | 未实现 | 无配额门控 |
-| Agent 模板库 | 未实现 | 使用复制（`POST .../duplicate`） |
-| 批量编辑 | 未实现 | 单个 Agent 通过 `PUT` 更新 |
+| Agent 模板库 | 未实现 | 使用复制 |
+| 批量编辑 | 未实现 | 逐个 Agent 修改 |
 | 归档/恢复 | 未实现 | 取消发布或删除 |
 | 成本拆分/请求级百分位 | 未实现 | 监控页提供首 Token 的 `p50`/`p95` |
 | 导入/导出 | 未实现 | 无 |

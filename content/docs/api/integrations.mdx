@@ -1,0 +1,265 @@
+---
+title: 消息集成 API
+description: 飞书与微信 iLink 的管理端配置、个人偏好和投递记录端点
+icon: MessagesSquare
+---
+
+飞书与微信 iLink 的 HTTP 契约分两层：**管理端**配置共享应用、能力开关、目录/知识同步与通知测试；**个人端**只操作调用者自己的连接、用途与 Agent 偏好。两层都使用 JWT 会话，API Key 不能替代。
+
+<Callout type="info" title="认证与权限">
+  管理端基地址为 `/api/v1/admin/integrations`，需要 `admin:integrations:settings:read` / `admin:integrations:settings:update`（超级管理员绕过）。飞书登录属于登录域，见 [SSO API](./sso.mdx)。
+
+  个人端基地址为 `/api/v1/feishu-agent` 与 `/api/v1/wechat-knowledge`，只接受已登录用户，且始终作用于当前用户，不接受用户 ID 参数。
+
+  集成实例本身的增删改查（`/api/v1/admin/integrations`、`/types`、`/{id}/test`）见 [SSO API](./sso.mdx) 第 5 节；飞书与微信是单例，不能通过通用端点创建或删除。
+</Callout>
+
+## 端点总览
+
+### 飞书（管理端）
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| GET / PUT | `/api/v1/admin/integrations/feishu/config` | 读取/保存 App ID 与 App Secret | 设置域读 / 写 |
+| POST | `/api/v1/admin/integrations/feishu/connection-check` | 检查应用凭据是否可用 | 设置域写 |
+| GET | `/api/v1/admin/integrations/feishu/departments` | 列出应用可见部门树 | 设置域读 |
+| PUT | `/api/v1/admin/integrations/feishu/department-scope` | 保存通讯录同步范围 | 设置域写 |
+| POST | `/api/v1/admin/integrations/feishu/sync` | 手动同步已选部门的成员 | 设置域写 |
+| GET | `/api/v1/admin/integrations/feishu/test-recipients` | 搜索已绑定飞书的启用用户 | 设置域读 |
+| POST | `/api/v1/admin/integrations/feishu/test-message` | 发送通知测试消息 | 设置域写 |
+| GET / PUT | `/api/v1/admin/integrations/feishu/agent-chat/config` | 接收方式、回调密钥与接收器状态 | 设置域读 / 写 |
+| GET | `/api/v1/admin/integrations/feishu/knowledge/spaces` | 列出可同步的 Wiki 空间 | 超级管理员 |
+| GET | `/api/v1/admin/integrations/feishu/knowledge/targets` | 列出可用的目标知识库 | 超级管理员 |
+| GET / POST | `/api/v1/admin/integrations/feishu/knowledge/sources` | 列出/创建同步来源 | 超级管理员 |
+| PUT / DELETE | `/api/v1/admin/integrations/feishu/knowledge/sources/{source_id}` | 更新/删除来源 | 超级管理员 |
+| POST | `/api/v1/admin/integrations/feishu/knowledge/sources/{source_id}/sync` | 立即同步 | 超级管理员 |
+
+### 飞书（个人端）与回调
+
+| 方法 | 路径 | 说明 | 认证 |
+| --- | --- | --- | --- |
+| GET / PUT | `/api/v1/feishu-agent/config` | 当前用户的 Agent 选择与开关 | 登录用户 |
+| GET | `/api/v1/feishu-agent/agents` | 当前用户可选的已发布 Agent | 登录用户 |
+| POST | `/api/v1/integrations/feishu/callback` | 飞书事件回调（提供方入口） | 飞书签名 |
+
+### 微信 iLink（个人端）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/wechat-knowledge/features` | 平台已启用的能力开关 |
+| GET | `/api/v1/wechat-knowledge/bindings` | 当前用户的连接与用途 |
+| POST | `/api/v1/wechat-knowledge/logins` | 发起二维码授权 |
+| POST | `/api/v1/wechat-knowledge/logins/{identifier}/poll` | 轮询授权结果，可带验证码 |
+| PUT | `/api/v1/wechat-knowledge/bindings/{identifier}/purpose` | 切换用途与目标 |
+| DELETE | `/api/v1/wechat-knowledge/bindings/{identifier}` | 断开连接 |
+| GET | `/api/v1/wechat-knowledge/targets` | 可采集的知识库（需知识库采集已启用） |
+| GET | `/api/v1/wechat-knowledge/models` | 目标知识库可用的识别模型 |
+| GET | `/api/v1/wechat-knowledge/agents` | 可用于对话的已发布 Agent |
+| GET | `/api/v1/wechat-knowledge/agent-models` | 所选 Agent 可用的语音识别模型 |
+| GET | `/api/v1/wechat-knowledge/receipts` | 采集回执（最多 50 条） |
+| GET | `/api/v1/wechat-knowledge/agent-receipts` | Agent 回执（最多 50 条） |
+| GET | `/api/v1/wechat-knowledge/items/{identifier}/original` | 下载采集原件 |
+
+---
+
+## 飞书管理端
+
+### 应用凭据
+
+```
+GET  /api/v1/admin/integrations/feishu/config
+PUT  /api/v1/admin/integrations/feishu/config
+```
+
+`PUT` 请求体：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `app_id` | string (1–255) | 是 | 飞书自建应用 App ID |
+| `app_secret` | string (≤4096) | 否 | 留空或省略保留已存密钥；传入则替换 |
+
+响应字段：`app_id`、`app_secret_configured`、`is_enabled`、`department_ids`。App Secret 永不明文返回。
+
+`POST /connection-check` 使用应用凭据获取 tenant token，成功返回 `{"status": "ok"}`；失败按飞书返回的错误码映射，应用密钥不会出现在日志或响应中。
+
+### 通讯录同步
+
+- `GET /departments` 返回应用可见的部门树（含子部门）。
+- `PUT /department-scope` 请求体 `{"department_ids": ["0", "od-xxx"]}`，`1–500` 项且必须属于可见部门；根部门 ID 为 `0`。
+- `POST /sync` 使用已保存范围同步成员，返回新建/更新/跳过账号数与新建团队数。未保存范围时返回校验错误。
+
+### 通知测试
+
+- `GET /test-recipients?search=` 需要通知能力已开启；返回最多 `20` 条 `{id, username, email}`，`id` 即用户 ID。
+- `POST /test-message` 请求体 `{"user_id": "...", "title": "...", "content": "..."}`，标题 `1–200`、正文 `1–2000`；接收人必须已绑定飞书且账号启用，否则返回 `feishu_test_recipient_unavailable`。
+
+### Agent 会话接收方式
+
+```
+GET  /api/v1/admin/integrations/feishu/agent-chat/config
+PUT  /api/v1/admin/integrations/feishu/agent-chat/config
+```
+
+`PUT` 请求体（字段均可省略，省略表示保持不变）：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `connection_mode` | `callback` \| `long_connection` | 保存后切换接收方式；未保存时默认 `callback` |
+| `event_verification_token` | string (8–255) | 回调签名校验令牌 |
+| `event_encrypt_key` | string (8–255) | 加密事件密钥 |
+
+非空的密钥必须至少 `8` 个字符。响应字段：`connection_mode`、`event_verification_token_configured`、`event_encrypt_key_configured`、`is_enabled`、`capability_enabled`、`receiver_status`。
+
+`receiver_status.state` 取值：
+
+| 状态 | 含义 |
+| --- | --- |
+| `disabled` | Agent 会话能力未开启或无活动集成 |
+| `callback` | 使用 HTTP 回调，不需要接收器 |
+| `unconfigured` | 已选长连接但应用凭据未保存 |
+| `waiting` | 尚无 worker 接管，或凭据已变更等待重建 |
+| `starting` | 正在建立连接 |
+| `connected` | WebSocket 已连接（**不代表**消息权限或事件订阅已就绪） |
+| `reconnecting` | 正在重连 |
+| `error` | 连接或配置失败 |
+
+`managed` 表示连接是否由平台后台托管。选择长连接后由消费 `agent` 队列的 worker 维护单例接收器，无需额外服务；关闭能力或切回回调会停止接收。
+
+### 回调端点
+
+```
+POST /api/v1/integrations/feishu/callback
+```
+
+公开端点，由飞书签名保护，不接受 API Key 或 JWT 调用。要求 `X-Lark-Request-Timestamp`、`X-Lark-Request-Nonce`、`X-Lark-Signature`；时间戳与服务端相差超过 `300` 秒即拒绝，请求体上限 `64 KiB`。`connection_mode` 为 `long_connection` 时该端点不生效。URL 校验挑战仅在 Verification Token 匹配时返回签名结果。
+
+## 飞书知识同步
+
+全部端点仅超级管理员可调用，使用应用凭据而非登录用户 token。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/knowledge/spaces` | 列出应用可见的 Wiki 空间 |
+| GET | `/knowledge/targets` | 列出可用目标知识库 |
+| GET | `/knowledge/sources` | 列出来源及最近结果 |
+| POST | `/knowledge/sources` | 创建来源 |
+| PUT | `/knowledge/sources/{source_id}` | 更新名称、间隔或启用状态 |
+| POST | `/knowledge/sources/{source_id}/sync` | 立即排队同步 |
+| DELETE | `/knowledge/sources/{source_id}` | 删除来源并移除其导入内容 |
+
+创建请求体：
+
+| 字段 | 类型 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- | --- |
+| `knowledge_base_id` | UUID | 是 | — | 目标知识库 |
+| `space_id` | string (1–255) | 是 | — | 必须属于当前可见空间 |
+| `name` | string (1–100) | 是 | — | 来源显示名 |
+| `interval_minutes` | integer | 否 | `60` | 自动同步间隔，`1–43200` |
+| `is_enabled` | boolean | 否 | `true` | 是否参与自动调度 |
+
+来源输出包含 `status`、`last_synced_at`、`last_error`、`last_result`、`created_at`、`updated_at`。已有同步进行中时，更新、同步或删除返回 `409`（`feishu_knowledge_source_busy`）；空间不可用返回 `feishu_knowledge_space_unavailable`。
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/integrations/feishu/knowledge/sources" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"knowledge_base_id":"KB_UUID","space_id":"SPACE_ID","name":"产品文档","interval_minutes":60}'
+```
+
+## 飞书个人偏好
+
+```
+GET  /api/v1/feishu-agent/config
+GET  /api/v1/feishu-agent/agents
+PUT  /api/v1/feishu-agent/config
+```
+
+`GET /config` 返回 `{enabled, is_enabled, linked, agent_id, agent_name, agent_available}`：`enabled` 是平台通道是否可用，`is_enabled` 是用户自己的开关，`linked` 表示是否已绑定飞书身份。不可用的 Agent 名称不会返回。
+
+`GET /agents` 返回当前用户在有权限团队内可用的已发布 Agent `{id, name, description, team_name}`；通道不可用或未绑定身份时返回空数组。
+
+`PUT /config` 请求体字段均可选：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `agent_id` | UUID \| null | `null` 表示清除选择；非空要求已绑定身份、通道可用且有该 Agent 的访问权 |
+| `is_enabled` | boolean | 打开前必须已保存一个可用 Agent |
+
+关闭开关或清除选择在通道暂停时也允许。变更只影响之后接收的消息，不影响已接收的回执、运行中的任务或其会话。
+
+---
+
+## 微信 iLink 个人端
+
+所有端点要求当前用户 JWT，不提供管理端代操作。平台能力关闭时，对应端点返回 `403`（`integration_feature_disabled`）。
+
+### 能力与连接
+
+```
+GET /api/v1/wechat-knowledge/features
+GET /api/v1/wechat-knowledge/bindings
+```
+
+`features` 返回 `{"agent_chat": boolean, "knowledge_collection": boolean}`。`bindings` 返回当前用户的所有连接，每项包含 `id`、`bot_id`、`purpose`（`none` / `knowledge_collection` / `agent`）、`agent_config`、`collection`、`status`、`last_error`、`last_received_at`、`created_at`。
+
+### 二维码授权
+
+```
+POST /api/v1/wechat-knowledge/logins
+POST /api/v1/wechat-knowledge/logins/{identifier}/poll
+```
+
+`logins` 返回 `{id, status, qrcode_content, expires_at}`；同一用户最多同时有 `3` 个未完成授权，超出返回 `429`（`wechat_login_limit`）。`poll` 请求体 `{"verify_code": "123456"}`（可省略，纯数字，≤32 位）。授权确认后返回连接摘要；身份已绑定其他账号返回 `409`（`wechat_identity_in_use`）。
+
+### 用途切换
+
+```
+PUT /api/v1/wechat-knowledge/bindings/{identifier}/purpose
+```
+
+请求体：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `purpose` | `none` \| `knowledge_collection` \| `agent` | 目标用途 |
+| `knowledge_base_id` | UUID \| null | 仅知识库采集 |
+| `vision_model_id` / `stt_model_id` | UUID \| null | 仅知识库采集 |
+| `agent_id` | UUID \| null | 仅 Agent 对话 |
+| `variables` | object | 仅 Agent 对话，Agent 输入变量初值 |
+
+用途互斥：提交 `agent` 时不能同时带知识库字段，提交 `knowledge_collection` 时不能带 Agent 字段，否则返回校验错误。未提交的可选字段沿用已保存配置。目标知识库必须有写权限；不可用或只读返回 `400`。存在未完成工作时切换被拒绝。
+
+`DELETE /bindings/{identifier}` 断开连接并写入审计，返回 `{"id": "..."}`；已采集文档保留。
+
+### 采集与 Agent 回执
+
+- `GET /receipts?binding_id=` 返回最近 `50` 条采集回执：`id`、`binding_id`、`knowledge_base_id`、`status`、`results[]`（逐附件结果，错误已本地化）、`last_error`、`reply_status`、`created_at`。
+- `GET /agent-receipts?binding_id=` 返回最近 `50` 条 Agent 回执：`id`、`binding_id`、`status`、`agent_name`、`agent_id`、`conversation_id`、`run_id`、`run_status`、`error`、`delivery_status[]`、`created_at`。
+- 传 `binding_id` 时会先校验归属；不属于当前用户返回 `404`（`wechat_binding_not_found`）。
+
+`GET /items/{identifier}/original` 下载采集原件，返回文件流（`application/octet-stream`）而非统一信封。调用者仍需对原目标知识库有访问权；记录缺失、原件路径异常或文件不存在均返回 `404`（`file_not_found`）。
+
+### 采集目标与模型
+
+```
+GET /api/v1/wechat-knowledge/targets
+GET /api/v1/wechat-knowledge/models?knowledge_base_id=UUID
+GET /api/v1/wechat-knowledge/agents
+GET /api/v1/wechat-knowledge/agent-models?agent_id=UUID
+```
+
+`targets` 只返回当前用户有写权限的活跃知识库 `{id, name, team_name}`；`models` 返回该库可用的视觉与语音识别模型。`agents` 返回 `{id, name, team_name, variables, enable_attachments, attachment_config}`；`agent-models` 返回 `{"stt": [...]}`。
+
+## 权限与错误
+
+| HTTP / code | 场景 |
+| --- | --- |
+| `401 / 2000` | 未认证 |
+| `403 / 3000` | 缺少集成管理权限 |
+| `403 / 1004` | 平台能力关闭（`integration_feature_disabled`） |
+| `404 / 4000` | 连接、来源或原件不存在 |
+| `409` | 身份已被其他账号绑定、来源正在同步 |
+| `429` | 未完成授权过多（`wechat_login_limit`） |
+| `502` | 飞书或微信上游失败（错误映射为本地化信息） |
+
+投递记录的查询端点见 [管理 API](./admin.mdx#消息投递日志)；配置与使用步骤见[消息集成](../usage/guides/integrations/index.mdx)。

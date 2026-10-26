@@ -29,6 +29,22 @@ Use this checklist before exposing the deployment to users. Items describe opera
 - [ ] Configure streaming over HTTP/1.1 with `proxy_buffering off` and read/write timeouts matching the 1800-second example.
 - [ ] Restrict the `clouisle` namespace with RBAC, NetworkPolicies, and Ingress policy.
 
+## Outbound network policy
+
+**Site Settings** > **Security** exposes three independent switches, all defaulting to `true`. They guard different outbound paths, and turning any of them off means explicitly accepting its risk:
+
+| Switch | Default | What it guards | Risk when off |
+| --- | --- | --- | --- |
+| `model_endpoint_allowlist_enabled` | `true` | LLM, embedding, rerank, and media provider endpoints (`model_endpoint_allowlist`) | Users can point model requests at any address, including internal services and cloud metadata endpoints, leaking credentials or probing the internal network |
+| `ssrf_protection_enabled` | `true` | Custom HTTP tools, Workflow HTTP nodes, URL imports/previews, database connection tests | Those features can reach private, loopback, and cloud metadata addresses; URL/port syntax validation remains, but private targets are no longer blocked |
+| `sandbox_network_allowlist_enabled` | `true` | Sandbox task egress (the sandbox network allowlist) | Sandbox code can reach any network, internal ones included; filesystem isolation and resource limits still apply, and the switch only affects **new tasks** |
+
+- [ ] Keep all three switches on; when one must be off, record the reason, the end date, and compensating controls (NetworkPolicy, egress proxy).
+- [ ] Turning a switch off keeps the saved list; turning it back on restores enforcement. A corrupted value is treated as fail-closed (on).
+- [ ] The sandbox egress allowlist accepts **exact DNS hostnames** only and defaults to `pypi.org`, `files.pythonhosted.org`, `pypi.python.org`, and `registry.npmjs.org`; wildcards and IP addresses are rejected, and the list holds at most `200` entries.
+- [ ] Add extra domains one exact hostname at a time; **never** use a wildcard to save effort — the sandbox egress allowlist does not support them.
+- [ ] The sandbox egress allowlist and the SSRF allowlist are separate: the first constrains sandbox code, the second constrains server-initiated HTTP requests. One cannot replace the other.
+
 ## Data protection and recovery
 
 - [ ] Enable encryption at rest for PostgreSQL, Qdrant, uploads, and backup storage where supported.
@@ -41,7 +57,7 @@ Use this checklist before exposing the deployment to users. Items describe opera
 
 - [ ] Pin production image tags/digests instead of `latest`; scan images before deploying.
 - [ ] Keep sandbox filesystem isolation enabled with the worker's required seccomp/capability settings; review the sandbox hardening guidance before changing them.
-- [ ] Limit sandbox egress and resource usage at the host/cluster layer per the threat model.
+- [ ] Keep the sandbox egress allowlist (`sandbox_network_allowlist_enabled`) on and add exact hostnames only; complement it with host/cluster-level egress and resource limits per the threat model.
 - [ ] Keep Docker, Kubernetes, PostgreSQL, Redis, Qdrant, Bubblewrap, and the host kernel patched.
 
 ## Logging and incident response

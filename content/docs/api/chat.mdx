@@ -36,7 +36,7 @@ Agent 必须已发布。API Key 需要对应权限，并且如果绑定了 Agent
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | 切换版本 |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | 运行状态（所有者范围） |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | 回放 N 之后的事件 |
-| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问（`delivery: steer / follow_up / auto`） |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问（`delivery: steer / follow_up / stop / auto`） |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | 提交等待中 `ask_user` 调用的结构化答案 |
 | GET | `/api/v1/conversations` | 列出会话 |
 | GET | `/api/v1/conversations/{conversation_id}` | 获取会话及消息 |
@@ -154,6 +154,27 @@ curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
 ```
 未执行检索时 `rag_context` 为 `null`（例如 RAG 关闭或 Agent 未关联知识库）；执行检索但没有上下文时为 `[]`。检索上下文可能包含稳定的 `citation_id`；引用时使用精确的 `[[cite:SOURCE_ID]]`。
 
+### 响应消息字段
+
+除正文与用量外，消息对象还有几组字段值得解析：
+
+| 字段 | 说明 |
+| --- | --- |
+| `images` / `file_urls` | 该消息的视觉图片与附件元数据，结构与请求字段一致 |
+| `reasoning_content` | 推理模型输出的思考内容（模型未启用推理时为 `null`） |
+| `steps` | 规范化轮次内的执行轨迹；每一步包含 `role`、`content`、`tool_calls`、`tool_name`、`reasoning_content`、`token_usage`、`duration_ms` 与 `rag_context` |
+| `round_id` / `round_index` / `round_role` / `is_round_canonical` / `iteration_index` / `round_status` | 轮次归属与状态，重新生成、版本切换和分支定位都依赖这些字段 |
+| `is_manually_stopped` | 用户手动停止时被截断的轮次 |
+| `version_number` / `version_count` | 该消息在版本组中的序号与版本总数 |
+
+### 引用契约
+
+- **只有带 `citation_id` 的来源可被引用。** `citation_id` 是稳定 ID，前缀表示来源类型：`rag_`（知识库检索）、`web_`（网页搜索 / 网页抓取 / RSS）、`asset_`（会话或工作流内文件及其解析产物）。同一来源在多次请求中 ID 不变，不会因为排序变化而改号。
+- **正文用精确标记 `[[cite:SOURCE_ID]]`**，`SOURCE_ID` 必须与来源的 `citation_id` 完全一致；一句话或一个列表项由多个来源支撑时并列多个标记。标记紧跟被支撑的陈述，放在加粗、链接、代码与公式之外。
+- **客户端按 `citation_id` 解析来源**：`rag_*` 从消息的 `rag_context` 取，`web_*` / `asset_*` 从工具结果载荷中带 `citation_id` 的条目取。解析不到的标记不应渲染成可点击引用。
+- **引用需要两个条件同时成立**：Agent 打开 `enable_citations`（默认关闭），且具备可引用来源（`rag_mode` 为 `auto` 或 `agentic`、启用附件，或使用 `web_search` / `fetch_webpage` 等内置来源工具）。任一条件不满足时，正文不会出现引用标记。
+- 数字标注（`[1]`）、Markdown 脚注和裸 URL 都不属于引用协议，不能替代 `[[cite:...]]`。
+
 
 ## 流式响应
 
@@ -195,9 +216,12 @@ data: {"usage": {"prompt_tokens": 150, "completion_tokens": 25, "total_tokens": 
 ```text
 event: media_result
 data: {"kind":"media.image","success":true,"images":[{"image":{"url":"/api/v1/upload/files/generated-images/2026/09/9a8b7c6d5e4f_55667788.png","asset_ref":"a1b2","format":"png"}}]}
+
+event: media_result
+data: {"kind":"media.image","success":false,"images":[],"error":"Image generation failed"}
 ```
 
-生成图片或视频的受保护 URL 必须使用当前 JWT 或 API Key 获取；客户端应明确展示未认证、无权限、不可用或预览过大状态，不得回退到未认证原始 URL。
+生成失败时 `success` 为 `false`，此时应读取 `error` 并展示失败状态，不要把事件当成已生成资产。生成图片或视频的受保护 URL 必须使用当前 JWT 或 API Key 获取；客户端应明确展示未认证、无权限、不可用或预览过大状态，不得回退到未认证原始 URL。
 
 ## 持久运行与控制
 
@@ -220,7 +244,7 @@ data: {"kind":"media.image","success":true,"images":[{"image":{"url":"/api/v1/up
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` | SSE 订阅该运行的事件流（可断点续连） |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | 运行状态（所有者范围） |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | 回放已缓冲事件（非流式，适合补齐丢包） |
-| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问/停止（`delivery: steer / follow_up / auto`） |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | 排队引导/追问/停止（`delivery: steer / follow_up / stop / auto`） |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | 提交等待中 `ask_user` 调用的结构化答案 |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | 协作式终止运行 |
 
@@ -270,6 +294,35 @@ GET /api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N
 
 运行状态取值（`RunOut.status` / `RunStartOut.status`）：`queued`、`running`、`stopping`、`completing`、`waiting`、`completed`、`stopped`、`failed`、`interrupted`。其中 `completed`、`stopped`、`failed`、`interrupted` 为终态。
 
+### 排队引导与追问
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs
+```
+
+运行活跃时不必等它结束，也不用停掉当前轮——把引导（中途追加指令）或追问（下一轮）排队即可：
+
+```json
+{
+  "delivery": "steer",
+  "content": "先只回答价格部分",
+  "attachments": [],
+  "request_id": "client-op-001"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `delivery` | string | 否 | `steer`（中途引导）、`follow_up`（本轮结束后追问）或 `stop`；默认 `auto`，未识别的值按 `steer` 入队 |
+| `content` | string | 否 | 引导/追问文本 |
+| `attachments` | array | 否 | 附件元数据数组，默认 `[]` |
+| `request_id` | string | 否 | 幂等键；同一运行内重复提交相同 `request_id` 会返回既有输入而不是再排一条 |
+
+- 输入按 `sequence` 顺序排队，由 Worker 逐条消费；消费时事件流发 `input_accepted`，携带 `kind`、`content` 与 `sequence`。
+- 运行已进入终态时不接受新输入，返回的仍是当前 `RunOut`（不会报错）。
+- 运行被终止或结束时，尚未消费的排队输入会被标记为丢弃。
+- `waiting`（等待 `ask_user` 答案）期间应提交答案而不是引导，否则本轮不会带着缺失的答案继续。
+
 ### 终止运行
 
 ```
@@ -284,7 +337,7 @@ POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/stop
   访问边界：全部运行路由按所有者（API Key 场景按 Agent）限定。运行不存在、或不属于路径中的 `{agent_id}` → `404`（业务码 `4000`，`run_not_found`）；运行所属会话属于他人 → `403`（业务码 `1004`，`access_denied`）；超级管理员绕过所有权检查。
 </Callout>
 
-提交等待中 `ask_user` 调用的答案：
+### 提交 ask_user 答案
 
 ```
 POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
@@ -304,12 +357,14 @@ POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `tool_call_id` | string | 是 | 来自 `run_status` 等待事件的待处理工具调用 ID |
-| `answers` | object | 否 | ID 键控的答案映射；每个值为所选选项或自定义字符串 |
+| `answers` | object | 否 | 问题 ID 键控的答案映射；每个值为所选选项或自定义字符串 |
 | `skipped` | boolean | 否 | 显式跳过所有问题（发送 `{ "answers": {}, "skipped": true }`） |
 
 运行必须处于 `waiting` 状态，且 `tool_call_id` 必须匹配待处理的交互。成功后运行从暂停状态恢复。
 
-当运行活跃时，编辑器可以排队引导（中途）或追问（最终边界），而不是被禁用；停止发送服务器命令并等待终止 `run_end` 事件。
+- **单次消费**：一次 `waiting` 交互只能被消费一次。并发或重复提交时只有第一个生效，之后运行已离开 `waiting`，再提交返回 `409`（`run_not_waiting_for_answers`）；`tool_call_id` 不匹配同样返回 `409`（`pending_interaction_mismatch`）。
+- **答案校验**：`answers` 的键必须是 `pending_tool_input.questions[]` 里的 `id`，未知 ID 返回 `400`（`answers_unknown_question_id`）；`required` 为 `true` 的问题必须有非空答案，带 `options` 的问题答案必须是非空字符串（可以是自定义文本，不限于选项值）；可选问题可以省略。`skipped: true` 时必须同时传空 `answers`。`ask_user` 一次最多 20 个问题，问题 ID 在本次调用内唯一。
+- 答案以 TOOL 消息持久化后，本轮从暂停处继续；事件流随后出现新的 `run_status`（`queued` → `running`）。
 
 ## 重新生成
 

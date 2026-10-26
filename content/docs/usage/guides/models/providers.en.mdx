@@ -1,140 +1,125 @@
 ---
 title: Providers, Model Types, and Model Discovery
-description: Look up the 23 provider identifiers, default endpoints, supported providers per model type, and remote model discovery rules
+description: Review the 23 providers, default request addresses, provider support per model type, and remote model discovery rules
 icon: Network
 ---
 
-Clouisle connects multimodal models through a unified provider abstraction. **Providers are not independently configurable entities**: there is no global provider registry holding default API keys, timeouts, or retry policies. Each model carries its own `provider`, `base_url`, `api_key`, and optional `provider_display_name`. "Configuring a provider" therefore means registering a model with a provider identifier; see [Register models and authorize teams](./manage-models.mdx) for the flow.
+Clouisle connects multimodal models through a unified provider abstraction. **A provider is not an independently configurable entity**: there is no global provider registry with a default API key, timeout, or retry policy. Each model carries its own provider, request address, API key, and optional display name. So “configuring a provider” really means “registering a model with a provider selected”; see [Register models and authorize teams](./manage-models.mdx).
 
-## Provider identifiers and default endpoints
+## Supported Providers
 
-`ModelProvider` defines **23** provider identifiers. When no custom `base_url` is set, the runtime resolves the request address from the table below.
+Choose a provider from the dropdown when registering a model. Without a custom request address, the platform uses the provider's official default.
 
-| Provider identifier (`provider`) | Display name | Default API Base URL | Remote discovery |
-| --- | --- | --- | --- |
-| `openai` | OpenAI | `https://api.openai.com/v1` | Yes |
-| `openai_responses` | OpenAI Responses | `https://api.openai.com/v1` | Yes |
-| `anthropic` | Anthropic | `https://api.anthropic.com` | Yes |
-| `google` | Google AI | `https://generativelanguage.googleapis.com/v1beta` | Yes |
-| `azure_openai` | Azure OpenAI | None (the admin must configure an Endpoint) | No |
-| `deepseek` | DeepSeek | `https://api.deepseek.com` | Yes |
-| `moonshot` | Moonshot | `https://api.moonshot.cn/v1` | Yes |
-| `zhipu` | Zhipu AI | `https://open.bigmodel.cn/api/paas/v4` | Yes |
-| `qwen` | Qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Yes |
-| `baichuan` | Baichuan | `https://api.baichuan-ai.com/v1` | Yes |
-| `minimax` | MiniMax | `https://api.minimax.chat/v1` | Yes |
-| `volcengine` | Volcengine | `https://ark.cn-beijing.volces.com/api/v3` | Yes |
-| `siliconflow` | SiliconFlow | `https://api.siliconflow.cn/v1` | Yes |
-| `xai` | xAI (Grok) | `https://api.x.ai/v1` | Yes |
-| `ollama` | Ollama | `http://localhost:11434` | Yes |
-| `runway` | Runway | `https://api.dev.runwayml.com` | No |
-| `pika` | Pika | `https://api.pika.art/v1` | No |
-| `luma` | Luma AI | `https://api.lumalabs.ai/dream-machine/v1` | No |
-| `kling` | Kling | `https://api.klingai.com` | No |
-| `stability` | Stability AI | `https://api.stability.ai` | No |
-| `midjourney` | Midjourney | None (requires a self-hosted proxy) | No |
-| `typesafe` | TypeSafe AI | `https://api.typesafe.ai/v1` | Yes |
-| `custom` | OpenAI Compatible | None (supplied by the integrator) | Yes |
+| Provider | Notes |
+| --- | --- |
+| OpenAI | Official Chat Completions API |
+| OpenAI Responses | OpenAI Responses API, mainly for image generation |
+| Anthropic | Claude models |
+| Google AI | Gemini models |
+| Azure OpenAI | Requires an administrator to enter the Azure endpoint |
+| DeepSeek | DeepSeek |
+| Moonshot | Moonshot AI |
+| Zhipu AI | Zhipu AI |
+| Qwen | Alibaba Cloud Qwen |
+| Baichuan | Baichuan AI |
+| MiniMax | MiniMax |
+| Volcengine | Volcengine Ark |
+| SiliconFlow | SiliconFlow |
+| xAI (Grok) | xAI |
+| Ollama | A local or self-hosted Ollama service |
+| Runway | Video generation |
+| Pika | Video generation |
+| Luma AI | Video generation |
+| Kling | Kling video generation |
+| Stability AI | Image generation |
+| Midjourney | Requires a self-built proxy and has no default address |
+| TypeSafe AI | Decision models |
+| OpenAI Compatible | Any compatible API; the integrator supplies the address |
 
-Endpoint resolution order is: the model's own `base_url` → the model-type-specific default → the provider default. Clearing `base_url` therefore does not fail; it falls back to the table above. This is also why a TTS model and a chat model under the same provider can call different addresses:
+The request address resolves in this order: the model's own address → the model type's dedicated default → the provider default. Clearing the address therefore does not fail; it falls back to the default. This is also why a provider's speech models and chat models use different addresses.
 
 <Callout type="info">
-Beyond the table, three **model-type-specific** default endpoints take precedence when the model has no `base_url`:
-- `volcengine` + `tts` → `https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse`
-- `volcengine` + `audio_generation` → `https://openspeech.bytedance.com/api/v3/tts/create`
-- `typesafe` + `decision` → `https://api.typesafe.ai/v1`
+  Besides official defaults, three **model-type-specific** default addresses apply only when the model has no address of its own: Volcengine text-to-speech, Volcengine audio generation, and the TypeSafe decision model.
 </Callout>
 
-### `openai` versus `openai_responses`
+### OpenAI vs. OpenAI Responses
 
-Both share the same default base URL (`https://api.openai.com/v1`) but speak different protocols:
+Both share a default address but use different protocols:
 
-- `openai` uses standard **Chat Completions** and is the normal choice for chat, embeddings, and TTS/STT.
-- `openai_responses` uses OpenAI's **Responses API** (the SDK's `client.responses.*`) and currently backs the **image generation** path (the Responses hosted image tool, supporting `size`, `quality`, `background`, `output_format`, and other Responses-only parameters).
+- **OpenAI** uses standard Chat Completions and is the usual choice for chat, embeddings, and speech.
+- **OpenAI Responses** uses OpenAI's Responses API and is currently used for **image generation** (supporting size, quality, background, output format, and other specific parameters).
 
 <Callout type="warn">
-The Responses API behavior of `openai_responses` applies only to image generation. If you configure a `chat` model with `openai_responses`, the chat runtime treats it as OpenAI-compatible (Chat Completions) and you do not get Responses API semantics; pick `openai` when the upstream only needs standard chat completions. Batch discovery uses the same path (`/v1/models`) for both.
+  OpenAI Responses behavior only applies to image generation. A chat model configured as OpenAI Responses still runs as standard compatible chat and does not gain Responses-specific semantics; if the upstream only needs standard chat completion, choose OpenAI. Model discovery uses the same path for both.
 </Callout>
 
-## Model types
+### How Providers Appear in the UI
 
-`ModelType` has 9 values, independent of the provider:
+Providers need no separate registration: model cards, the sidebar, and node dropdowns render the provider icon and name directly. Icons come from built-in provider artwork — OpenAI Responses uses the OpenAI icon and Azure OpenAI uses the Azure icon; OpenAI Compatible shows a gateway icon and guesses the model family from the model name prefix. Names are localized in the UI language (for example “DeepSeek”, “Moonshot”, “Zhipu AI”, “Qwen”, “Baichuan”, “Kling”, “Volcengine Ark”, “OpenAI Compatible”); a custom display name takes precedence, and unknown identifiers show the raw code.
 
-| Model type (`model_type`) | Description | Providers supported at runtime |
+## Model Types
+
+There are nine model types, independent of providers:
+
+| Model type | Description | Providers supported at runtime |
 | --- | --- | --- |
-| `chat` | Chat and text completion (streaming, function calling) | `openai`, `anthropic`, `google`, `xai`, `azure_openai`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `ollama`, `custom` (remaining identifiers are treated as OpenAI-compatible) |
-| `embedding` | Text embeddings (RAG, memory retrieval) | 15: `openai`, `openai_responses`, `azure_openai`, `google`, `deepseek`, `moonshot`, `zhipu`, `qwen`, `baichuan`, `minimax`, `volcengine`, `siliconflow`, `xai`, `ollama`, `custom` |
-| `rerank` | Retrieval reranking | Any (LLM reranking through the chat model by default; `siliconflow` or `native_rerank: true` / `rerank_api: "native"` switches to the native `/rerank` endpoint) |
-| `tts` | Text to speech | `openai`, `azure_openai`, `volcengine`, `minimax` |
-| `stt` | Speech to text | `openai`, `azure_openai` |
-| `audio_generation` | Prompt to audio | `volcengine` only |
-| `text_to_image` | Text to image | `openai`, `openai_responses`, `azure_openai`, `custom`, `siliconflow`, `google`, `runway`, `luma`, `stability`, `volcengine`, `minimax` |
-| `text_to_video` | Text to video | `runway`, `luma`, `kling`, `pika`, `siliconflow`, `volcengine`, `minimax`, `qwen` |
-| `decision` | Typed decisions (choice/score/yes-no, non-generative) | `typesafe` **only** |
+| Chat | Chat and text completion (streaming, function calling) | OpenAI, Anthropic, Google AI, xAI, Azure OpenAI, DeepSeek, Moonshot, Zhipu AI, Qwen, Baichuan, MiniMax, Volcengine, SiliconFlow, Ollama, OpenAI Compatible (other identifiers run in compatible mode) |
+| Embedding | Text vector embeddings (knowledge bases, memory retrieval) | 15: OpenAI, Google AI, DeepSeek, Moonshot, Zhipu AI, Qwen, Baichuan, MiniMax, Volcengine, SiliconFlow, xAI, Ollama, OpenAI Compatible, Azure OpenAI, OpenAI Responses |
+| Rerank | Reordering retrieval results | Any; by default the chat model reranks, while SiliconFlow or native rerank mode calls a native rerank endpoint |
+| TTS | Text to speech | OpenAI, Azure OpenAI, Volcengine, MiniMax |
+| STT | Speech to text | OpenAI, Azure OpenAI |
+| Audio generation | Generate audio from a prompt | Volcengine only |
+| Text to image | Image generation | OpenAI, OpenAI Responses, Azure OpenAI, OpenAI Compatible, SiliconFlow, Google AI, Runway, Luma AI, Stability AI, Volcengine, MiniMax |
+| Text to video | Video generation | Runway, Luma AI, Kling, Pika, SiliconFlow, Volcengine, MiniMax, Qwen |
+| Decision | Typed decisions (choice/score/yes-no, non-generative) | TypeSafe AI **only** |
 
-Creation and update validate only two combinations: `embedding` must use one of the 15 providers above, and `decision` must be `typesafe`. Other mismatches are **not** rejected on save:
+Only two combinations are validated on create/update: **Embedding** must use one of the providers listed above, and **Decision** must be TypeSafe AI. Other mismatches are **not** rejected at save time:
 
 <Callout type="error">
-For example, creating `provider: anthropic` with `model_type: embedding`, or `model_type: text_to_video` with `provider: stability`, saves successfully but throws `Unsupported provider for ...` / `UnsupportedOperationError` on the first real call. Knowledge bases and media nodes can therefore surface the mistake only later; always verify with **Test Connection** right after registering.
+  For example, Anthropic + Embedding or Stability AI + Text to video saves normally but fails with an “unsupported provider” error on the first real call. Knowledge bases and media nodes can therefore expose configuration errors only after saving — always verify with **Test connection** right after registering.
 </Callout>
 
 <Callout type="info">
-`decision` models use TypeSafe's own protocol: no chat completion, but a state plus typed questions in and answers with probability distributions out, consumed by the Workflow **Decision** node. Runtime requests go to `POST {API Base}/v1/systemone`.
+  The decision model is a TypeSafe AI proprietary protocol: instead of chat completion it takes a state plus a typed question and returns answers with probability distributions, consumed by workflow **Decision** nodes.
 </Callout>
 
-## Remote model discovery
+## Remote Model Discovery
 
-**Discover models** lists the models a provider actually exposes before you save, so you never hand-write a wrong `model_id`. Call `POST /api/v1/admin/models/discover` with the `admin:model:create` permission; credentials are used for that request only and are never persisted.
+**Discover models** lists what a provider actually exposes before you save, avoiding hand-typed model names. Credentials are used only for that discovery request and are never stored.
 
-Discovery supports **16** providers (the "Remote discovery" column above). Each uses a fixed list path and auth method:
+Discovery supports **16 providers**: OpenAI, OpenAI Responses, Anthropic, Google AI, DeepSeek, Moonshot, Zhipu AI, Qwen, Baichuan, MiniMax, Volcengine, SiliconFlow, xAI, Ollama, TypeSafe AI, and OpenAI Compatible. Azure OpenAI, Runway, Pika, Luma AI, Kling, Stability AI, and Midjourney do **not** support discovery and report that the provider does not support it. Every provider except Ollama requires an API key.
 
-| Provider | Discovery path | Auth |
-| --- | --- | --- |
-| `openai` / `openai_responses` / `moonshot` / `baichuan` / `minimax` / `siliconflow` / `xai` / `custom` | `/v1/models` | `Authorization: Bearer <key>` |
-| `anthropic` | `/v1/models` | `x-api-key: <key>` + `anthropic-version: 2023-06-01` |
-| `google` | `/v1beta/models` | Query parameter `?key=<key>` |
-| `deepseek` | `/models` | `Authorization: Bearer <key>` |
-| `zhipu` | `/api/paas/v4/models` | `Authorization: Bearer <key>` |
-| `qwen` | `/compatible-mode/v1/models` | `Authorization: Bearer <key>` |
-| `volcengine` | `/api/v3/models` | `Authorization: Bearer <key>` |
-| `ollama` | `/api/tags` | No auth header, no API Key required |
-| `typesafe` | `/v1/models` | `Authorization: Bearer <key>` |
+### Discovery prerequisites
 
-`azure_openai`, `runway`, `pika`, `luma`, `kling`, `stability`, and `midjourney` do **not** support discovery; the call returns `success: false` with a "provider does not support model discovery" message. Every provider except `ollama` requires an API Key.
+- **The request address must pass the site endpoint allowlist**, otherwise it is rejected before any request is made.
+- The address must be `http(s)://host[:port]` with no query string, fragment, username/password, backslash, or path starting with `//`; a trailing `/` is stripped.
+- Redirects are not followed, so credentials cannot be forwarded across origins.
+- At most **200** models are returned; entries with overlong or duplicate names are skipped.
+- Results include model name, context length, maximum output, and capabilities (vision, function calling, streaming, JSON mode), and can fill the create form directly.
 
-### Hard requirements for a discovery request
+### Discovering TypeSafe models behind a gateway
 
-- **The base URL must pass the endpoint allowlist** (`model_endpoint_not_allowlisted`), otherwise the request is rejected before it leaves the server.
-- The base URL must be `http(s)://host[:port]` with no query string, fragment, username/password, backslash, or `//`-prefixed path; a trailing `/` is stripped.
-- A 15-second timeout and **no redirects** (`follow_redirects=false`), so credentials cannot be forwarded to another host.
-- The response body is capped at **2 MiB**; at most **200** models are returned, and items with an over-long or duplicate `id`/`name` are skipped.
-- Both `data` (OpenAI-compatible) and `models` (Google/Ollama) list shapes are recognized, and `google` strips the `models/` prefix.
-- Results carry `id`, `name`, `context_length`, `max_output_tokens`, and `capabilities` (`vision`, `function_call`, `streaming`, `json_mode`) that can be filled straight into the create form.
+TypeSafe AI treats the configured request address as a gateway prefix and appends the model-list path, so both `https://gw.example.com/openai/v1` and `https://gw.example.com/api` work without hand-writing the discovery URL. The exact joining rules and examples are in the [model provider reference](../../../reference/model-providers.mdx).
 
-### TypeSafe path rebasing
+## Endpoint Allowlist
 
-The `typesafe` discovery path is **rebuilt** from the configured base URL path so that gateway deployments work:
+The **model endpoint allowlist** in site settings is the master gate for model egress; discovery, connection tests, and runtime requests all obey it. Matching rules:
 
-- Base URL path ends with `/v1`: that path is reused. `https://gw.example.com/openai/v1` → requests `/openai/v1/models`.
-- Base URL path is non-empty but does not end with `/v1`: `/v1/models` is appended. `https://gw.example.com/api` → requests `/api/v1/models`.
-- Base URL has no path: the default `/v1/models` is used.
-
-## Endpoint allowlist
-
-The **Model Endpoint Allowlist** site setting (`model_endpoint_allowlist`) is the master gate for all model egress: discovery, connection tests, and runtime requests all obey it. Matching rules:
-
-- Exact **Origin** match on `scheme + host + port`, **ignoring the path**; `https://gateway.example.com/anything` and `https://gateway.example.com` are the same Origin.
+- Exact match on **scheme + host + port**, **ignoring the path**; `https://gateway.example.com/anything` and `https://gateway.example.com` are the same target.
 - Non-default ports participate: `http://ollama.internal:11434` differs from `http://ollama.internal`.
-- 20 official Origins ship by default (including `https://api.typesafe.ai`, `https://openspeech.bytedance.com`, and `http://localhost:11434`); `midjourney` has no default Origin because it needs a self-hosted proxy.
-- The allowlist holds up to 200 entries; **an empty list blocks every model endpoint**.
-- Removing an Origin immediately blocks later discovery, tests, and runtime requests with no service restart.
+- Twenty official addresses are preloaded; Midjourney has no default entry because it needs a self-built proxy.
+- The allowlist holds at most 200 entries; **clearing the list blocks every model endpoint**.
+- Removing an address immediately blocks later discovery, tests, and runtime requests — no restart needed.
+
+Administrators can **turn off allowlist validation** under **Site settings > Security**. With it off, the allowlist is no longer compared, but address syntax is still validated and the saved list is preserved for re-enabling. Field details are in the [Site settings reference](/en/reference/site-settings).
 
 <Callout type="warn">
-Prefer HTTPS for remote endpoints. Use HTTP only on a trusted private network; otherwise API Keys and model traffic travel in plaintext.
+  Turning off allowlist validation lets any resolvable host act as a model endpoint. Only do this when you trust every administrator who can create models and accept the data-egress risk. Prefer HTTPS for remote endpoints; plain HTTP is only for trusted private networks, otherwise API keys and model traffic travel in clear text.
 </Callout>
 
-## Related pages
+## Related Pages
 
 - [Register models and authorize teams](./manage-models.mdx) — register models, test connections, authorize teams, and set quotas
-- [Model](/usage/concepts/model) — two-level model structure and quota semantics
-- [Model provider reference](/reference/model-providers) — field definitions and Embedding adapter details
+- [Models](/en/usage/concepts/model) — the two-level model structure and quota semantics
+- [Model providers reference](/en/reference/model-providers) — field definitions and embedding adapter details
+- [Models API](/en/api/models) — endpoints, requests, and error codes

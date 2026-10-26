@@ -4,7 +4,7 @@ description: Upload images, documents, sandbox artifacts, and parse files
 icon: Upload
 ---
 
-Clouisle provides endpoints for knowledge-base documents, chat attachments, sandbox artifacts, and file parsing. Requests use `multipart/form-data`, and responses follow the unified `code`, `data`, `msg` shape.
+Clouisle provides endpoints for knowledge-base documents, chat attachments, sandbox artifacts, and file parsing. Upload and parse requests use `multipart/form-data`; file reads return binary content; apart from file reads, responses follow the unified `code`, `data`, `msg` shape.
 
 ## Endpoint Overview
 
@@ -17,6 +17,8 @@ Clouisle provides endpoints for knowledge-base documents, chat attachments, sand
 | POST | `/api/v1/upload/sandbox-artifact` | Upload a sandbox-generated artifact |
 | POST | `/api/v1/upload/parse` | Parse one file into text |
 | POST | `/api/v1/upload/parse/batch` | Parse up to five files |
+| GET | `/api/v1/upload/files/{category}/{year}/{month}/{filename}` | Read an uploaded file (protected categories require authorized access) |
+| DELETE | `/api/v1/upload/files/{category}/{year}/{month}/{filename}` | Delete a stored file (superuser only) |
 
 ## Supported Formats and Limits
 
@@ -85,17 +87,62 @@ A successful knowledge-base document upload returns `pending`. Configure chunk s
 
 The sandbox artifact endpoint accepts a JWT or `clou_` API key. Internal sandbox requests may instead use a signature: the `X-Sandbox-Artifact-Timestamp` (Unix seconds) and `X-Sandbox-Artifact-Signature` headers, rejected when the timestamp differs from the current time by more than `300` seconds. Its size limit comes from the `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` site setting.
 
-## Access Control and Errors
+## Reading and deleting files
 
-- Generated images, generated videos, and sandbox artifacts are protected Assets. Viewing or downloading them requires the current user or API key to have access to the related conversation or workflow run.
+```
+GET /api/v1/upload/files/{category}/{year}/{month}/{filename}
+```
+
+Returns the stored file's bytes. The `url` in the upload response is already this path, so use it as-is; `category`, `year`, `month`, and `filename` are path-segment validated and cannot contain `..` or separators.
+
+- **Public categories** (`general`, `avatar`, `icon`, and similar) are readable without an auth header.
+- **Protected categories** (`agent-attachments`, `sandbox-artifacts`, `generated-images`, `generated-videos`) and any asset with a scope reference require the active JWT or a `clou_` API key: missing credentials return `401`, unauthorized access returns `403`, and a missing or unavailable asset returns `404`.
+
+```bash
+curl -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  "$API_BASE_URL/api/v1/upload/files/generated-images/2026/09/9a8b7c6d5e4f_55667788.png" \
+  --output image.png
+```
+
+```
+DELETE /api/v1/upload/files/{category}/{year}/{month}/{filename}
+```
+
+Deletes a stored file; superuser only, and a successful response has `data: null`.
+
+## Access Control and Preview States
+
+**Protected assets** cover chat attachments (`agent-attachments`), sandbox artifacts (`sandbox-artifacts`), generated images (`generated-images`), and generated videos (`generated-videos`). Reading or downloading them is authorized against the asset's **execution scope**, of which there are two:
+
+- `conversation`: checks whether the caller can access the conversation; an API key must additionally have access to the conversation's Agent.
+- `workflow_run`: checks whether the caller can access the workflow run (triggerer, workflow visibility); an API key must additionally have access to the workflow.
+
+An asset with no scope reference is readable only by its creator or a superuser. Authorization happens before any bytes are read — nothing is written to disk first and judged afterwards.
+
+Images and videos generated in chat are registered as Assets and attached to the corresponding message's asset list (conversation scope), so they remain retrievable after a refresh or when reopening history; sandbox artifacts are registered the same way and follow the workflow-run scope.
+
 - Fetch protected media URLs with the active JWT or API key. Clients should surface unauthenticated, unauthorized, unavailable, and too-large preview states instead of falling back to an unauthenticated raw URL.
-- An `asset_ref` is valid only within its conversation or workflow-run scope; do not guess or reuse it across scopes.
+- An `asset_ref` is valid only within its conversation or workflow-run scope; do not guess or reuse it across scopes — the same ref no longer resolves after the scope changes.
+
+Previews should distinguish these states instead of showing one generic "failed to load":
+
+| State | Trigger | Suggested rendering |
+| --- | --- | --- |
+| `too-large` | File exceeds the preview limit | Show the size and limit, offer a download |
+| `unauthorized` | Missing or expired credentials (`401`) | Ask the user to sign in or refresh credentials |
+| `permission-denied` | Authenticated but not part of that conversation/run (`403`) | Explain there is no access; no retry |
+| `unsupported` | Type cannot be previewed inline | Offer download only |
+| `parse-failure` | Parsing or conversion failed | Explain the failure, keep the original download |
+
+## Errors
 
 | Error | Code | Description |
 | --- | --- | --- |
 | File too large | `1001` | Exceeds the endpoint limit; `data.max_size` reports the limit |
 | Unsupported type | `1001` / `6003` | MIME type or extension is not allowed |
 | Too many batch files | `1001` | More than 5 files for `parse/batch` |
-| File not found | `4000` | Stored file no longer exists |
+| Unauthenticated | `2000` | Protected file requested without a JWT or API key (HTTP `401`) |
+| Permission denied | `3000` | Authenticated but not part of that conversation/workflow run (HTTP `403`) |
+| File not found | `4000` | Stored file no longer exists or the asset is unavailable (HTTP `404`) |
 
 When an upload or parse fails, read `data.errors` and `msg`; do not infer the cause from the HTTP status alone.

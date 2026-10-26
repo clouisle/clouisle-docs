@@ -13,7 +13,7 @@ Clouisle runs 5 application services using 3 images. `clouisle-backend` provides
 | `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
 | `api` | clouisle-backend | FastAPI API | `8000` |
 | `worker` | clouisle-backend | Celery `default`, `agent`, `knowledge`, `workflow` queues | None |
-| `sandbox-worker` | clouisle-sandbox-worker | Celery `sandbox` queue and artifact uploads | None |
+| `sandbox-worker` | clouisle-sandbox-worker | Celery `sandbox` and dedicated queues, artifact uploads | None |
 | `beat` | clouisle-backend | Celery Beat scheduler, must run with a single replica | None |
 | `db` | PostgreSQL 17 + pg_search | Business, full-text retrieval, and audit data | `5432` |
 | `redis` | Redis 7 | Queues, cache, sessions | `6379` |
@@ -29,17 +29,35 @@ The `clouisle-backend` image starts `api`, `worker`, and `beat` through subcomma
 | `agent` | `worker` | `app.tasks.agent` | AgentRun execution (model calls and tool loop) |
 | `knowledge` | `worker` | `app.tasks.knowledge_base` | Document parsing, chunking, embedding, and indexing |
 | `workflow` | `worker` | `app.tasks.workflow` | Workflow runs |
-| `sandbox` | `sandbox-worker` | `app.tasks.sandbox`, `tasks.cleanup_expired_sandbox_sessions` | Code sandbox execution and expired sandbox session cleanup |
+| `sandbox` + per-worker `sandbox.worker.<hash>` | `sandbox-worker` | `app.tasks.sandbox`, `tasks.cleanup_expired_sandbox_sessions` | Code sandbox execution and session cleanup; interactive session tasks only enter the dedicated queue of the worker that owns the session |
 
-The supplied Compose, Helm, and single-file manifests run the worker as `python main.py worker -c 4 -Q default,agent,knowledge,workflow` — one service consuming all four queues — and the sandbox worker as `python main.py sandbox-worker -c <SANDBOX_WORKER_CONCURRENCY>`, consuming only `sandbox`.
+The supplied Compose, Helm, and single-file manifests run the worker as `python main.py worker -c 4 -Q default,agent,knowledge,workflow` — one service consuming all four queues — and the sandbox worker as `python main.py sandbox-worker -c <SANDBOX_WORKER_CONCURRENCY>`, consuming `sandbox` plus its own `sandbox.worker.<hash>` queue.
 
 Periodic tasks dispatched by Beat: `sweep-lost-agent-runs` every 2 minutes on the `default` queue (reclaims AgentRuns still marked in-flight after a worker crash and is the only producer of `INTERRUPTED`), and `cleanup-expired-sandbox-sessions` every 15 minutes on the `sandbox` queue. Tasks on the `agent` queue set no retries: model calls and tool execution have side effects, so a retry would execute them twice.
 
 Scaling rules:
 
 - `docker compose up -d --scale worker=4` or `kubectl scale deployment worker` scales all four queues together. To scale one queue independently, run an extra worker container subscribed to a single queue, for example `-Q agent` to grow AgentRun execution only.
-- The `sandbox` queue is its own service; scaling `sandbox-worker` does not affect knowledge base or workflow processing.
+- The `sandbox` queue is its own service, so adding sandbox workers does not affect knowledge base or workflow processing; each instance must still use its own node-local disk and never share a volume.
 - `beat` always runs a single replica, see [Service topology](#service-topology).
+
+## Messaging integrations and delivery
+
+Feishu and WeChat iLink are two providers of the same `Integration` model. They add no separate service and no per-provider delivery tables.
+
+- **One delivery queue**: every outbound message and artifact is written to `integration_deliveries` (`provider_type` is `feishu` or `wechat`) with status `pending`, `sending`, `sent`, `error`, `unavailable`, or `unknown`. The admin **Delivery Log** (`/deliveries`) reads `GET /api/v1/admin/deliveries`, which never returns message text, provider resource keys, or credentials.
+- **Beat reconciles the integration schedule**: Beat runs `IntegrationScheduler`, which reads each `Integration`'s enabled capabilities from PostgreSQL every 2 seconds and registers only the enabled periodic tasks — WeChat binding polling (3 s, `default`), WeChat Agent binding recovery (3 s, `agent`), WeChat knowledge receipt recovery (60 s, `knowledge`), Feishu Agent channel recovery (10 s, `agent`), and Feishu knowledge sync dispatch (60 s, `knowledge`). Toggling a capability therefore needs no Beat restart, but **Beat must be restarted once after an upgrade**, because an old Beat process keeps running the old scheduler.
+- **WeChat polling runs in ordinary workers**: the `default` queue dispatches every 3 seconds. Batch slots (`WECHAT_POLL_MAX_BATCHES`, default `8`) and claims live in PostgreSQL; each batch claims up to `WECHAT_POLL_BATCH_SIZE` bindings (default `64`) and polls `WECHAT_POLL_CONCURRENCY` of them concurrently (default `16`), stops at 30 seconds, and its claim can be taken over after 90 seconds. It is a plain Celery task with no dedicated receiving process.
+- **Who owns the Feishu long connection**: with `connection_mode=long_connection`, only workers consuming the `agent` queue supervise one receiver child process from the worker parent; a Redis lease (15-second TTL, 2-second reconciliation) elects a single holder so messages are never received twice. The HTTP callback mode still works.
+- **Workers never touch the uploads volume**: `worker` and `sandbox-worker` set `UPLOAD_STORAGE_MODE=remote` and reach the API's authenticated file gateway with `API_INTERNAL_BASE_URL` and `INTERNAL_API_TOKEN` (Kubernetes reads it via `INTERNAL_API_TOKEN_FILE`). Only `api` mounts the uploads directory; with object storage configured, even that mount is unnecessary.
+
+## Sandbox sessions and checkpoints
+
+Code execution runs in the separate `sandbox-worker`, which pins sessions to a worker:
+
+- Each sandbox worker derives a `worker_id` and `storage_id` on its retained disk (`.worker-identity.json`). Every execution, checkpoint save, and expiry cleanup for a session is delivered to that worker's dedicated queue, `sandbox.worker.<sha256(worker_id)>`.
+- The worker writes a checkpoint at the end of each round; a restarted process or reset session resumes from it, and a session may be recovered once by default (`SANDBOX_SESSION_MAX_RESETS=1`). Heartbeats are 5 seconds with a 20-second expiry, and recovery starts 30 seconds after a worker goes silent.
+- The workspace and checkpoints must therefore stay on that worker's persistent disk: a named volume (`sandbox_data`) in Compose, a node-local `hostPath` in Kubernetes. They are not shared storage, and **sessions on a lost node or disk cannot be recovered on another node**.
 
 ## Request routing
 
@@ -59,7 +77,9 @@ The backend mounts every router under `API_V1_STR`, default `/api/v1`: `GET {API
 
 ## Persisted data
 
-Default Compose volumes: `postgres_data`, `redis_data`, `qdrant_data`, and `uploads_data`. Multiple API replicas using local upload storage require `ReadWriteMany`; with only `ReadWriteOnce`, keep a single API replica, while Worker and Sandbox Worker can still scale independently.
+Default Compose volumes: `postgres_data`, `redis_data`, `qdrant_data`, `uploads_data`, and `sandbox_data`. `api` alone owns `uploads_data`; multiple API replicas using local upload storage require `ReadWriteMany`, and with only `ReadWriteOnce`, keep a single API replica. Worker and Sandbox Worker mount no uploads volume and still scale independently. `sandbox_data` is mounted by one `sandbox-worker` only and must never be shared between replicas.
+
+Site settings (**Site Settings** > **Storage**) can switch the upload backend to object storage (`object_storage_*`); uploads then no longer depend on a shared volume, so multiple replicas can run across nodes.
 
 ## Internal addresses
 

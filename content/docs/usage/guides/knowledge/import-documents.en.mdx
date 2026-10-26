@@ -1,121 +1,120 @@
 ---
 title: Import Documents
-description: Upload files or import from URLs and track parsing, embedding, and indexing status
+description: Upload files or import documents from URLs, and track parsing, embedding, and indexing status
 icon: Upload
 ---
 
-On the knowledge base detail page, select **Upload Documents** to upload local files or **Import from URL** to add a web page or YouTube URL. Uploading only stores the file and creates a `pending` record; the document is parsed, chunked, embedded, and made searchable only after you **process** it.
+On the knowledge base detail page, select **Upload documents** to upload local files, or **Import URL** to add a web page or YouTube URL. Uploading only stores the file and creates a **Pending** record; you **must then process it** before it is parsed, chunked, embedded, and searchable.
 
-## Supported formats
+## Supported Formats
 
-| Kind | Extensions | Parsing |
+| Type | Extensions | Parsing |
 | --- | --- | --- |
 | PDF | `.pdf` | Document converter → Markdown text |
 | Word | `.docx`, `.doc` | Document converter → Markdown text |
 | Excel | `.xlsx`, `.xls` | Document converter → Markdown text |
 | PowerPoint | `.pptx` | Document converter → Markdown text |
 | Plain text | `.txt` | Decoded as UTF-8 |
-| Markdown | `.md`, `.markdown` | Decoded as UTF-8, chunked with Markdown structure awareness |
+| Markdown | `.md`, `.markdown` | Decoded as UTF-8 and chunked by Markdown structure |
 | HTML | `.html`, `.htm` | Document converter → Markdown text |
 | CSV | `.csv` | Structured extraction |
 | JSON | `.json` | Structured extraction |
 | Web page | `url` | Fetched server-side |
 
-<Callout type="warn" title="Not supported">
-  Legacy `.ppt`, XML, archives (ZIP/TAR/GZ), and folder upload are not supported, and there is no OCR for scanned documents or images — a PDF that contains only images extracts to empty text and processing fails.
+<Callout type="warn" title="Unsupported cases">
+  Legacy `.ppt`, XML, archives (ZIP/TAR/GZ), and folder uploads are unsupported, and there is no OCR for scans or images — a PDF containing only images extracts nothing and fails processing.
 </Callout>
 
-## Uploading files
+Markdown files (and documents that keep Markdown structure after conversion) skip recursive character splitting and are **chunked by structural blocks**: level 1-2 headings force a split, oversized tables split by row with the header repeated, and code blocks stay intact or get a closing fence, with each chunk recording its section and type. See [Chunking and document processing](./chunking.mdx) for details and tunable parameters.
 
-1. On the knowledge base detail page select **Upload Documents**.
-2. Drop files into the dialog or click to select them (multiple selection allowed).
-3. The frontend validates each file's extension and size and immediately drops the files that fail.
-4. Click **Upload**; the dialog shows upload progress.
-5. Each file becomes a document with status `pending`.
+## Upload Files
 
-Frontend validation only catches problems early — the **server validates the extension and size again**: an oversized file returns `file_too_large` and an unsupported one returns `invalid_document_type`.
+1. On the knowledge base detail page, select **Upload documents**.
+2. Drag files into the dialog, or click to choose files (multi-select supported).
+3. The UI validates extension and size per file and immediately removes invalid files with an error.
+4. Click **Upload** and watch the progress.
+5. Each file becomes a document with **Pending** status.
+
+The UI check is only for early feedback; **the server validates again**. Oversized files report “file too large” and unsupported formats report “unsupported type”.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-document-processing.png" alt="Document processing status" />
   <figcaption>Processing status and error messages in the document list</figcaption>
 </figure>
 
-## Upload limits
+## Upload Limits
 
-- The single-file limit defaults to **`50MB`**, controlled by the site setting `kb_document_max_upload_size_mb`, adjustable within `1-1024MB`.
-- The upload dialog reads that site setting and shows the current value (`Maximum file size: 50MB`), so refresh the page after an administrator changes it.
-- The limit is **per file**: you can select several files at once, but each counts and is created separately.
-- There is no ZIP upload and no per-knowledge-base storage quota; watch storage at the team level.
+- The default per-file limit is **`50MB`**, controlled by the site's document upload limit and adjustable from `1-1024MB`.
+- The upload dialog reads that site setting and shows the current value (`Max file size: 50MB`), so refresh the page after an administrator changes it.
+- The limit is **per file**: you can select multiple files, but each counts and creates a document independently.
+- ZIP uploads are unsupported, and there is no per-knowledge-base storage quota; storage usage is observed at the team level.
 
-## Status and processing stages
+## Status and Processing Stages
 
 ```text
-Upload/import → extract text → clean → chunk → embed → build lexical index → completed
+Upload/import → Extract text → Clean → Chunk → Generate embeddings → Build full-text index → Completed
 ```
 
 | Status | Meaning | What you can do |
 | --- | --- | --- |
-| `pending` | File stored, waiting to be processed | Preview chunks, start processing, quick process, delete |
-| `processing` | Extracting, chunking, embedding, or indexing | Wait; progress is visible |
-| `completed` | Indexed and retrievable | Hit testing, edit chunks, reprocess |
-| `error` | Processing failed, with an error message | Read the error, retry failed chunks, reprocess |
+| **Pending** | File saved, awaiting processing | Preview chunks, start processing, quick process, delete |
+| **Processing** | Extracting, chunking, embedding, or indexing | Wait for completion; progress is visible |
+| **Completed** | Indexed and searchable | Hit testing, edit chunks, reprocess |
+| **Failed** | Processing failed with an error message | View the error, retry failed chunks, reprocess |
 
-There are three ways to process, pick the one you need:
+There are three processing modes:
 
-- **Quick Process**: processes with the knowledge base (or document) chunk settings as-is, no preview.
-- **Start Processing** (preview page): review — and if needed edit — chunks with **Preview Chunks** first, then submit exactly those chunks for embedding.
-- **Bulk processing**: select several documents in the table and use the selection toolbar to **Quick Process** the pending ones.
+- **Quick process**: process with the knowledge base (or document) chunk settings as-is, without preview.
+- **Start processing** (preview page): confirm or even edit chunks with **Preview chunks**, then submit them for embedding.
+- **Bulk processing**: select several documents in the table and use the selection toolbar to **Quick process** pending ones.
+
+### Batch preview and completion notifications
+
+When you confirm several documents on the bulk preview page, the UI submits them in batches; when the whole batch finishes, **one aggregated notification** is sent instead of one per document.
+
+- All succeeded sends an indexing-complete notice; all failed sends a failure notice.
+- Partial success prefers the failure notice and states how many succeeded and failed; if only indexing notices are enabled site-wide, it falls back to the indexing notice.
+- Single uploads and single-document processing still notify per document. Notification types are controlled by the switches under **Site settings → Automatic notifications**; with them off, nothing is sent.
 
 <Callout type="warn">
-  Uploading and processing are two separate stages. A document appearing in the list does not mean it has been embedded; only a document with status `completed` is suitable for referencing from an Agent, and only those are ever recalled.
+  Upload and processing are separate stages. A document in the list is not necessarily embedded; only **Completed** documents are suitable for referencing in an Agent and only they are searchable.
 </Callout>
 
-## Importing from a URL
+## Import from a URL
 
-1. On the knowledge base detail page select **Import from URL**.
-2. Enter a full `http://` or `https://` address and a document name (`1-255` characters). The UI marks the name optional, but the API requires `name` and rejects an empty submission with a field error, so fill it in.
-3. Click **Import** — the target is safety-checked first (internal, loopback, and cloud metadata addresses are rejected), then a `url` document is created and the preview page opens.
-4. Generate a chunk preview on that page and submit processing: URL content is fetched server-side at that point, so **importing never starts processing automatically**.
+1. On the knowledge base detail page, select **Import URL**.
+2. Enter a full `http://` or `https://` address and a document name (`1-255` characters). The UI marks the name optional, but submitting it blank is rejected with a validation error, so fill it in.
+3. Click **Import** — the system first runs a security check on the target (rejecting private networks, loopback, and cloud metadata addresses), then creates a URL document and opens the preview page.
+4. Generate the chunk preview and submit for processing: the URL content is fetched server-side at that point, so **importing does not start processing automatically**.
 
-If the import fails (unreachable address, empty content, parsing error) the document keeps an error message; you can open the source URL or delete and retry.
+If import fails (unreachable address, empty content, parse failure), the document keeps the error message; view the source URL or delete it and retry.
 
-## Failures and retries
+## Import from WeChat Collection
 
-| Error | Common cause | What to do |
+Besides manual upload and URL import, a personal WeChat account can collect messages straight into a knowledge base: scan the QR code under **Personal settings → WeChat iLink**, set the purpose to **Knowledge collection**, and pick an active, writable (not read-only shared) target knowledge base. Text, links, files, images, voice, and video you send are then parsed by type and automatically turned into documents and indexed. See [WeChat iLink integration](../integrations/wechat.mdx) for setup, supported content, and limits.
+
+Unlike manual upload, collection creates documents and starts processing and indexing automatically — no extra “process” click and no “preview chunks” step; failures are reported back to WeChat with a failed status. A few boundaries:
+
+- **Where originals are stored**: supported attachment originals are kept as protected files of that knowledge base with **no public address**; only the submitter or someone with access to the knowledge base can download them.
+- **Size limits**: each attachment takes the smaller of the knowledge base upload limit (`50MB` by default) and **100MB**; audio/video must be at most 30 minutes.
+- **Deduplication**: duplicate content within the same knowledge base is detected and the completed document reused, with that submission marked as a duplicate (submission records are still kept).
+- **Failure messages**: blocked article bodies, unsupported content types, and similar cases are reported explicitly in WeChat, never silently dropped.
+
+## Failures and Retries
+
+| Symptom | Common cause | Fix |
 | --- | --- | --- |
-| `file_too_large` | Exceeds the site limit | Compress the file or ask an administrator to raise the limit |
-| `invalid_document_type` | Extension/MIME not in the supported list | Convert the format |
-| Extraction failed | Corrupted, encrypted, or image-only file | Re-export or remove the password and upload again |
-| All or some embeddings failed | Model credentials, quota, or dimension mismatch | Check model authorization and dimension, then **Retry Failed Chunks** |
-| Lexical index unavailable | PostgreSQL / `pg_search` problem | Check the database and extension |
+| File too large | Exceeds the site limit | Compress the file or ask an administrator to raise the limit |
+| Unsupported type | Extension or content type not in the list | Convert the format |
+| Extraction failed | Corrupt, encrypted, or image-only file | Re-export or remove the password and re-upload |
+| All/partial embedding failures | Model credentials, quota, or dimension mismatch | Check model authorization and dimension, then **retry failed chunks** |
+| Full-text index unavailable | Retrieval service problem | Ask an administrator to check the service |
 
-**Retry Failed Chunks** is only available for an `error` document that has failed chunks; when the source file is fine (for example the model failed transiently) it is cheaper than reprocessing because successfully embedded chunks are kept.
+**Retry failed chunks** is only available for a **Failed** document that has failed chunks; if the source text is fine (for example a temporary model outage), it costs less than reprocessing because successful chunks are kept.
 
-## Importing through the API
+## Related Pages
 
-Knowledge base endpoints accept a JWT user session (`Authorization: Bearer <ACCESS_TOKEN>`), never an API key:
-
-```bash
-# Upload a file (multipart, the field name is always "file")
-curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/upload" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -F "file=@./handbook.pdf"
-
-# Import a URL (optional "name")
-curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/url" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Release Notes", "source_url": "https://example.com/releases"}'
-
-# Process the document (optionally overriding chunk settings)
-curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID/process" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"chunk_size": 1000, "chunk_overlap": 100, "clean_text": true}'
-```
-
-## Related pages
-
-- [Chunking and Document Processing](./chunking.mdx) — preview, process, and edit chunks
-- [Browsing Documents & Metadata](./browse-documents.mdx) — status, fields, and metadata
-- [Knowledge Base settings reference](/en/reference/knowledge-settings) — upload limit and chunking fields
+- [Chunking and document processing](./chunking.mdx) — preview, process, and edit chunks
+- [Browse documents and metadata](./browse-documents.mdx) — statuses, fields, and metadata
+- [Knowledge base settings reference](/en/reference/knowledge-settings) — upload limits and chunk fields
+- [Knowledge API](/en/api/knowledge) — upload, import, and processing endpoints

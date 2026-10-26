@@ -44,6 +44,13 @@ For `volcengine`, some model types have dedicated default endpoints that take pr
 Resolution order is: explicit `base_url` > provider + model-type endpoint > provider general endpoint. `typesafe` + `decision` also registers a dedicated endpoint (identical to the general one).
 </Callout>
 
+### Admin display: icons and localized names
+
+Provider presentation is resolved entirely in the frontend from `provider`; the model API returns only the identifier:
+
+- **Icons**: each identifier maps to a bundled provider mark, with `openai_responses` reusing the OpenAI icon and `azure_openai` the Azure icon. `custom` shows the neutral gateway mark but infers a model family from the `model_id` prefix (`gpt-`, `gemini`, `claude`, `deepseek`, `qwen`, `glm`, `kimi`, `grok`, `doubao`, `stable-diffusion`, …); an unrecognized family keeps the gateway mark. Unknown identifiers fall back to a colored initial, never a blank slot.
+- **Localized names**: the sidebar, model cards, and node dropdowns read `models.providers.*`. The Chinese UI shows `deepseek` as “深度求索”, `moonshot` as “月之暗面”, `zhipu` as “智谱 AI”, `qwen` as “通义千问”, `baichuan` as “百川智能”, `kling` as “可灵”, `volcengine` as “火山方舟”, and `custom` as “OpenAI 兼容接口”; the English UI uses each provider's English name (DeepSeek, Moonshot, Qwen, …). A non-empty `provider_display_name` wins over the catalog name, which suits self-hosted gateways. Unknown identifiers render the raw code.
+
 ---
 
 ## Model Type Classification (`ModelType`)
@@ -71,6 +78,7 @@ The `decision` type is a **non-generative** model: it evaluates a single state a
 - **Only provider**: the `decision` type currently accepts only the `typesafe` provider. Creating or updating a `decision` model whose `provider` is not `typesafe` returns a validation error (`model_type_not_supported`).
 - **Default endpoint**: `https://api.typesafe.ai/v1`. Runtime requests go to `{base_url}/v1/systemone`; the adapter guarantees the path includes a `/v1` segment, so configuring `base_url` as either `https://api.typesafe.ai` (no `/v1`) or `https://api.typesafe.ai/v1` both resolve to `https://api.typesafe.ai/v1/systemone`.
 - **Authentication**: the API key is sent as `Authorization: Bearer <key>`.
+- **Discovery path joining**: the configured `base_url` acts as a gateway prefix, then the model-list path is appended. A path ending in `/v1` is reused (`https://gw.example.com/openai/v1` → `/openai/v1/models`); a non-empty path not ending in `/v1` gets `/v1/models` appended (`https://gw.example.com/api` → `/api/v1/models`); no path uses `/v1/models`.
 - **Model ID**: for example `jev-1.13.0`, or `jev-latest` to follow the provider's current release. Model discovery (`POST /api/v1/admin/models/discover`, requires `admin:model:create`) uses the `/v1/models` path for TypeSafe and automatically avoids duplicating a version segment when `base_url` already ends in `/v1`.
 - **Endpoint allowlist**: `https://api.typesafe.ai` is included in the default **Model Endpoint Allowlist**; when routing through a self-hosted gateway, register that gateway's origin under **Site Settings > Security** first.
 
@@ -126,6 +134,8 @@ All outbound requests to model providers are strictly validated against the syst
 - The allowlist holds at most 200 entries (`MODEL_ENDPOINT_ALLOWLIST_MAX_ENTRIES`).
 - If an administrator configures a custom private Base URL (for example self-hosted vLLM or a private Ollama node), its full Origin (`scheme + host + port`) must be explicitly registered under **Site Settings > Model Endpoint Allowlist**.
 - Validation ignores request paths, query parameters, and credentials, but non-standard ports (such as `:11434`) are matched strictly.
+
+The `model_endpoint_allowlist_enabled` switch (default `true`) controls whether this gate applies. When it is off, allowlist matching stops but Base URL syntax validation (`http(s)://`, no userinfo, no query string or fragment) still runs; the saved list is preserved and can be re-enabled at any time. A malformed boolean is treated as enabled (fail-closed). The switch location and the full field list are documented in the [site settings reference](/en/reference/site-settings).
 
 ### Connectivity Test Endpoint
 

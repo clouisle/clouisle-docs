@@ -17,6 +17,8 @@ When a Knowledge Base is created, `embedding_dimension` is empty; the system wri
 
 A Knowledge Base's `visibility` defaults to `private` (visible only to the creator) and can be set to `team` (visible to team members); `public` is retained for compatibility only.
 
+Cross-team sharing grants **read-only** access (`read_only`): the receiving team can list and view the knowledge base, read documents and chunks, and run searches, but writes — uploading, processing, deleting, and editing chunks — still require the caller to belong to the owner team (usually with an `owner`/`admin` role). A `private` knowledge base cannot be shared, a knowledge base cannot be shared with its own team, and a given target team can be shared exactly once. Creating or revoking a share requires the `owner`/`admin` role in the owner team.
+
 ## Chunking & Rerank
 
 | Field | Type | Default | Limit |
@@ -42,8 +44,12 @@ A Knowledge Base's `visibility` defaults to `private` (visible only to the creat
 
 Hybrid retrieval requires at least one of dense weight or lexical weight to be greater than `0`. Query length is `1-1000` characters; batch comparison supports at most `10` configurations and IDs must be unique.
 
+Storage: vector recall uses Qdrant, while full-text recall uses PostgreSQL's `pg_search` extension — chunks are written to `knowledge_lexical_chunks` (BM25 index `knowledge_lexical_chunks_bm25_idx`, jieba tokenization), title and document name are boosted `2x`, and results matching identifiers (ticket numbers, error codes) sort ahead of others.
+
+Precedence is **request parameters > knowledge base settings > built-in defaults**. Knowledge base settings only apply when that knowledge base is searched; when an Agent or workflow references several knowledge bases, each one first recalls with its own settings, then all candidates go through one global weighted RRF (each candidate carries its knowledge base's `dense_weight`/`lexical_weight`/`rrf_k`, defaulting to `1.0`/`1.0`/`60`), and reranking is performed once by the first active knowledge base — sorted by ID — that has a `rerank` model bound. The public search endpoint queries one knowledge base per request.
+
 <Callout type="info" title="expand_adjacent is an internal option">
-The retrieval layer also has an `expand_adjacent` switch (default `false`): when enabled, it pulls in the chunks adjacent to a matched chunk (index ±1) within the same document to round out the context. It is an **internal request parameter of the retrieval service** and is **not currently exposed via the public search API**, so it cannot be configured in Knowledge Base settings or in a search request; the public search endpoint does not accept the field.
+The retrieval layer also has an `expand_adjacent` switch (default `false`): when enabled, it pulls in the chunks adjacent to a matched chunk (index ±1) within the same document to round out the context. Like the context-assembly settings `max_documents` (documents per result set), `max_chunks_per_document` (chunks per document), and `context_token_budget` (token budget for assembled context), it is an **internal request parameter of the retrieval service** and is **not currently exposed via the public search API**, so it cannot be configured in Knowledge Base settings or in a search request; the public search endpoint does not accept these fields.
 </Callout>
 
 ## Documents & Statuses

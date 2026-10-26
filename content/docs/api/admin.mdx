@@ -4,7 +4,7 @@ description: 管理后台端点的分组、权限码与调用边界
 icon: ShieldCheck
 ---
 
-管理路由挂载在 `/api/v1/admin` 下，覆盖仪表盘、观测、审计日志、会话、用户、角色、权限、站点设置、模型、SSO、通知、团队、记忆、Agent、工具、Skills、工作流、工作流指标、TOTP、包管理和知识库。它们由管理后台使用，响应遵循统一的 `code`/`data`/`msg` 结构，不是面向匿名调用的公共 API。
+管理路由挂载在 `/api/v1/admin` 下，覆盖仪表盘、观测、审计日志、会话、用户、角色、权限、站点设置、模型、SSO、通知、团队、记忆、Agent、工具、Skills、工作流、工作流指标、TOTP、包管理、知识库和消息投递。它们由管理后台使用，响应遵循统一的 `code`/`data`/`msg` 结构，不是面向匿名调用的公共 API。
 
 ## 权限模型
 
@@ -34,6 +34,7 @@ icon: ShieldCheck
 | 模型 | `/api/v1/admin/models` | `admin:model:read`、`admin:model:create`、`admin:model:update`、`admin:model:delete` |
 | 集成 | `/api/v1/admin/integrations` | `admin:integrations:login:read/update`（登录域）、`admin:integrations:settings:read/update`（内置配置域） |
 | 通知 | `/api/v1/admin/notifications` | `admin:notification:create`（创建）、`admin:notification:delete`（删除）；列表按全局管理权限或授权团队收敛 |
+| 消息投递 | `/api/v1/admin/deliveries` | `admin:integrations:settings:read`（只读） |
 | 团队 | `/api/v1/admin/teams` | `admin:team:read`、`admin:team:create`、`admin:team:delete` |
 | 记忆 | `/api/v1/admin/memories` | `admin:memory:read`、`admin:memory:update`、`admin:memory:delete` |
 | Agent | `/api/v1/admin/agents` | `admin:app:read`、`admin:app:create`、`admin:app:update`、`admin:app:delete`、`admin:app:publish`、`admin:app:duplicate` |
@@ -74,6 +75,7 @@ icon: ShieldCheck
 | GET | `/api/v1/admin/workflows/filters` | 工作流筛选选项 |
 | GET | `/api/v1/admin/totp/stats` | TOTP 使用统计 |
 | GET | `/api/v1/admin/notifications` | 管理视图通知列表 |
+| GET | `/api/v1/admin/deliveries` | 飞书/微信 Agent 会话出站投递记录 |
 | GET | `/api/v1/admin/knowledge-bases` | 跨团队知识库列表 |
 
 ## 工作流指标
@@ -94,6 +96,108 @@ icon: ShieldCheck
 curl -X GET "https://your-domain.com/api/v1/admin/workflows/metrics/dashboard" \
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
 ```
+
+## 消息投递日志 [#delivery-log]
+
+`GET /api/v1/admin/deliveries` 读取飞书与微信 Agent 会话共用的持久化出站队列 `integration_deliveries`。它是**只读**端点，需要 `admin:integrations:settings:read`，超级管理员绕过检查；消息正文、平台资源键（`media_key`）、凭据和文件内容都不会返回。管理后台的**监控** > **投递记录**（`/deliveries`）页面使用同一端点。
+
+`sent` 只表示平台接受了回复请求，不代表接收人已读、打开了卡片或下载了附件。
+
+### 查询参数
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `provider_type` | repeated `feishu` / `wechat` | 否 | - | 按集成过滤；重复传参匹配任一值（OR） |
+| `status` | repeated `pending` / `sending` / `sent` / `error` / `unavailable` / `unknown` | 否 | - | 按投递状态过滤；重复传参匹配任一值（OR） |
+| `run_id` | string (UUID) | 否 | - | 按来源 AgentRun 精确过滤 |
+| `filename` | string（1–500 字符） | 否 | - | 对产物文件名做不区分大小写的子串过滤 |
+| `limit` | integer（1–100） | 否 | `25` | 每页条数 |
+| `offset` | integer（≥ 0） | 否 | `0` | 偏移量 |
+
+`provider_type` 内部 OR、`status` 内部 OR，两组之间 AND。响应为 `{items, total, limit, offset}`，按 `created_at`、`id` 倒序。
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/deliveries?provider_type=feishu&provider_type=wechat&status=error&status=unknown&limit=25&offset=0" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "provider_type": "feishu",
+        "run_id": "1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d",
+        "user_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+        "chat_id": "oc_xxx",
+        "message_id": "om_xxx",
+        "event_key": "final-asset",
+        "sequence": 0,
+        "kind": "asset",
+        "filename": "report.pdf",
+        "content_type": "application/pdf",
+        "size": 12345,
+        "media_type": "file",
+        "status": "error",
+        "error": "feishu_agent_asset_upload_failed",
+        "error_detail": "FeishuAPIError: Feishu API error 234001: Invalid request param. | HTTP 400 | code 234001 | {...}",
+        "has_media_key": false,
+        "created_at": "2026-10-22T10:03:13Z",
+        "updated_at": "2026-10-22T10:03:13Z"
+      }
+    ],
+    "total": 1,
+    "limit": 25,
+    "offset": 0
+  },
+  "msg": "success"
+}
+```
+
+### 状态
+
+| 状态 | 含义 |
+| --- | --- |
+| `pending` | 已入队，尚未被发送者认领；重启与功能暂停后仍保留 |
+| `sending` | 已被某个 worker 在租约内认领；租约过期后转为 `unknown`，不会自动重发 |
+| `sent` | 平台接受了回复请求 |
+| `error` | 永久失败，如平台拒绝或产物不可用 |
+| `unavailable` | 运行已结束，但回复不应发送（渠道关闭、访问被撤销、缺少会话上下文） |
+| `unknown` | 发送后的超时；结果不确定，绝不盲目重发 |
+
+### 字段与错误
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string (UUID) | 投递行 ID |
+| `provider_type` | string | `feishu` 或 `wechat` |
+| `run_id` / `user_id` / `agent_id` | string (UUID) \| null | 来源 AgentRun、连接用户、Agent |
+| `chat_id` / `message_id` | string \| null | 平台会话 ID / 消息 ID |
+| `event_key` | string | 事件标识，如 `received`、`final`、`final-asset`、`ask:<tool-call>` |
+| `sequence` | integer | 同一事件内分片顺序 |
+| `kind` | string | `text`、`markdown`、`asset` 等 |
+| `filename` / `content_type` / `size` | string / string / integer \| null | 产物名称、MIME 类型、字节数 |
+| `media_type` | string \| null | 平台媒体类型 |
+| `status` | string | 上表状态之一 |
+| `error` | string \| null | 稳定失败键，用于行为判断与本地化 |
+| `error_detail` | string \| null | 平台原始错误：消息、HTTP 状态、错误码与响应片段 |
+| `has_media_key` | boolean | 是否已保存平台资源键；键本身不返回 |
+| `created_at` / `updated_at` | string (ISO 8601) | 创建与最后更新时间 |
+
+`error` 是稳定的机器可读键（如 `feishu_agent_asset_upload_failed`）；`error_detail` 保留平台返回的原文、HTTP 状态与错误码，便于定位权限、参数或大小问题。
+
+<Callout type="warn" title="与通知投递不是同一张表">
+  `GET /api/v1/admin/deliveries` 与 `integration_deliveries` 只覆盖飞书/微信 Agent 会话。站内通知的 email / webhook / feishu 外部发送记录在 `notification_deliveries`，通过通知管理接口的 `deliveries[]` 读取；微信不是通知渠道。
+</Callout>
+
+### 升级关系
+
+单表 `integration_deliveries` 取代旧的 `feishu_agent_deliveries` 与 `wechat_agent_deliveries`。首次启动时 API 复制旧表数据并删除旧表，因此 **API、所有 worker 与 Beat 必须部署到匹配版本**：旧进程会向已删除的表写入。仅回滚应用镜像无法重建队列表；回滚必须使用升级前的数据库备份。
+
+页面行为、筛选与排障建议见[投递记录](../usage/guides/integrations/delivery-log.mdx)。
 
 ## 调用示例
 

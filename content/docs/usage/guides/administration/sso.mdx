@@ -4,59 +4,67 @@ description: 配置 OIDC、SAML 2.0 或 CAS 登录连接并管理 SSO 用户生�
 icon: KeyRound
 ---
 
-登录身份源在**站点设置** → **集成**（`/site-settings/integrations`）统一管理：登录身份源、邮件、Webhook 与飞书通讯录共用同一 Integration 模型，但各自的能力与权限互不混用。先在**站点设置** → **安全**中打开全局 SSO 策略，再逐个添加登录集成。每个登录集成的协议配置是一段 JSON，字段随类型不同；保存前先准备好身份提供商的回调地址、客户端凭据与证书。
+登录身份源在**站点设置** → **集成**（`/site-settings/integrations`）统一管理：登录身份源、邮件、Webhook 与飞书通讯录共用同一套集成列表，但各自的能力与权限互不混用。先在**站点设置** → **安全**中打开全局 SSO 策略，再逐个添加登录集成。
+
+每个登录集成的协议配置是一段 JSON，字段随类型不同；保存前先准备好身份提供商那边的回调地址、客户端凭据与证书。
 
 <Callout type="info">
   前置条件：
-  1. 全局 SSO 开关（`sso_enabled`，默认关闭）已开启，否则登录页不会请求集成列表。
-  2. 操作者具备 `admin:integrations:login:read`（查看）或 `admin:integrations:login:update`（创建、编辑、删除、测试、解绑）权限。
+  1. 全局 SSO 开关已开启，否则登录页不会显示任何 SSO 按钮。
+  2. 操作者具备登录集成的查看或修改权限（超级管理员始终可以）。
   3. 身份提供商能访问 Clouisle 的**后端公网地址**，否则回调无法到达（见下一节）。
 </Callout>
 
 ## 支持范围
 
-| 类型 | 静态能力 | 管理权限域 |
+| 类型 | 用途 | 管理位置 |
 | --- | --- | --- |
-| `oauth2`、`oidc`、`saml2`、`cas` | `user_login` | login |
-| `email`、`webhook` | `notification` | settings |
-| `feishu` | `directory_sync`、`user_login` | settings（app_id、app_secret、部门范围、目录同步）与 login（登录开关、按钮文案、登录的启用/停用） |
+| OAuth2、OIDC、SAML 2.0、CAS | 网页登录 | **站点设置** → **集成**中的登录集成对话框 |
+| 邮件、Webhook | 通知投递 | 各自的专用表单 |
+| 飞书 | 登录与通讯录同步 | 飞书集成卡片（同一套应用凭据，能力分开关控制） |
 
-能力由后端注册表静态声明，不能通过配置添加尚未实现的功能。邮件、Webhook 和飞书为单实例集成，使用专用表单配置，本页只讲登录部分。飞书是由同一套应用凭据（app_id、app_secret）构成的单个集成，同时声明 `directory_sync` 和 `user_login`：启用飞书集成本身不会授予登录能力，网页登录需要在同一集成上显式开启；关闭集成会同时停用目录同步与登录，但保留这项选择。
+飞书是一个集成同时提供通讯录同步与网页登录：启用飞书集成本身不会授予登录能力，网页登录需要在同一张卡片上显式打开；关闭集成会同时停用目录同步与登录，但保留这项选择。邮件、Webhook 与飞书为单实例集成，本页只讲登录部分。
 
 ## 回调地址
 
-注册到身份提供商的回调地址格式为：
+在身份提供商后台登记的回调（重定向）地址为：
 
 ```
-{BACKEND_ORIGIN}/api/v1/sso/callback/{integration_name}
+https://your-domain.com/api/v1/sso/callback/<集成名称>
 ```
 
-`BACKEND_ORIGIN` 取**请求本身的对外来源地址**——即浏览器实际访问到后端的那一个域名（经反向代理时使用代理转发的对外地址；若前端代理 `/api/*`，则使用前端公开域名）。这里的 `:3000` 会被自动改写成 `:8000`。它**不是** `API_BASE_URL`（服务内部地址），也不受 `FRONTEND_URL` 影响：用错会导致回调 404 或跳回错误域名。
-
-`{integration_name}` 必须与 Clouisle 中登记的集成名称**完全一致**，大小写敏感，且创建后保持稳定（它是已登记的 URL 标识）。回调地址不匹配是 SSO 登录失败最常见的原因。
+- `your-domain.com` 是**浏览器实际访问到后端的对外地址**：经反向代理时使用代理转发的对外地址；若前端代理了接口路径，则使用前端公开域名。它**不是**服务内部地址，也不是前端页面地址——用错会导致回调失败或跳回错误域名。
+- 按上面的格式拼出地址（域名 + 集成名称）；飞书集成卡片会直接显示可复制的重定向地址。
+- `<集成名称>` 必须与 Clouisle 中登记的集成名称**完全一致**，大小写敏感，且创建后保持稳定。回调地址不匹配是 SSO 登录失败最常见的原因。
 
 ## 添加登录集成
 
-在**站点设置** → **集成**创建登录集成，填写以下字段：
+在**站点设置** → **集成**点击添加登录集成，对话框分 **Basic Info** / **Configuration** / **Attribute Mapping** 三个页签。基本信息：
 
 | 字段 | 必填 | 约束 |
 | --- | --- | --- |
-| **集成名称** | 是 | `^[a-z][a-z0-9_-]*$`：小写字母开头，仅含小写字母、数字、`-`、`_`；最长 `100`；全局唯一（重复返回 `6305`） |
-| **类型**（`provider_type`） | 是 | `oauth2` / `oidc`（OAuth2/OIDC）/ `saml2`（SAML 2.0）/ `cas`（CAS） |
-| **显示名称** | 是 | 列表与关联账号卡片中的名称，最长 `100` |
-| **按钮文本** | 否 | 登录页按钮文案，最长 `50`，如「使用 GitHub 继续」 |
-| **图标 URL** | 否 | 必须是 `http://` 或 `https://` 开头，最长 `512` |
-| **启用**（`is_enabled`） | — | 关闭后该集成不出现在登录页 |
-| **能力**（`enabled_capabilities`） | 是 | 登录集成必须包含 `user_login`，否则登录页不展示按钮 |
-| **登录配置**（`login_config`） | — | 该集成自己的注册、审批、默认角色（见[用户生命周期](#用户生命周期)） |
+| **Provider Name**（集成名称） | 是 | 小写字母开头，仅含小写字母、数字、`-`、`_`；最长 `100`；全局唯一（重名会提示名称已存在） |
+| **Protocol**（类型） | 是 | OAuth2 / OIDC / SAML 2.0 / CAS |
+| **Display Name**（显示名称） | 是 | 列表与关联账号卡片中的名称，最长 `100` |
+| **Button Text**（按钮文本） | 否 | 登录页按钮文案，最长 `50`，如「使用 GitHub 继续」 |
+| **Icon URL**（图标） | 否 | 必须是 `http://` 或 `https://` 开头，最长 `512` |
+| **Enabled**（启用） | — | 关闭后该集成不出现在登录页 |
+| **Allow Signup**（允许注册） | — | 允许该集成在首次登录时新建账户 |
+| **Require Approval**（需要审批） | — | 新建的账户需管理员批准后才能登录 |
+| **Default Role**（默认角色） | 否 | 新建账户的初始全局角色；留空时回退到站点默认角色 |
 
 <Callout type="warn">
-  **集成名称与类型在创建后不可修改**。命名请与身份提供商中的配置保持一致，改名等于重建集成；已有用户身份连接与外部身份 ID 会保留在原集成上。
+  **Provider Name 与 Protocol 在创建后不可修改**。命名请与身份提供商中的配置保持一致，改名等于重建集成；已有用户身份连接会保留在原集成上。
 </Callout>
 
 ## 协议配置
 
-协议配置是一段自由 JSON 文本，字段名必须与下表一致，拼写错误不会报错，只会在登录时抛出配置异常。**客户端密钥不要放入 `config`，而是填写凭据字段**（API 为 `credentials.client_secret`）；凭据使用 Fernet 加密存储，管理接口响应只返回 `credentials_configured` 字段名，从不返回明文或密文，空值表示保留原密钥。
+在 **Configuration** 页签中填写两段 JSON：
+
+- **Configuration JSON**：协议参数，字段名必须与下表一致；拼写错误不会在保存时报错，而是在登录时暴露为配置异常。
+- **Credentials JSON**：客户端密钥等敏感值，例如 `{"client_secret": "..."}`。**不要把密钥写进 Configuration**。
+
+凭据加密存储，保存后**永不回显**：编辑时看到的是已配置的键名，JSON 里留空表示保留原密钥。
 
 ### OAuth2 / OIDC
 
@@ -71,7 +79,7 @@ icon: KeyRound
 登录使用授权码 + PKCE（`S256`）流程，并生成 `nonce`。
 
 <Callout type="note">
-  当前实现**没有 `issuer_url` 字段，也不做 ID Token 签名/JWKS 校验**：用户信息一律取自 `userinfo_url` 的响应。因此密钥是否正确只有在真正换令牌时才会暴露，见[测试连接](#测试连接)。
+  当前实现**没有 Issuer URL 字段，也不做 ID Token 签名/JWKS 校验**：用户信息一律取自 `userinfo_url` 的响应。因此客户端密钥是否正确、证书是否有效，只有在真正换令牌时才会暴露，见[测试连接](#测试连接)。
 </Callout>
 
 ### SAML 2.0
@@ -82,7 +90,7 @@ icon: KeyRound
 | `idp_entity_id` | 是 | IdP Entity ID |
 | `sso_url` | 是 | IdP 单点登录 URL（HTTP-Redirect 绑定） |
 | `x509_cert` | 是 | IdP X.509 证书，PEM 内容但**不含** `-----BEGIN/END CERTIFICATE-----` 头尾 |
-| `acs_url` | 是 | ACS 地址；运行时会用实际回调地址覆盖它，仅作为占位/参考 |
+| `acs_url` | 是 | ACS 地址；仅作占位/参考，运行时始终使用实际回调地址覆盖 |
 | `slo_url` | 否 | SP 单点登出地址 |
 | `idp_slo_url` | 否 | IdP 单点登出地址 |
 | `name_id_format` | 否 | NameID 格式，默认 `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified` |
@@ -97,10 +105,10 @@ icon: KeyRound
 }
 ```
 
-`strict` 模式开启，SAML 响应必须通过签名校验；IdP 与 Clouisle 的时钟偏差过大会直接判定失败。
+开启 strict 模式，SAML 响应必须通过签名校验；IdP 与 Clouisle 的时钟偏差过大会直接判定失败。
 
 <Callout type="warn">
-  `slo_url` / `idp_slo_url` 只会被写入 SAML 配置，**当前没有实现 SP 发起的单点登出流程**——用户在 IdP 侧登出不会同步注销 Clouisle 会话。
+  `slo_url` / `idp_slo_url` 只会被保存，**当前没有实现 SP 发起的单点登出流程**——用户在 IdP 侧登出不会同步注销 Clouisle 会话。
 </Callout>
 
 ### CAS
@@ -115,11 +123,11 @@ CAS 用户标识取自校验响应中的 `<cas:user>`；版本 `3` 还会读取 
 
 ## 属性映射
 
-属性映射是集成上独立的 `attribute_mapping` 字段（一段 JSON），把提供商返回的数据映射到 Clouisle 需要的字段：
+**Attribute Mapping** 页签是一段 JSON，把提供商返回的数据映射到 Clouisle 需要的字段：
 
 | Clouisle 字段 | 用途 |
 | --- | --- |
-| `email` | 账户邮箱（**必需**，缺失会导致登录失败，见下） |
+| `email` | 账户邮箱（**必需**，缺失会导致登录失败） |
 | `username` | 用户名，重复时会自动加数字后缀 |
 | `avatar_url` | 头像地址 |
 
@@ -141,72 +149,53 @@ CAS 用户标识取自校验响应中的 `<cas:user>`；版本 `3` 还会读取 
 GitHub 的返回字段与 OIDC 标准不同，需要改成 `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`。
 
 <Callout type="warn">
-  映射结果会与提供商**原始返回字段合并，同名字段以原始值为准**。也就是说映射只对「原始返回里不存在同名键」的字段生效；若提供商已返回 `email`，映射里的 `email` 会被覆盖。排查字段错位时请先打印原始响应。
+  映射结果会与提供商**原始返回字段合并，同名字段以原始值为准**。也就是说映射只对「原始返回里不存在同名键」的字段生效；若提供商已返回 `email`，映射里的 `email` 会被覆盖。排查字段错位时请先查看原始响应。
 </Callout>
 
 <Callout type="error">
-  最终数据里必须有非空的 `email`，否则新用户创建会失败并返回校验错误（`email_required`）。OIDC 的 `sub`/`id`、SAML 的 NameID、CAS 的 `<cas:user>` 会作为外部身份标识；标识为空同样会导致登录失败。
+  最终数据里必须有非空的 `email`，否则新用户创建会失败并提示邮箱缺失。OIDC 的 `sub`/`id`、SAML 的 NameID、CAS 的 `<cas:user>` 会作为外部身份标识；标识为空同样会导致登录失败。
 </Callout>
 
 ## 配置 GitHub 登录
 
-1. 确保外部可访问 Clouisle，配置正确的 `FRONTEND_URL`，并保留可用的管理员登录方式。
-2. 在**站点设置** → **安全**配置全局 SSO 策略：SSO 总开关、密码登录、自动创建用户、审批和邮箱匹配。原有 `sso_*` 键与认证行为保持不变。
-3. 在 GitHub 的 **Settings → Developer settings → OAuth Apps** 创建 OAuth 应用，将回调填写为 `https://your-domain.com/api/v1/sso/callback/github`。
-4. 创建名称为 `github` 的 `oauth2` 登录集成，启用 `user_login`，填写显示名称、按钮文本、图标及该集成自己的 `login_config`（注册、审批、默认角色）。
-5. 非敏感配置填写 Client ID、授权 URL、token URL、userinfo URL 和 `read:user user:email` scopes；`attribute_mapping` 使用 `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`。
-6. 在凭据字段填写 Client Secret（API 为 `credentials.client_secret`），不要放入 `config`。保存并测试配置后，用独立浏览器会话完成实际登录；配置测试不代表完整登录已通过。
+1. 确保外部可访问 Clouisle，并保留可用的管理员登录方式。
+2. 在**站点设置** → **安全**配置全局 SSO 策略：SSO 总开关、密码登录、自动创建用户、审批和邮箱匹配。
+3. 在 GitHub 的 **Settings → Developer settings → OAuth Apps** 创建 OAuth 应用，把回调填写为 `https://your-domain.com/api/v1/sso/callback/github`。
+4. 创建名称为 `github` 的 OAuth2 登录集成，填写显示名称、按钮文本、图标，按需打开 **Allow Signup** / **Require Approval** 并选择默认角色。
+5. 在 **Configuration** 中填写 Client ID、授权 URL、token URL、userinfo URL 与 scope（`read:user user:email`）；**Attribute Mapping** 使用 `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`。
+6. 在 **Credentials** 中填写 `{"client_secret": "..."}`，不要写进 Configuration。保存并测试后，用独立浏览器会话完成一次真实登录；配置测试通过不代表完整登录已通过。
 
 ## 配置飞书登录
 
-飞书网页登录是飞书集成上的一项可选能力，与通讯录同步共用同一套 app_id、app_secret，无需再创建一个身份源。
+飞书网页登录是飞书集成上的一项可选能力，与通讯录同步共用同一套 App ID / App Secret，无需再创建一个身份源。
 
-1. 在飞书开发者后台把卡片中显示的**重定向地址**（`https://<backend-host>/api/v1/sso/callback/<integration-name>`，例如 `…/api/v1/sso/callback/feishu`）加入应用的重定向 URL 白名单；该地址在飞书卡片中直接可见并可一键复制。`<backend-host>` 是外部可达的后端（或代理）域名，与所有身份源的回调域名一致。
-2. 为应用授予登录所需 scope：`contact:user.base:readonly contact:user.email:readonly`。身份来自登录用户资料本身，无需 scope；邮箱字段需要 `contact:user.email:readonly`。
-3. 在**站点设置** → **集成** → **飞书**卡片的能力区域打开**飞书登录**开关，并按需填写按钮文案。修改登录开关需要 `admin:integrations:login:update`，因此启用它的角色需同时具备两个域（超级管理员始终可以）。
-4. 如果尚未配置应用凭据，在同一张卡片上填写。凭据与通讯录同步共用，密钥留空表示保留原值。保持集成处于启用状态。
+1. 在飞书开发者后台把飞书卡片中显示的**重定向地址**（`https://<backend-host>/api/v1/sso/callback/<集成名称>`，例如 `…/api/v1/sso/callback/feishu`）加入应用的重定向 URL 白名单；该地址可直接一键复制。
+2. 为应用授予登录所需 scope：`contact:user.base:readonly contact:user.email:readonly`。
+3. 在**站点设置** → **集成** → **飞书**卡片的能力区域打开**飞书登录**开关，并按需填写登录按钮文案。修改登录开关属于登录集成权限，飞书卡片上的其他设置属于集成设置权限，因此操作者通常需要同时具备两者。
+4. 如果尚未配置应用凭据，在同一张卡片上填写；凭据与通讯录同步共用，密钥留空表示保留原值。保持集成处于启用状态。
 
-只有在全局 SSO 已启用、集成已启用、且 `user_login` 位于其已启用能力中时，登录页才会展示飞书登录按钮。未开启该选项时，飞书只提供通讯录同步，不出现登录按钮。关闭集成会同时停用两项能力，但保留该选项。
+成员可以在个人设置 → 账户安全的关联账号区域点击**绑定飞书**，把飞书身份关联到已有账号；该入口同样要等管理员启用飞书用户登录后才出现。
 
-登录身份以资料中的 `union_id` 作为外部身份标识存储；缺少 `union_id` 时回退为 `open_id`，因此在同一开发者账号内更换应用不会导致已绑定账号失效。
+只有在全局 SSO 已启用、集成已启用、且飞书登录开关打开时，登录页才会展示飞书按钮。未开启该选项时，飞书只提供通讯录同步。关闭集成会同时停用两项能力，但保留该选项。
 
-通讯录中没有任何邮箱的飞书账号，会使用与目录同步相同的确定性占位邮箱 `feishu-<sha256(user_id)>@accounts.clouisle.example`，使登录与同步汇聚到同一个本地账号而不是各建一个。推导该地址需要飞书 `user_id`，因此需要 `contact:user.employee_id:readonly`；缺少该 scope 时这类账号没有 `user_id`，其首次登录会被拒绝，而不会创建占位身份。
+登录身份以飞书资料中的 `union_id` 作为外部身份标识存储；缺少 `union_id` 时回退为 `open_id`，因此在同一开发者账号内更换应用不会导致已绑定账号失效。
+
+通讯录中没有任何邮箱的飞书账号，会使用与目录同步一致的确定性占位邮箱，使登录与同步汇聚到同一个本地账号而不是各建一个。推导该地址需要飞书 `user_id`，因此需要 `contact:user.employee_id:readonly`；缺少该 scope 时这类账号的首次登录会被拒绝，而不会创建占位身份。
 
 ## 测试连接
 
-列表中的**测试连接**调用 `POST /api/v1/admin/integrations/{id}/test`：
+集成卡片上的**测试连接**按钮（**Test Connection**）会在服务端**仅本地构造**一次授权地址（使用占位回调地址），检查配置里必需的键是否齐全：
 
-- 它在服务端**仅本地构造**一次授权地址（用一个占位回调地址），验证配置里必需的键是否齐全，然后返回该地址的前 100 个字符。
+- 成功只说明配置能构造出授权地址。
 - 它**不会**访问身份提供商，因此客户端密钥错误、回调地址不匹配、证书过期这类问题它都**测不出来**——必须用真实登录验证。
-- 返回 `status: error` 只说明键缺失或值无法构造授权地址。
-
-## 管理权限与 API
-
-统一管理基地址为 `/api/v1/admin/integrations`，公开登录列表为 `GET /api/v1/sso/integrations`（旧 `/sso/providers` 已移除，无兼容别名）：
-
-| 操作 | 端点 | 权限 |
-| --- | --- | --- |
-| 查看类型与能力目录 | `GET /api/v1/admin/integrations/types` | 任一域的 read |
-| 列出实例（按权限域过滤） | `GET /api/v1/admin/integrations` | 任一域的 read |
-| 创建登录集成 | `POST /api/v1/admin/integrations` | `admin:integrations:login:update` |
-| 更新 / 删除（单实例禁止删除） | `PUT` / `DELETE /api/v1/admin/integrations/{id}` | 按字段判定所属域（`enabled_capabilities`、`is_enabled` 按所涉能力；`config`、`credentials` 计 settings；`button_text`、`display_name`、`icon_url`、`login_config`、`attribute_mapping` 计 login） |
-| 测试配置 | `POST /api/v1/admin/integrations/{id}/test` | `admin:integrations:login:update` |
-| 全局登录策略 | `GET` / `PUT /api/v1/admin/integrations/login-settings` | `admin:integrations:login:read` / `:update`（界面：**站点设置** → **安全**） |
-| 登录页可用的集成列表 | `GET /api/v1/sso/integrations` | 公开 |
-| 发起登录 / 回调 | `GET /api/v1/sso/login/{name}`、`GET /api/v1/sso/callback/{name}` | 公开 |
-| 解绑自己的连接 | `DELETE /api/v1/sso/connections/{connection_id}` | 已登录用户 |
-
-<Callout type="note">
-  `GET /api/v1/sso/integrations` 在全局 SSO 关闭时**即使集成是启用状态也返回空数组**——登录页没有按钮时，先检查全局开关、集成启用状态和 `user_login` 能力。
-</Callout>
 
 ## 通用流程
 
 1. 在**站点设置** → **安全**中启用 SSO，并按需调整全局策略（允许密码登录、自动创建、需要审批、按邮箱匹配）。
-2. 在**站点设置** → **集成**添加登录集成：填写基本信息，选择类型并启用 `user_login` 能力。
-3. 填入该协议的 JSON 配置，把密钥填进凭据字段而非 `config`。
-4. 在 `attribute_mapping` 中把邮箱、用户名、头像对应到提供商字段。
-5. 保存后，把 Clouisle 展示的回调地址填入身份提供商的白名单/重定向地址。
+2. 在**站点设置** → **集成**添加登录集成：填写基本信息，选择协议。
+3. 在 **Configuration** 页签填入该协议的 JSON 配置，把密钥填进 **Credentials** 而不是 Configuration。
+4. 在 **Attribute Mapping** 页签把邮箱、用户名、头像对应到提供商字段。
+5. 保存后，把回调地址（`https://your-domain.com/api/v1/sso/callback/<集成名称>`）填入身份提供商的白名单/重定向地址。
 6. 用隐身窗口验证三种情况：新用户、已存在用户、错误回调。
 
 <figure>
@@ -216,61 +205,43 @@ GitHub 的返回字段与 OIDC 标准不同，需要改成 `{"email": "email", "
 
 ## 用户生命周期
 
-全局设置与集成开关是**或**的关系，最终判定如下：
+全局策略与集成自己的设置是**或**的关系，最终判定如下：
 
 | 结果 | 判定规则 |
 | --- | --- |
-| 关联已有账户 | `sso_match_by_email=true`（默认）且返回邮箱能匹配到现有用户；关联时同时确保该用户加入默认团队 |
-| 新建账户 | 全局 `sso_auto_create_users` **或** 集成 `login_config` 中的允许注册任一开启 |
-| 新建被拒 | 全局自动创建关闭**且**集成允许注册也关闭 → `6302`（`sso_registration_disabled`） |
-| 需要审批 | 全局 `sso_require_approval` **或** 集成 `login_config` 中的需要审批任一开启 → 账户为 `pending` 且不可登录 |
-| SSO-only | 全局 `sso_allow_password_login=false` → 密码登录返回 `6306` |
+| 关联已有账户 | 全局开启「按邮箱匹配已有账户」（默认开启）且返回邮箱能匹配到现有用户；关联时同时确保该用户加入默认团队 |
+| 新建账户 | 全局「自动创建用户」**或**集成自己的「允许注册」任一开启 |
+| 新建被拒 | 全局自动创建关闭**且**集成允许注册也关闭 |
+| 需要审批 | 全局「新账户需要审批」**或**集成的「需要审批」任一开启 → 账户为待审批且不可登录 |
+| 仅 SSO 登录 | 全局关闭「允许密码登录」后，密码登录被拒绝 |
 
-登录集成的 `allow_signup`、`require_approval`、`default_role_id` 位于 `login_config`，不再是顶层字段。新建的 SSO 用户具有以下特征：
+新建的 SSO 用户具有以下特征：
 
-- **没有本地密码**（`hashed_password` 为空字符串），因此无法用密码登录。
+- **没有本地密码**，因此无法用密码登录。
 - 邮箱直接标记为已验证（信任提供商的邮箱）。
-- 用户名取映射出的 `username`；缺失时用邮箱 `@` 前的部分，再缺失时用 `user_<外部身份标识前 8 位>`；重名会自动追加数字后缀。
-- 角色取 `login_config` 的 `default_role_id`（**仅 API 可设置，界面上没有该字段**），未设置时回退到全局默认角色；随后按 `default_team_id` 加入默认团队。
+- 用户名取映射出的 `username`；缺失时用邮箱 `@` 前的部分，再缺失时用外部身份标识前 8 位加前缀；重名会自动追加数字后缀。
+- 角色取集成设置的默认角色，未设置时回退到全局默认角色；随后按默认团队设置加入团队。
 
 ## 升级注意事项
 
-从旧 SSO 提供商模型升级到统一 Integration 模型时，注意以下事项：
+从旧版 SSO 提供商模型升级到统一集成模型时：升级会保留集成标识、用户身份连接与外部身份 ID，**无需重新绑定账号，也无需修改身份提供方的回调地址**。
 
-- **部署前备份数据库，并保留对应的后端 `SECRET_KEY`**（凭据用 Fernet 加密，换密钥会导致无法解密）。切换前停止所有旧版 API 与 worker，迁移完成后再启动同一新版本的 API 和 worker；**不支持新旧版本混用的滚动部署**。
-- 迁移将 `sso_providers` 表改名为 `integrations`、`protocol` 改为 `provider_type`，注册策略移入 `login_config`，配置中的敏感字段分离并加密。**集成 UUID、用户身份连接、外部身份 ID 与外键关系保留**，无需重新绑定账号，也无需修改身份提供方的回调地址。
-- 连接响应字段由 `provider_*` 改为 `integration_id`、`integration_name`、`integration_display_name`、`integration_icon_url`；读取旧字段的客户端须同步更新。
-- 角色授权由 `admin:sso:read/update` 迁移为 `admin:integrations:login:read/update`（`admin:settings:read/update` 持有者额外获得 settings 域集成权限）。
-- **回滚必须同时恢复切换前数据库、匹配的应用版本和加密密钥**，不要用旧程序访问新 schema，也不要尝试从脱敏响应恢复凭据。
-
-## 常见错误
-
-| 代码 | 含义 |
-| --- | --- |
-| `6300` | 集成不存在 |
-| `6301` | SSO 登录会话过期（会话有效期 **10 分钟**，用户中途放弃授权即会过期） |
-| `6302` | 该集成不允许注册（自动创建与允许注册均已关闭） |
-| `6303` | 提供商拒绝认证或回调校验失败 |
-| `6304` | 配置缺失/类型不受支持 |
-| `6305` | 集成名称已存在 |
-| `6306` | 站点为 SSO-only，密码登录被禁用 |
-
-回调失败时后端会重定向到 `/sso-callback?error=...`，其中 `error` 可能是 `sso_provider_not_found`、`sso_session_expired`、`sso_login_failed`，账户被停用或待审批时分别是 `inactive`、`pending_approval`。
+升级前备份数据库，并按升级文档要求的顺序更新全部组件；不支持新旧版本混用的滚动部署。回滚必须同时恢复切换前的数据库、匹配的应用版本与加密密钥。完整的升级与回滚步骤见[升级 Clouisle](../../../self-host/operations/upgrade.mdx)。
 
 ## 故障排除
 
 ### 登录页没有 SSO 按钮
 
-1. 检查全局 SSO 开关是否为 `true`。
-2. 检查该集成是否**启用**，且 `enabled_capabilities` 包含 `user_login`（飞书需要显式开启登录开关）。
-3. 直接请求 `GET /api/v1/sso/integrations` 确认返回内容（为空则前端不会渲染按钮）。
+1. 检查**站点设置** → **安全**中的全局 SSO 开关是否打开。
+2. 检查该集成是否**启用**，且飞书登录开关（如使用飞书）已打开。
+3. 确认身份提供商配置的回调地址与上面的格式一致。
 
 ### 回调报错 / 停在同一页面
 
-1. 核对回调地址的**域名与集成名称**是否与配置完全一致；不要登记新的 integrations 回调路由。
-2. 确认对外地址（请求来源或反向代理转发）是身份提供商可达的公网地址。
-3. 检查授权码是否已过期（用户停留过久 → `6301`）。
-4. 查看审计日志中的 `sso_login_failed` 记录与错误信息。
+1. 核对回调地址的**对外域名与集成名称**是否与配置完全一致。
+2. 确认对外地址是身份提供商可达的公网地址。
+3. 检查用户是否在授权页停留过久（登录会话有效期 **10 分钟**，超时需重新发起）。
+4. 查看审计日志中的 SSO 登录失败记录与错误信息。
 
 ### 登录成功但字段错位
 
@@ -286,18 +257,18 @@ GitHub 的返回字段与 OIDC 标准不同，需要改成 `{"email": "email", "
 
 ### 飞书回调被拒或未创建账号
 
-1. 确认应用已登记 `https://<backend-host>/api/v1/sso/callback/<integration-name>`。
+1. 确认应用已登记该集成的回调地址（以飞书卡片显示的地址为准）。
 2. 确认登录 scope 包含 `contact:user.email:readonly`；通讯录中没有邮箱的账号还需 `contact:user.employee_id:readonly`，否则没有可据以推导占位邮箱的 `user_id`，首次登录会被拒绝。
 3. 飞书部门浏览或同步提示集成未启用时：先保存 App ID 和 App Secret，再启用飞书集成并打开**通讯录同步**开关。
 
 ### 关闭密码登录后无人能进后台
 
-这是把站点切成 SSO-only 的典型事故：请先确认至少一个超级管理员已绑定身份连接；若已锁死，可在服务端直接把 `sso_allow_password_login` 改回 `true` 后重启。
+这是把站点切成 SSO-only 的典型事故：请先确认至少一个超级管理员已绑定身份连接。若已经锁死，需要平台运维在服务端恢复密码登录开关。
 
 ## 相关文档
 
-- [SSO API](/api/sso) — 端点、请求体与响应字段
+- [SSO API](../../../api/sso.mdx) — 登录流程、集成管理端点与错误码
 - [登录与账户安全](./authentication.mdx) — 登录保护与 SSO 首次登录行为
 - [个人账户设置](./profile.mdx) — 解除关联与防自锁保护
-- [站点设置参考](/reference/site-settings) — `sso_*` 键的默认值
-- [环境变量](/self-host/configuration/environment-variables) — `FRONTEND_URL`、`PUBLIC_API_URL` 与 `API_V1_STR` 的作用与区别
+- [站点设置参考](../../../reference/site-settings.mdx) — SSO 与安全策略的默认值
+- [升级 Clouisle](../../../self-host/operations/upgrade.mdx) — 从旧 SSO 模型迁移与回滚

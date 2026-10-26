@@ -185,7 +185,9 @@ curl -X GET "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-44665
 | `hide_tool_calls` | boolean | 聊天界面隐藏工具调用详情 |
 | `hide_message_actions` | boolean | 隐藏 Token 用量/速度统计 |
 | `hide_reasoning` | boolean | 隐藏推理过程 |
-| `tools_config` | array | 工具配置列表（`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`） |
+| `hide_artifact_list` | boolean | 隐藏聊天界面中助手消息下方的生成文件列表；不会删除文件 |
+| `enable_citations` | boolean | 在回复中附带来源引用 |
+| `tools_config` | array | 工具配置列表（`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`）；`web_search` 的 `config` 只允许 `engine` |
 | `enable_attachments` | boolean | 启用文件和图片附件 |
 | `enable_user_input_request` | boolean | 启用模型可调用 `ask_user` 工具 |
 | `enable_memory` | boolean | 启用跨会话记忆 |
@@ -308,8 +310,10 @@ POST /api/v1/agents
 | `hide_tool_calls` | boolean | 否 | 聊天界面隐藏工具调用详情（默认 false） |
 | `hide_message_actions` | boolean | 否 | 隐藏 Token 用量/速度统计（默认 false） |
 | `hide_reasoning` | boolean | 否 | 隐藏推理/思维链（默认 false） |
-| `tools_config` | array | 否 | 工具配置（`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`） |
-| `tools_credentials` | object | 否 | 工具凭证（API 密钥、Token 等） |
+| `hide_artifact_list` | boolean | 否 | 隐藏助手消息下方的生成文件列表（默认 false），只影响展示 |
+| `enable_citations` | boolean | 否 | 回复附带来源引用（默认 false） |
+| `tools_config` | array | 否 | 工具配置（`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`）；`web_search` 的 `config` 只允许 `engine` |
+| `tools_credentials` | object | 否 | 工具凭证（API 密钥、Token 等）；不允许包含搜索密钥 |
 | `enable_attachments` | boolean | 否 | 启用文件和图片附件（默认 false） |
 | `attachment_config` | object | 否 | 附件限制配置 |
 | `enable_user_input_request` | boolean | 否 | 启用 `ask_user` 工具（默认 false） |
@@ -326,6 +330,10 @@ POST /api/v1/agents
 | `opening_message` | string | 否 | 聊天开场消息 |
 | `suggested_questions` | array | 否 | 推荐问题列表 |
 | `visibility` | string | 否 | `private` 或 `team`（默认 `private`；历史值 `public` 会按 `team` 处理） |
+
+<Callout type="warn" title="搜索凭据归站点所有">
+  `web_search` 没有 per-Agent 凭据：`tools_config` 中该项的 `config` 只接受 `engine`（`auto`/`tavily`/`bocha`/`searxng`/`deepseek`），其他键返回校验错误；`tools_credentials` 中出现 `TAVILY_API_KEY`、`BOCHA_API_KEY`、`SEARXNG_AUTH_TOKEN` 或 `DEEPSEEK_API_KEY` 同样被拒绝。可用引擎由站点配置决定，见[工具 API](./tools)。
+</Callout>
 
 ### 请求示例
 
@@ -734,6 +742,8 @@ GET /api/v1/agents/{agent_id}/public
     "hide_tool_calls": false,
     "hide_message_actions": false,
     "hide_reasoning": false,
+    "enable_citations": false,
+    "hide_artifact_list": false,
     "created_by": {
       "id": "user-001",
       "username": "alice",

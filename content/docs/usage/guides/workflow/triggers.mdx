@@ -1,76 +1,76 @@
 ---
 title: 触发器与运行
-description: 通过手动、API 和 Webhook 启动工作流
+description: 通过手动、Webhook 和定时任务启动工作流，并把运行页嵌入外部网站
 icon: Webhook
 ---
 
-工作流触发方式在**工作流设置**中配置。发布前可调试草稿，正式调用要求工作流已发布。
+触发方式在**工作流设置** > **触发器** > **触发方式**中配置：**手动触发**、**Webhook**、**定时任务**。草稿随时可以调试运行，对外触发（Webhook、嵌入、定时）都要求工作流已发布。
 
-## 手动与 API 运行
+## 手动运行
 
-编辑器内选择**运行**，填入输入变量后启动。API 运行使用：
+在编辑器选择**运行**打开**测试运行**抽屉，填入输入参数后选择**开始运行**。未发布时只能选择**调试（使用草稿）**。
 
-```bash
-curl -X POST "$CLOUISLE_API/api/v1/workflows/<workflow_id>/run" \
-  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"inputs":{"query":"检查订单状态"}}'
-```
-
-请求体中的 `inputs` 默认是空对象。响应返回运行 ID；使用运行查询接口获取状态和结果。
+工作流发布后，用户也可以直接打开运行页填写输入并运行；运行页的呈现方式在发布时选择（**表单与结果**或**结果与详情**）。运行记录在编辑器菜单的**日志**页查看。
 
 ## Webhook
 
-1. 在**工作流设置**选择**Webhook**。
-2. 保存后生成 Webhook Token 和 URL。
-3. 在**访问 API**页复制 URL，使用 API Key 的 Bearer 认证调用。
-4. 请求 JSON 直接提供工作流输入字段。
-
-Webhook 工作流必须已发布且启用对应触发器。初始响应包含运行 ID、状态和 `stream_url`；连接该 URL 可通过 SSE 查看节点事件。
-
-```bash
-curl -X POST "$CLOUISLE_API/api/v1/workflows/webhook/<webhook_token>" \
-  -H "Authorization: Bearer $CLOUISLE_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"检查订单状态"}'
-```
-
-## Cron
-
-在**工作流设置** > **触发器**中选择**定时任务**，界面支持按间隔、每天、每周、每月或自定义 Cron 配置。执行频率会换算成一条标准 Cron 表达式（`分 时 日 月 周`，如 `0 9 * * 1-5` 表示工作日上午 9 点），间隔预设为 5/10/15/30 分钟与 1/2/3/6/12 小时。
-
-<Callout type="warn" title="仅保存配置不会自动运行">
-  后端**有**实现调度逻辑的任务：`workflow.check_scheduled`（`backend/app/services/workflow/tasks.py`）挑选已发布且 `trigger_type=cron` 的工作流，用 `croniter` 判断当前这一分钟是否命中表达式，命中就以空输入 `{}`、以工作流创建者的身份触发一次运行。
-
-  但随附部署不会调度它，原因有三层，必须全部解决：
-
-  1. **不在 `include` 列表里**：`backend/app/core/celery.py` 中 `celery_app` 的 `include` 不含 `app.services.workflow.tasks`，任务默认没有注册到 Worker。
-  2. **不在 Beat 表里**：同一文件的 `beat_schedule` 只有用量重置、密钥/密码到期检查、沙箱会话清理和 AgentRun 失联扫描，没有 `workflow.check_scheduled`。随附的 Beat 容器（Compose/Helm/K8s 的 `beat` 服务，命令为 `python main.py beat`）只执行这份表。
-  3. **键名不一致**：调度任务读 `trigger_config["cron"]`，而**工作流设置**表单写入的是 `trigger_config["cron_expression"]`。即使调度成功，界面保存的表达式也不会被匹配。
-
-  该任务也没有匹配的 `task_routes` 规则，因此会落到 `default` 队列——需要确认有 Worker 消费该队列，或在 Beat 条目里用 `options.queue` 指定队列。
-</Callout>
-
-### 启用自定义部署的 Cron
-
-1. 把 `app.services.workflow.tasks` 加进 `celery_app` 的 `include`，或在 Worker 启动时导入该模块。
-2. 在 `beat_schedule` 添加条目（建议每分钟一次）：
-
-```python title="app/core/celery.py"
-celery_app.conf.beat_schedule["workflow-check-scheduled"] = {
-    "task": "workflow.check_scheduled",
-    "schedule": crontab(minute="*"),
-}
-```
-
-3. 统一表达式键名：把界面保存的 `trigger_config.cron_expression` 改名为 `cron`，或直接用 API 把表达式写到 `cron` 键上。
-4. 确认消费 `default` 队列的 Worker 正在运行，否则任务发出后无人执行。
+1. 在**工作流设置** > **触发器**把**触发方式**设为 **Webhook** 并保存。
+2. 保存后生成 **Webhook URL**；如需作废旧地址，点击**重新生成**，旧 URL 立即失效。
+3. 打开**访问 API**页，复制 Webhook URL 与页面给出的调用示例，把示例里的 `YOUR_API_KEY` 换成自己的 API Key。
+4. 发送请求：请求体直接提供工作流的输入字段，**不要**再包一层 `inputs`。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-trigger-settings.png" alt="工作流触发器设置" />
   <figcaption>工作流触发器设置</figcaption>
 </figure>
 
+注意事项：
+
+- Webhook 必须已发布，且工作流的触发方式是 Webhook；否则请求会被拒绝，提示**无效的 Webhook 令牌**、**工作流未发布**或 **Webhook 触发已禁用**。
+- 调用需要 API Key 认证，Key 必须有权访问该工作流。Key 在用户菜单的**API 密钥**页创建与停用，详见[API 密钥](../administration/api-keys.mdx)。
+- 请求立即返回一次运行记录，随后在**日志**页或运行抽屉查看进度和结果。
+- 包含暂停节点的工作流会在暂停点停下等待输入或审批，不会一直占用连接。
+
+请求与响应字段的完整说明见[工作流 API](../../../api/workflow.mdx)。
+
+## 定时任务
+
+在**工作流设置** > **触发器**把**触发方式**设为**定时任务**，再选择**执行频率**：
+
+| 频率 | 需要填写 | 换算结果 |
+| --- | --- | --- |
+| **按间隔执行** | **执行间隔**：5 / 10 / 15 / 30 分钟，1 / 2 / 3 / 6 / 12 小时 | `*/5 * * * *`、`0 */2 * * *` 这类表达式 |
+| **每天执行** | 执行时间 | `分 时 * * *` |
+| **每周执行** | 星期几 + 执行时间 | `分 时 * * 周`，例如 `0 9 * * 1-5` 是工作日上午 9 点 |
+| **每月执行** | 日期 + 执行时间 | 每月固定日期的执行时间 |
+| **自定义 Cron** | **Cron 表达式** | 直接填写 `分 时 日 月 周` |
+
+定时运行使用空输入，运行记录归属于工作流创建者。
+
+<Callout type="warn" title="定时触发依赖部署侧的调度服务">
+  界面保存的只是计划配置。定时触发需要部署环境开启调度服务才会按计划运行，随附的默认部署没有开启它，因此在默认部署上保存后不会自动运行。需要定时运行时，请联系部署管理员启用调度服务，并确认调度服务与界面保存的计划格式一致（否则到点仍不会触发）。排查方向见[故障排查](../../../self-host/operations/troubleshooting.mdx)里后台任务处理相关的章节。
+</Callout>
+
+## 嵌入运行页
+
+把已发布工作流的运行页嵌入自己的网站或内部系统：
+
+1. 在编辑器工具栏选择**嵌入**（**嵌入设置**）。
+2. 打开**启用嵌入**。工作流未发布时该开关不可用——先发布。
+3. 填写**允许的域名**：`example.com`、`example.com:3000` 或通配子域 `*.example.com`，多个用逗号或换行分隔。**留空表示不限制来源域名**，任何站点都能嵌入，正式环境不要留空。
+4. 按需调整**展示头部**、**查看历史**（历史记录保存在访问者浏览器本地）、**允许新建**，以及**主题**（自动/浅色/深色）和**主色调**。
+5. 选择**浮窗**、**全屏**或**移动端**嵌入模式；浮窗模式还可以设置**浮窗位置**（右下角/左下角）与**问候语**。
+6. 在**API 密钥**填入以 `clou_` 开头的 Key，它会自动填进下方代码片段；复制代码粘贴到你的网站。
+7. 选择**保存**后，代码片段即可用。
+
+注意事项：
+
+- 嵌入页只读已发布版本，草稿改动不会出现在嵌入页。
+- 嵌入使用 API Key 认证，Key 必须有权访问该工作流；泄露后吊销 Key 即可让嵌入失效。
+- 嵌入页的输入与结果呈现沿用发布时选择的呈现方式。完整的配置项说明、代码片段参数与鉴权细节见[独立运行与网页嵌入](../agent/embed-and-share.mdx)和[嵌入集成 API](../../../api/embed.mdx)。
+
 ## 状态与取消
 
-运行状态包括 `pending`、`running`、`waiting`、`success`、`failed`、`cancelled` 和 `timeout`；`waiting` 表示停在暂停节点等待审批或补充变量。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。查看[工作流 API](/api/workflow)获取流式运行事件。
+运行状态包括**等待中**、**运行中**、**等待输入**、**成功**、**失败**、**已取消**和**超时**；**等待输入**表示停在暂停节点等待审批或补充变量。运行抽屉可以取消仍在执行的任务；部分已发出的外部 API 请求不能被中断。
+
+各状态的完整含义与排障顺序见[工作流调试与监控](./debugging.mdx)。

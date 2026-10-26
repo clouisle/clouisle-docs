@@ -4,7 +4,7 @@ description: 上传图片、文档、沙箱产物并解析文件
 icon: Upload
 ---
 
-Clouisle 提供知识库文档、聊天附件、沙箱产物和文件解析接口。所有请求都使用 `multipart/form-data`，响应遵循统一的 `code`、`data`、`msg` 结构。
+Clouisle 提供知识库文档、聊天附件、沙箱产物和文件解析接口。上传与解析请求使用 `multipart/form-data`，读取文件返回二进制内容；除读取文件外，响应遵循统一的 `code`、`data`、`msg` 结构。
 
 ## 端点总览
 
@@ -17,6 +17,8 @@ Clouisle 提供知识库文档、聊天附件、沙箱产物和文件解析接�
 | POST | `/api/v1/upload/sandbox-artifact` | 上传沙箱生成的产物 |
 | POST | `/api/v1/upload/parse` | 解析单个文件文本 |
 | POST | `/api/v1/upload/parse/batch` | 批量解析最多 5 个文件 |
+| GET | `/api/v1/upload/files/{category}/{year}/{month}/{filename}` | 读取上传文件（受保护分类需认证授权） |
+| DELETE | `/api/v1/upload/files/{category}/{year}/{month}/{filename}` | 删除存储文件（仅超级管理员） |
 
 ## 支持的格式与大小
 
@@ -85,17 +87,62 @@ curl -X POST "$API_BASE_URL/api/v1/upload/parse?max_content_length=100000&trunca
 
 沙箱产物端点可以使用 JWT 或 `clou_` API Key；内部沙箱请求也可以改用签名：请求头 `X-Sandbox-Artifact-Timestamp`（Unix 秒）与 `X-Sandbox-Artifact-Signature`，时间戳与当前时间相差超过 `300` 秒即被拒绝。大小限制由站点设置 `SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` 控制。
 
-## 访问控制与错误
+## 读取与删除文件
 
-- 生成图片、生成视频和沙箱产物属于受保护 Asset；查看或下载需要当前用户或 API Key 对相关会话/工作流运行拥有权限。
+```
+GET /api/v1/upload/files/{category}/{year}/{month}/{filename}
+```
+
+返回存储文件的二进制内容。上传响应里的 `url` 已经是这个路径，直接使用即可；`category`、`year`、`month`、`filename` 会做路径段校验，不能包含 `..` 或分隔符。
+
+- **普通分类**（如 `general`、`avatar`、`icon`）可直接读取，不需要认证头。
+- **受保护分类**（`agent-attachments`、`sandbox-artifacts`、`generated-images`、`generated-videos`）以及任何挂着作用域引用的资产，必须带当前 JWT 或 `clou_` API Key；缺失返回 `401`，无权访问返回 `403`，资产不存在或已不可用返回 `404`。
+
+```bash
+curl -H "Authorization: Bearer $CLOUISLE_TOKEN" \
+  "$API_BASE_URL/api/v1/upload/files/generated-images/2026/09/9a8b7c6d5e4f_55667788.png" \
+  --output image.png
+```
+
+```
+DELETE /api/v1/upload/files/{category}/{year}/{month}/{filename}
+```
+
+删除存储文件，仅超级管理员可用；成功后 `data` 为 `null`。
+
+## 访问控制与预览状态
+
+**受保护资产**包括聊天附件（`agent-attachments`）、沙箱产物（`sandbox-artifacts`）、生成图片（`generated-images`）与生成视频（`generated-videos`）。读取或下载它们时，服务端按资产所属的**执行作用域**授权，作用域只有两种：
+
+- `conversation`：校验调用者能否访问该会话；API Key 还必须对会话所属 Agent 有权限。
+- `workflow_run`：校验调用者能否访问该工作流运行（触发者、工作流可见性）；API Key 还必须对工作流有权限。
+
+资产没有任何作用域引用时，只有创建者本人或超级管理员可读。授权在读取字节之前完成，不会先落盘再判权。
+
+聊天中生成的图片与视频在生成后注册为 Asset 并挂到对应消息的资产列表（会话作用域），因此刷新页面或重开历史仍能取回；沙箱产物同样以资产形式登记并跟随工作流运行作用域。
+
 - 受保护媒体 URL 必须携带当前 JWT 或 API Key。客户端应展示未认证、无权限、不可用和预览过大状态，不得回退到未认证原始 URL。
-- `asset_ref` 仅在对应会话或工作流运行范围内有效，不要猜测或跨范围复用。
+- `asset_ref` 仅在对应会话或工作流运行范围内有效，不要猜测或跨范围复用；换作用域后同一 `asset_ref` 不再解析。
+
+预览与展示应显式区分以下状态，而不是统一显示「加载失败」：
+
+| 状态 | 触发条件 | 建议呈现 |
+| --- | --- | --- |
+| `too-large` | 文件超过预览上限 | 显示大小与限制，提供下载入口 |
+| `unauthorized` | 缺少凭证或凭证过期（`401`） | 提示登录或刷新凭证后重试 |
+| `permission-denied` | 有身份但不属于该会话/运行（`403`） | 说明无访问权限，不提供重试 |
+| `unsupported` | 类型不支持内联预览 | 仅提供下载 |
+| `parse-failure` | 解析或转换失败 | 说明失败原因，保留原始下载 |
+
+## 错误
 
 | 错误 | 代码 | 说明 |
 | --- | --- | --- |
 | 文件过大 | `1001` | 超过端点限制；`data.max_size` 提供限制 |
 | 类型不支持 | `1001` / `6003` | MIME 类型或扩展名不在允许列表中 |
 | 批量文件过多 | `1001` | `parse/batch` 超过 5 个文件 |
-| 文件不存在 | `4000` | 存储文件已不存在 |
+| 未认证 | `2000` | 受保护文件缺少 JWT 或 API Key（HTTP `401`） |
+| 无权限 | `3000` | 有身份但不属于该会话/工作流运行（HTTP `403`） |
+| 文件不存在 | `4000` | 存储文件已不存在或资产已不可用（HTTP `404`） |
 
 上传或解析失败时读取响应中的 `data.errors` 和 `msg`，不要仅依据 HTTP 状态码判断失败原因。

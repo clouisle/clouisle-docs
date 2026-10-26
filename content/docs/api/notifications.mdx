@@ -24,7 +24,7 @@ icon: Bell
 
   管理端点中，`GET` 不做权限码校验，而是按**范围**鉴权：调用者需具备全局管理员访问权（`is_superuser`，或任一角色的权限码为 `admin:dashboard:access` / `*`），否则必须传入自己担任 OWNER/ADMIN 的 `team_id`。`POST` 需要 `admin:notification:create`，`DELETE` 需要 `admin:notification:delete`。
 
-  外部投递渠道（邮件、钉钉、企业微信、飞书、Webhook、Slack）必须在 [设置 API](./settings) 中先启用并配置，否则创建请求会被拒绝。
+  外部投递渠道只有 **email**、**webhook** 与 **feishu**，必须在集成设置中先启用并配置，否则创建请求会被拒绝。飞书额外要求 `notification` 能力已开启、App 凭据已保存，且接收人存在通讯录同步建立的飞书身份绑定；微信 iLink 属于消息集成，不是通知渠道。
 </Callout>
 
 ## 可见范围
@@ -64,8 +64,8 @@ icon: Bell
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `channel` | string | `email`、`dingtalk`、`wechat`、`feishu`、`webhook` 或 `slack` |
-| `status` | string | `pending`、`sending`、`success` 或 `failed` |
+| `channel` | string | 仅 `email`、`webhook` 或 `feishu` |
+| `status` | string | `pending`、`sending`、`success`、`failed` 或 `skipped`（无符合条件的接收人） |
 | `error_message` | string \| null | 失败原因（已本地化） |
 | `retry_count` | integer | 重试次数，默认 `0` |
 | `sent_at` | string (ISO 8601) \| null | 发送成功时间 |
@@ -73,6 +73,10 @@ icon: Bell
 
 <Callout type="info">
   用户端的列表接口不填充投递记录，`deliveries` 恒为 `[]`；只有管理端列表与创建响应会返回 `deliveries`。`is_read` / `read_at` 则相反——它们只出现在用户端，管理端列表恒为 `false` / `null`。
+</Callout>
+
+<Callout type="warn" title="通知投递 ≠ 消息集成投递">
+  这里的 `deliveries[]` 来自 `notification_deliveries`，只记录站内通知向 **email / webhook / feishu** 的外部发送。飞书与微信 Agent 会话的回复和产物写入另一张表 `integration_deliveries`，状态为 `pending` / `sending` / `sent` / `error` / `unavailable` / `unknown`，通过 `GET /api/v1/admin/deliveries` 或**监控** > **投递记录**页面查询，见[投递记录](../usage/guides/integrations/delivery-log.mdx)。微信不是通知渠道。
 </Callout>
 
 ---
@@ -273,7 +277,7 @@ POST /api/v1/admin/notifications
 | `data` | object | 否 | 附加数据载荷 |
 | `link_url` | string | 否 | 站内链接 |
 | `expires_at` | string (ISO 8601) | 否 | 过期时间 |
-| `notify_channels` | array of string | 否 | 外部投递渠道，默认不投递 |
+| `notify_channels` | array of string | 否 | 外部投递渠道，仅 `email` / `webhook` / `feishu`；默认不投递 |
 
 **范围鉴权：**
 
@@ -305,8 +309,8 @@ curl -X POST "https://your-domain.com/api/v1/admin/notifications" \
 **成功响应（200 OK）：** `data` 为创建的通知对象，`deliveries` 包含本次新建的投递记录（状态为 `pending`，由后台任务异步发送并更新）。
 
 <Callout type="warn" title="外部渠道必须先配置">
-  `notify_channels` 中的每个渠道都会在创建前校验其启用状态与必需配置，任一不满足即返回 `400`：
-  `smtp_not_enabled` / `smtp_not_configured`、`dingtalk_not_enabled` / `dingtalk_not_configured`、`wechat_not_enabled` / `wechat_not_configured`、`feishu_not_enabled` / `feishu_not_configured`、`webhook_not_enabled` / `webhook_not_configured`、`slack_not_enabled` / `slack_not_configured`。渠道配置见 [设置 API](./settings)。
+  `notify_channels` 中的每个渠道都会在创建前校验。未知渠道返回 `400` + `invalid_notification_channels`；已停用或缺少凭据时返回 `400`，错误键分别为：
+  `smtp_not_enabled` / `smtp_not_configured`、`webhook_not_enabled` / `webhook_not_configured`、`feishu_notification_not_enabled` / `feishu_notification_not_configured`。飞书接收人没有绑定身份不会导致创建失败，而是在投递时记为 `skipped` 或部分成功。渠道配置见[通知与外部渠道](../usage/guides/administration/notifications.mdx)。
 </Callout>
 
 ---
@@ -355,6 +359,8 @@ DELETE /api/v1/admin/notifications/{notification_id}
 
 ## 相关文档
 
-- [通知设置](/usage/guides/administration/notifications) — 管理后台的通知与投递渠道配置
-- [设置 API](./settings) — 通知渠道（SMTP、钉钉、企业微信、飞书、Webhook、Slack）的启用与测试
+- [通知设置](../usage/guides/administration/notifications.mdx) — 管理后台的通知与投递渠道配置
+- [消息集成](../usage/guides/integrations/index.mdx) — 飞书、微信 iLink 与 Agent 会话
+- [投递记录](../usage/guides/integrations/delivery-log.mdx) — 消息集成的 `integration_deliveries` 队列
+- [设置 API](./settings) — 集成凭据与渠道测试端点
 - [错误处理](./errors) — 按 HTTP 状态与业务错误码恢复

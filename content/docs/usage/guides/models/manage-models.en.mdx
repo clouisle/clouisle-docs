@@ -1,274 +1,208 @@
 ---
 title: Register Models and Authorize Teams
-description: Register global models, test connections, set capability flags, and authorize teams with quotas and priority
+description: Register global models, auto-discover provider models, test connections, and authorize teams with quotas and priority
 icon: Gauge
 ---
 
-Clouisle models use a **two-level structure**: an administrator first registers global models on the **Models** page of the admin panel (provider, endpoint, credentials, capabilities, pricing), then authorizes models to teams with quotas. The platform UI (the **Models** page and the model selectors in Agents and workflows) only shows models authorized to the current team.
+Clouisle models use a **two-level structure**: a platform administrator first registers global models in the **admin panel** > **Models** (provider, model ID, credentials, capabilities, pricing), then authorizes them to teams with quotas. The **Models** page a team sees, along with the model selectors in Agents and workflows, only lists models authorized to that team.
 
 <Callout type="info">
-Prerequisite: model egress is gated by the **Model Endpoint Allowlist** site setting (`model_endpoint_allowlist`). Custom endpoints (self-hosted gateways, internal Ollama nodes) must be allowlisted first, otherwise saving, testing, and runtime calls are rejected with `model_endpoint_not_allowlisted`. See [Providers, model types, and model discovery](./providers.mdx#endpoint-allowlist).
+Custom API endpoints (self-hosted gateways, internal Ollama nodes) must be added to **Site Settings** > **Security** > **Model Endpoint Allowlist** first. Otherwise saving, testing, and runtime requests are rejected. See [Endpoint Allowlist](./providers.mdx#endpoint-allowlist).
 </Callout>
 
 ## Registering a global model
 
-In the **admin panel** > **Models**, select **Add Model**, fill in the form, then **Test Connection** before saving. Writable fields and constraints:
+Go to **admin panel** > **Models** and select **Add Model**. The form has three parts: **Basic Info**, **Parameters**, and **Advanced**. Fill it in, select **Test Connection**, then save. A saved model appears in the list, enabled by default.
 
-| Field | Type | Required | Constraints and default | Notes |
-| --- | --- | --- | --- | --- |
-| `name` | string | Yes | `1-100` characters | Display name shown in team model lists and selectors |
-| `provider` | enum | Yes | One of 23 provider identifiers | Determines the adapter and default endpoint |
-| `model_id` | string | Yes | `1-100` characters | Real upstream model ID or deployment name; a typo surfaces as "model not found" at call time |
-| `model_type` | enum | Yes | One of 9 types | Determines the call protocol; must match the provider |
-| `provider_display_name` | string | No | ≤ `100` characters | Overrides the user-facing provider name for gateway/proxy setups |
-| `base_url` | string | No | ≤ `512` characters | Empty falls back to the provider/type default endpoint |
-| `api_key` | string | No | ≤ `1024` characters | Required for every provider except `ollama`; stored encrypted |
-| `context_length` | integer | No | `>= 1` | Used for display and capacity checks only; it does not truncate |
-| `max_output_tokens` | integer | No | `>= 1` | Default output cap, overridable by `default_params.max_tokens` or a call argument |
-| `input_price` / `output_price` | decimal | No | `>= 0`, max 6 decimal places | Price per 1M tokens, recorded for reference |
-| `default_params` | object | No | — | Default inference parameters, e.g. `{"temperature": 0.7, "top_p": 0.9}` |
-| `capabilities` | object | No | — | Capability flags, see below |
-| `config` | object | No | — | Extra configuration such as Azure `api_version`/`deployment` or the video test `poll_timeout_s` |
-| `is_enabled` | boolean | No | Default `true` | Global on/off switch |
-| `is_default` | boolean | No | Default `false` | Whether this is the default model for its `model_type` |
-| `sort_order` | integer | No | Default `0` | Ascending sort weight |
+### Basic info
+
+| Field | Required | Values and defaults | Notes |
+| --- | --- | --- | --- |
+| **Model Name** | Yes | 1–100 characters | Shown in the model list, selectors, and usage stats |
+| **Provider** | Yes | One of 23 providers, see [Supported Providers](./providers.mdx#supported-providers) | Determines the call protocol and default endpoint |
+| **Model Type** | Yes | Chat, embedding, rerank, decision, TTS, STT, audio generation, text-to-image, text-to-video | Determines how the model is called and which test action runs |
+| **Model ID** | Yes | 1–100 characters | The provider's real model name or deployment name; a typo surfaces as "model not found" at call time |
+| **API Base URL** | No | ≤ 512 characters | Empty uses the provider/type default; custom addresses must be allowlisted |
+| **API Key** | Required for every provider except Ollama | ≤ 1024 characters | Stored encrypted; the UI only shows "API key is configured" afterwards |
+| **Provider / Gateway Name** | No | ≤ 100 characters | With **OpenAI-compatible**, replaces the provider name shown in lists |
 
 <Callout type="warn">
-`provider`, `model_id`, and `model_type` are **immutable after creation**: the update endpoint accepts every field in the table except these three. To change a model ID, provider, or type, create a new model, re-authorize teams, and adjust any knowledge bases or Agents referencing the old one.
+**Provider**, **Model ID**, and **Model Type** cannot be changed after saving. To change the provider, model ID, or type, create a new model, authorize it to teams, and repoint the knowledge bases, Agents, and workflows that referenced the old one.
 </Callout>
 
-Example: registering an OpenAI chat model.
+### Parameters
 
-```json
-{
-  "name": "GPT-4 Turbo",
-  "provider": "openai",
-  "model_id": "gpt-4-turbo-preview",
-  "model_type": "chat",
-  "api_key": "sk-...",
-  "context_length": 128000,
-  "max_output_tokens": 4096,
-  "input_price": 10.0,
-  "output_price": 30.0,
-  "default_params": {"temperature": 0.7, "top_p": 0.9},
-  "capabilities": {"streaming": true, "function_call": true}
-}
-```
+- **Context Length** and **Max Output Tokens** are used for display and capacity checks only; they do not truncate. An Agent-level or per-call max-token value can still override the output cap.
+- **Input Price** and **Output Price** are recorded as USD per million tokens. They are reference values and do not drive billing or quotas.
+- **Inference parameters** (frequency penalty, presence penalty, default max tokens) fall back to provider defaults when left empty.
+- **Input modalities** and **output modalities** declare what the model accepts and can generate (text, image, audio, video, file). Ticking **image** under input is what allows image uploads in chat; output modalities are only a declaration and do not enable image or video generation.
+- The three **Model Capabilities** switches are described in [Model capabilities](#model-capabilities).
 
-For Azure OpenAI, the deployment name and API version go through `config`, and `model_id` holds the deployment name:
+### Advanced
 
-```json
-{
-  "name": "GPT-4 (Azure)",
-  "provider": "azure_openai",
-  "model_id": "gpt-4-deployment",
-  "model_type": "chat",
-  "base_url": "https://your-resource.openai.azure.com",
-  "config": {"api_version": "2024-02-15-preview", "deployment": "gpt-4-deployment"}
-}
-```
+Sections appear based on provider and model type: **Thinking / Reasoning** (enable thinking, thinking budget, reasoning effort), **Image Settings**, **Video Settings**, **Audio Settings**, **Azure Configuration** (API version, deployment name), plus three JSON inputs — **Extra Request Body**, **Default Params Extension**, and **Config Extension** — for provider-specific parameters. Common setups:
 
-## Discovering provider models
+| Scenario | How to fill it in |
+| --- | --- |
+| Azure OpenAI | Set API version and deployment name under **Azure Configuration**; put the deployment name in **Model ID** as well |
+| Volcengine Ark | Fill `X-Api-Key` and `X-Api-Resource-Id` in the **API Key** area |
+| Self-hosted gateway | Pick **OpenAI-compatible** as the provider and fill **API Base URL** plus **Provider / Gateway Name** |
+| Reasoning model | Turn on **Enable thinking**, then set a **thinking budget** or **reasoning effort** if needed |
 
-While the create form is **unsaved**, you can select **Discover Models**: after filling in `base_url` and the API Key, the backend calls the provider's model-list endpoint (such as `/v1/models` or Ollama's `/api/tags`) and fills `id`, `name`, context length, max output, and capability flags into the form, so you never mistype `model_id`. 16 providers support discovery; `azure_openai`, `runway`, `pika`, `luma`, `kling`, `stability`, and `midjourney` do not. Full rules (paths, auth, 15-second timeout, 2 MiB cap, TypeSafe gateway path rebasing) are in [Providers, model types, and model discovery](./providers.mdx#remote-model-discovery).
+Exact field names, ranges, and defaults are in [Model Definition Fields](/reference/model-providers#model-definition-fields).
+
+## Auto-discovering provider models
+
+When creating a model, after you fill in **Provider**, **API Base URL**, and **API Key** (local providers such as Ollama need no key), the form automatically fetches the provider's available models: the **Model ID** input becomes a searchable dropdown listing what the provider returned (shown as "name (ID)"). Picking one fills in the name, context length, max output tokens, modalities, and capability switches, so you never mistype the model ID. The hint under the field reports fetching, success, or failure.
+
+- Discovery only runs when **creating** a model; editing an existing model does not re-fetch.
+- Providers without a model-list API (Azure OpenAI, Runway, Pika, Luma, Kling, Stability AI, Midjourney) show no list — enter the model ID manually.
+- A failed fetch only costs convenience: a manually entered model ID still saves and works.
+- The credential used for discovery is used for that request only and is not stored because of it.
+
+Supported providers, address rules, and failure reasons are in [Remote Model Discovery](./providers.mdx#remote-model-discovery).
 
 ## Credentials and endpoints
 
-- `api_key` is stored encrypted by the backend. Every read endpoint returns only `has_api_key: true/false` and **never echoes the plaintext**; enter a new value in the edit form to rotate it.
-- API Key format is validated: `openai` must start with `sk-`, `anthropic` with `sk-ant-`, otherwise the request fails with `invalid_api_key_format`. `ollama` is the only provider that needs no API Key.
-- The effective request address resolves as the model's `base_url` → the type-specific default → the provider default; see [Provider identifiers and default endpoints](./providers.mdx#provider-identifiers-and-default-endpoints). The chosen endpoint must be an allowlisted Origin.
+- **API Keys are stored encrypted.** After saving, every page shows only "API key is configured" — the plaintext is never displayed. To rotate, enter a new value in the edit form; leaving it empty keeps the current key.
+- Key formats follow a convention: OpenAI-style keys start with `sk-`, Anthropic keys with `sk-ant-`. When the format clearly does not match, **Test Connection** reports a format error. **Ollama** is the only provider that needs no key.
+- The effective request address falls back in this order: the model's **API Base URL** → the type's default → the provider's default. It must match the [endpoint allowlist](./providers.mdx#endpoint-allowlist).
 
-## Capability flags
+## Model capabilities
 
-`capabilities` holds four flags that drive UI and runtime behavior:
+The three capability switches decide whether Agents and workflows can use specific model behavior:
 
-| Flag | Effect | Cost of getting it wrong |
+| Switch | Effect when on | Cost of getting it wrong |
 | --- | --- | --- |
-| `function_call` | Lets the model call tools | Off: an Agent cannot use tools. On while the model does not support it: protocol errors during tool calls |
-| `vision` | Allows image input | Off: images cannot be used in chat |
-| `streaming` | Supports streaming responses | Off: chat returns in one shot and time-to-first-token grows noticeably |
-| `json_mode` | Supports structured JSON output | Off: JSON-dependent nodes and parameter extraction degrade to text parsing |
+| **Function Call** | Lets the model call tools | Off: Agents cannot use tools. On for a model that does not support it: protocol errors during tool calls |
+| **Streaming** | Streams the answer as it is generated | Off: answers arrive in one shot and long answers feel slower to start |
+| **JSON Mode** | Supports structured JSON output | Off: JSON-dependent nodes and parameter extraction fall back to text parsing |
 
-Before enabling tools for an Agent, confirm the selected chat model truly supports `function_call`; use **Discover Models** to read the provider's declaration, then correct it by hand if needed.
+Before enabling tools for an Agent, confirm the chosen chat model really supports **Function Call**: read the provider's declaration from the **Model ID** dropdown while creating the model, then correct it by hand if needed.
 
 ## Testing connections
 
-Two test endpoints differ in permission and purpose:
+**Test Connection** in the dialog sends one minimal request upstream using the current form contents and reports success or failure plus the **latency**:
 
-| Endpoint | Permission | Purpose |
-| --- | --- | --- |
-| `POST /api/v1/admin/models/{model_id}/test` | `admin:model:update` | Tests a saved model's actual configuration |
-| `POST /api/v1/admin/models/test` | `admin:model:create` | Tests the configuration in the form before saving; credentials are not persisted |
-
-The test drives the real adapter for that `model_type` with one minimal request:
-
-| Model type | Test action |
+| Situation | What is tested |
 | --- | --- |
-| `chat` | Sends one chat message whose fixed content is `Hi` and requires non-empty text back |
-| `embedding` | Embeds the string `test` and requires a non-empty vector |
-| `rerank` | Reranks a fixed query against two documents and requires results |
-| `decision` | Sends a TypeSafe decision request with one `noul` question and requires answers |
-| `text_to_image` | Generates one `A simple connection test image` (`openai_responses` adds `quality: low`) and requires image content |
-| `text_to_video` | Creates a video task and polls until completion using `config.poll_timeout_s` (default `120` seconds) and `config.poll_interval_ms` (default `3000`) |
-| `tts` | Synthesizes `Hello` using `default_params.speaker` or `voice` |
-| `audio_generation` | Generates `A short, gentle bell sound` |
-| `stt` | Validates only the API Key format; no real transcription is sent |
+| New, unsaved model | The credentials currently in the form; they are not persisted |
+| Editing a saved model | The saved configuration; a newly entered key is used as-is |
 
-The response is always `success`, `message`, and `latency_ms`. Two things to note:
+Test actions per model type:
 
-<Callout type="info">
-- If the upstream returns a **rate limit** error, every type except `text_to_video` treats it as "configuration is valid but currently throttled" and still returns `success: true` with a rate-limit notice — a passing connection test does not mean the quota is sufficient.
-- The video test really creates a task; a polling timeout (default `120` seconds) returns `model_test_connection_timeout`. Raise `poll_timeout_s` in `config` when the provider needs longer.
+| Model type | What the test does |
+| --- | --- |
+| Chat | Sends `Hi` and requires non-empty text back |
+| Embedding | Embeds a fixed string and requires a vector |
+| Rerank | Reranks two documents against a fixed query and requires results |
+| Decision | Sends one minimal decision request to TypeSafe and requires an answer |
+| Text-to-image | Generates one test image |
+| Text-to-video | Really creates a video task and waits for the render |
+| TTS / audio generation | Synthesizes a fixed clip of audio |
+| STT | Validates the key format only; no real transcription |
+
+<Callout type="warn">
+- **Passing the test does not mean the quota is sufficient**: when upstream throttles, every type except text-to-video still reports success together with a rate-limit notice.
+- **The text-to-video test creates a real task and incurs provider charges**, waiting up to 120 seconds by default. If the provider renders slower, the test reports a timeout — raise the wait seconds in **Advanced** > **Config Extension**.
 </Callout>
 
 <Callout type="info">
-Not implemented / Roadmap. There is no multi-request performance test (request count, concurrency, p50/p95/p99, cost aggregation). Testing is a single connection/response check.
+Only single-request connection checks exist. There is no multi-request load test, concurrency test, or p95 latency statistic.
 </Callout>
 
 ## Enabling, disabling, and default models
 
-- `is_enabled` is the model's only status bit: turning it off removes the model from selectors while keeping its configuration and team authorizations, and turning it back on restores them.
-- There is no `testing` or `deprecated` state, no deprecation notice, EOL date, or replacement-model suggestion.
-- `is_default` is unique per `model_type`: calling `POST /api/v1/admin/models/{model_id}/set-default` clears the flag on other models of the same type. Knowledge base embedding models and the Agent fallback when no model is specified both rely on it.
+Use the row actions in the model list to **Enable** / **Disable** a model, or change **Status** and **Set as default model for this type** in the edit dialog.
+
+- Disabling is the only way to retire a model: it disappears from every selector while its configuration and team authorizations are kept, and re-enabling restores it.
+- **The default model is unique per type**: **Set as Default** clears the default flag from other models of the same type. Knowledge base embedding and the Agent fallback when no model is chosen both rely on it.
+- The list can be filtered by status and deleted in bulk.
 
 ## Authorizing models to teams
 
-<Callout type="info">
-**Granting, changing quotas, enabling/disabling a grant, and revoking a grant are superuser-only** (the backend handlers depend on `get_current_active_superuser`). A team administrator who can see the **Authorized Models** tab still gets a 403 on submit.
-</Callout>
+Only a superuser can authorize models:
 
-1. Open the **admin panel** > **Teams** and open the target team.
-2. Switch to the **Authorized Models** tab and select **Add Model**.
-3. Select one or more global models (the dropdown lists only not-yet-authorized, globally enabled models) and submit them together.
-4. Fill in the daily/monthly Token and request limits plus the priority for each grant; leave a field empty for unlimited.
-5. After saving, team members can see the model on their **Models** page (see below).
+1. Go to **admin panel** > **Teams** and open the target team.
+2. Switch to the **Model Authorization** tab and select **Authorize Model**.
+3. Tick one or more globally enabled models in the dropdown (already authorized ones are not listed). You can authorize several at once.
+4. Set daily / monthly token limits and request limits plus priority for each model. Leave a field empty for unlimited.
+5. Select **Authorize** to save.
 
-An authorization is unique on the team + model pair: authorizing the same model twice returns "already authorized". Batch authorization `POST /teams/{team_id}/models/batch` only creates new grants and silently skips existing ones; batch revoke `DELETE /teams/{team_id}/models/batch` returns the number actually deleted.
+Team members can then see the model on their **Models** page.
 
-The **Models** page a team member sees lists **every grant** for the team (including disabled ones with `is_enabled: false`, filterable by status), while model selectors in Agents and workflows only offer grants that are both authorized and enabled (`GET /teams/{team_id}/available-models` returns only grants that are enabled and whose global model is enabled).
+- A team has exactly one authorization per model; authorizing the same model twice is rejected.
+- Authorized models can be adjusted via **Edit Authorization** (quotas, priority) or removed with **Revoke Authorization**.
+- Team administrators can view **Authorized Models** and usage, but authorizing, changing quotas, and revoking are superuser-only.
+
+### What a team sees
+
+- The team **Models** page lists every authorized model, including globally disabled ones, and can filter by status.
+- Model selectors in Agents, workflows, and elsewhere only offer models that are both authorized and enabled.
 
 ## Quotas and usage
 
-All four limits may be `null` (unlimited), and `0` is a **valid value** (immediately exhausted):
+All four limits can be left empty (unlimited); **`0` is a valid value** and means immediately exhausted.
 
-| Field | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `daily_token_limit` | integer / null | `null` | Daily token cap |
-| `monthly_token_limit` | integer / null | `null` | Monthly token cap |
-| `daily_request_limit` | integer / null | `null` | Daily request cap |
-| `monthly_request_limit` | integer / null | `null` | Monthly request cap |
+| Limit | Default | Meaning |
+| --- | --- | --- |
+| Daily token limit | Unlimited | Tokens available per day |
+| Monthly token limit | Unlimited | Tokens available per month |
+| Daily request limit | Unlimited | Requests allowed per day |
+| Monthly request limit | Unlimited | Requests allowed per month |
 
-Enforcement is not symmetric, so configure with care:
+Enforcement differs, so configure with care:
 
-- **Token limits**: rejected only when `used + estimated for this call > limit`. Reaching exactly the limit does not fail immediately, but any further tokens do.
-- **Request limits**: rejected when `used >= limit`, so request number `limit` still succeeds and request `limit + 1` is blocked.
-- Usage resets **lazily** in the site timezone (`TIMEZONE`, default `Asia/Shanghai`): after 00:00 each day and after 00:00 on the 1st of each month, the next quota check zeroes the counters and writes them back.
-- Over quota, the chat endpoint returns business error `6103` with HTTP `429` and the message "model quota exceeded".
+- **Token limits** reject only when "used + estimate for this call" exceeds the limit, so hitting the limit exactly does not fail until a bit more is used.
+- **Request limits** reject when "used ≥ limit": request number `limit` still succeeds and request `limit + 1` is blocked.
+- Usage resets on the site timezone: after 00:00 each day and after 00:00 on the 1st of each month, the next quota check zeroes the counters.
+- Once exhausted, chat reports "Model quota exceeded" — raise the limit or wait for the next reset.
 
-`GET /teams/{team_id}/models/quota` returns each grant's limits, usage, and percentages. Note that `is_quota_exceeded` accounts only for **token** limits (`used >= limit`); compare `daily_request_limit` with `daily_requests_used` yourself for request quotas.
+The progress bar in the authorization list counts **token** limits only. To check request quotas, compare used requests with the daily / monthly request limits yourself.
 
 ## Priority
 
-`priority` defaults to `0` and only affects ordering among models of the same type, never availability. The team model list sorts by `-priority, created_at` and the available model list by `-priority` — a larger value moves a model to the front of selectors. Change any limit or the priority in the **Edit** dialog.
+**Priority** defaults to `0` and only affects the ordering of same-type models in selectors, never availability: a larger value sorts earlier. Edit it together with quotas in **Edit Authorization**.
 
 ## Updating, revoking, and deleting
 
 | Action | Effect |
 | --- | --- |
-| Update model (`PUT /admin/models/{id}`) | Only name, credentials, endpoint, capabilities, pricing, default parameters, status, and sort order; `provider`/`model_id`/`model_type` cannot change |
-| Disable model | Globally hidden, team grants kept, restorable at any time |
-| Revoke team grant | Deletes the team + model grant and its usage records; the team immediately loses the model |
-| Delete global model | Removes the global registry entry and **cascades to every team's authorization via the foreign key** |
+| Edit model | Name, API key, base URL, capabilities, pricing, parameters, and status can change; provider, model ID, and model type cannot |
+| Disable model | Globally hidden, team authorizations kept, restorable at any time |
+| Revoke team authorization | The team immediately loses the model and its usage records are removed |
+| Delete model | The global entry is deleted and **every team's authorization for it is deleted too** |
 
 <Callout type="error">
-Deleting a global model cascades to all team authorizations and is irreversible. To retire a model for one team only, revoke that grant or disable it instead of deleting the global model.
+Deleting a global model also deletes all team authorizations and cannot be undone. To retire a model for one team only, revoke that authorization instead of deleting the model.
 </Callout>
 
 ## Troubleshooting
 
 ### Connection test fails
 
-1. **Check the allowlist**: confirm the custom endpoint's `scheme://host:port` is in **Site Settings** > **Security** > **Model Endpoint Allowlist**.
-2. **Check the credential format**: `openai` needs the `sk-` prefix and `anthropic` the `sk-ant-` prefix; verify the key is not expired and can access the target model.
-3. **Check provider/type matching**: combinations such as `anthropic` + `embedding` or `stability` + `text_to_video` fail at call time, not on save.
-4. **Check the network**: a 15-second timeout and no redirects apply; confirm internal endpoints are reachable and not blocked by a firewall.
-5. **Check upstream status**: provider throttling or outages show as test failures, but throttling normally still returns `success: true`.
+1. **Check the allowlist**: confirm the custom endpoint's scheme + host + port is in **Site Settings** > **Security** > **Model Endpoint Allowlist**. Non-default ports such as `:11434` are compared too.
+2. **Check the key format**: OpenAI-style keys need the `sk-` prefix, Anthropic keys `sk-ant-`; confirm the key is valid and may access the target model.
+3. **Check provider/type matching**: combinations such as Anthropic + embedding or Stability + text-to-video may save but fail at call time.
+4. **Check the network**: a 15-second timeout applies and redirects are not followed; confirm internal addresses are reachable.
+5. **Check upstream status**: provider throttling or outages also show as test failures, though throttling usually still reports success.
 
-### Quota exhausted (`6103` / HTTP 429)
+### "Model quota exceeded"
 
-1. Call `GET /teams/{team_id}/models/quota` to see which limit was hit.
-2. Raise the limit, switch to a same-type model that has headroom, or wait for the lazy daily/monthly reset.
-3. If you suspect a false positive, check for one oversized request; token limits compare `used + estimate`.
+1. Open **admin panel** > **Teams** > target team > **Model Authorization** and find which limit was hit.
+2. Raise the limit, switch to a same-type model with headroom, or wait for the daily / monthly reset.
+3. If you suspect a false positive, look for one oversized request: token limits compare used plus estimate.
 
 ### Slow responses or timeouts
 
-1. Review the model's `context_length` and `max_output_tokens`; an oversized output cap noticeably lengthens responses.
-2. Lower `max_tokens`, enable streaming (`capabilities.streaming`), or switch to a faster model.
-3. For video models, check `config.poll_timeout_s`; the default `120` seconds may be shorter than the provider's render time.
-
-## API access
-
-Admin model endpoints live under `/api/v1/admin/models` and require `admin:model:read`, `admin:model:create`, `admin:model:update`, or `admin:model:delete` per operation. See the [Models API](/api/models) for the endpoint list.
-
-```python
-# List models (admin)
-models = api.get("/api/v1/admin/models")
-
-# Create a model
-model = api.post("/api/v1/admin/models", json={
-    "name": "GPT-4 Turbo",
-    "provider": "openai",
-    "model_id": "gpt-4-turbo-preview",
-    "model_type": "chat",
-    "api_key": "sk-...",
-    "input_price": 10.0,   # per 1M tokens
-    "output_price": 30.0
-})
-
-# Test the form configuration before saving (credentials not persisted)
-api.post("/api/v1/admin/models/test", json={
-    "provider": "openai",
-    "model_id": "gpt-4-turbo-preview",
-    "model_type": "chat",
-    "api_key": "sk-..."
-})
-
-# Test a saved model
-api.post(f"/api/v1/admin/models/{model_id}/test")
-
-# Discover available provider models
-api.post("/api/v1/admin/models/discover", json={
-    "provider": "openai",
-    "base_url": "https://api.openai.com/v1",
-    "api_key": "sk-..."
-})
-
-# Make it the default model for its type
-api.post(f"/api/v1/admin/models/{model_id}/set-default")
-
-# Authorize a team (superuser only) with quotas and priority
-api.post(f"/api/v1/teams/{team_id}/models", json={
-    "model_id": str(model_id),
-    "daily_token_limit": 1_000_000,
-    "monthly_token_limit": 20_000_000,
-    "daily_request_limit": 2000,
-    "monthly_request_limit": 40000,
-    "priority": 10
-})
-
-# Batch authorize / batch revoke
-api.post(f"/api/v1/teams/{team_id}/models/batch", json={
-    "model_ids": [str(a), str(b)],
-    "monthly_token_limit": 5_000_000
-})
-api.delete(f"/api/v1/teams/{team_id}/models/batch", json={"model_ids": [str(a)]})
-
-# Inspect quota usage
-api.get(f"/api/v1/teams/{team_id}/models/quota")
-```
+1. Review **Context Length** and **Max Output Tokens**; an oversized output cap noticeably lengthens responses.
+2. Lower the Agent's max tokens, turn on **Streaming**, or switch to a faster model.
+3. Video models that render slower than the test wait time report a timeout during testing.
 
 ## Related pages
 
-- [Providers, model types, and model discovery](./providers.mdx) — 23 provider identifiers, default endpoints, and discovery rules
+- [Providers, model types, and model discovery](./providers.mdx) — 23 providers, default endpoints, and discovery rules
 - [Model](/usage/concepts/model) — two-level structure and quota concepts
-- [Teams and permissions](/usage/guides/administration/teams) — team member roles
+- [Teams and members](/usage/guides/administration/teams) — member roles, model authorization, and team ownership
+- [Models API](/api/models) — register, test, and discover models programmatically
+- [Team Models API](/api/team-models) — authorization, quota, and usage endpoints

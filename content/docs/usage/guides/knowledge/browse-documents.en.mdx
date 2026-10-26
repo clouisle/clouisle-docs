@@ -1,109 +1,65 @@
 ---
 title: Browsing Documents & Metadata
-description: View knowledge base documents, system fields, extracted metadata, and sharing origin
+description: Browse knowledge base documents, inspect chunks and file previews, and understand document information and read-only scope
 icon: FolderSearch
 ---
 
-In **Knowledge Bases**, select a knowledge base to browse its document list: search by name, filter by status (pending/processing/completed/error) or type, and open a document to inspect its chunks and metadata. Knowledge bases shared into your team carry an origin badge and are read-only throughout.
+In **Knowledge Bases**, select a knowledge base to browse its documents: search by name, filter by processing status or file type, and select rows for batch actions. Open a document to inspect and edit its chunks, and to preview or download the original file. Knowledge bases shared in from another team carry an origin badge and are read-only throughout.
 
-## Document list and filters
+## Document List
 
-The document list endpoint supports three filter dimensions, usable together:
+Each row shows the document name, type, size, chunk count, processing status, and creation time, with a row menu offering:
 
-| Parameter | Type | Notes |
-| --- | --- | --- |
-| `search` | string | Fuzzy match on the document name |
-| `status` | string array | `pending`, `processing`, `completed`, `error` |
-| `doc_type` | string array | `pdf`, `docx`, `doc`, `pptx`, `txt`, `markdown`, `html`, `csv`, `xlsx`, `xls`, `json`, `url` |
-| `page` / `page_size` | integer | Defaults `1` / `20` |
-
-The UI status and type filters are single-select, but the endpoint accepts arrays — scripts can filter on several statuses or types at once.
-
-## Document system fields
-
-| Field | Notes |
+| Action | Notes |
 | --- | --- |
-| `name` | Document name (the filename by default; URL imports may set a custom name) |
-| `doc_type` | Document type: `pdf`, `docx`, `doc`, `pptx`, `txt`, `markdown`, `html`, `csv`, `xlsx`, `xls`, `json`, `url` |
-| `file_size` | File size in bytes; empty for URL documents |
-| `file_path` | Whether the file is stored server-side (empty for URL documents) |
-| `source_url` | Origin URL (URL documents only) |
-| `status` | `pending`, `processing`, `completed`, `error` |
-| `error_message` | Failure reason (`error` status only) |
-| `chunk_count` | Number of chunks generated |
-| `token_count` | Estimated token count (sum of chunk characters ÷ 4) |
-| `metadata` | Automatically extracted JSON metadata (see below) |
-| `processed_at` | When processing completed |
-| `created_at` / `updated_at` | Timestamps |
+| **Configure** / **Quick Process** | Unprocessed documents only: **Configure** opens the detail page to adjust chunk parameters, while **Quick Process** starts processing with the current settings |
+| **Manage Chunks** | Opens the document detail page to view and edit chunks |
+| **Reprocess** | Opens chunk preview; confirm or adjust, then re-chunk and index again — manual chunk edits are lost |
+| **Retry Failed Chunks** | Failed documents only: retries just the failed chunks |
+| **Download Original** | Downloads the file as uploaded; URL imports have no original |
+| **View Source URL** | URL imports only: opens the origin address |
+| Delete | Deletes the document and all its chunks |
 
-## Extracted metadata
+- **Search documents…** filters by name; the status filter (pending/processing/completed/failed) and the type filter each accept one value at a time.
+- Select several rows to **Batch Process**, **Batch Retry Failed Chunks**, or delete them together.
+- Documents uploaded but not yet chunk-configured are flagged at the top of the list; select the batch configuration action there to continue.
+- Documents managed by Feishu sync carry a read-only marker: edit the original in Feishu, since local edits, reprocessing, and deletion are unavailable here.
 
-`metadata` is a JSON object written by the processing pipeline during text extraction. It is **not editable field by field** and is regenerated on reprocessing. Common keys:
+## Document Detail Page
 
-- `format`: `markdown` means the content was converted to Markdown by the document converter (PDF/Office/HTML take this path).
-- `char_count`: character count of the cleaned text.
-- `file_size`, `doc_type`: file information captured during extraction.
-- `media_assets`: the list of embedded images that were extracted from the document (images are served through the document media endpoint).
+Chunks are listed on the left and chunk settings on the right.
 
-Chunks carry their own `metadata` as well:
+- The chunk list shows each chunk's index and content; you can **Edit Chunks**, add a chunk, or delete one. If a chunk has unsaved changes, the editor asks whether to save or discard before leaving.
+- When the status is failed, retry only the failed chunks instead of reprocessing the whole document.
+- For an unprocessed document, adjust **Chunk Size** (in characters), **Chunk Overlap**, **Custom Separator**, and **Clean Text** on the right, then start processing. After processing completes, changing those settings requires **Reprocess**.
+- **Preview Original** opens a read-only preview: images display directly, PDFs page through, DOCX files offer thumbnails, page numbers, and zoom, and spreadsheets (XLSX/CSV) show read-only sheet by sheet. Files over `20MB` are not previewed online — use **Download Original** instead.
+- URL imports have no original file, so only the source address and chunks are available.
 
-- `section`: the heading breadcrumb of a Markdown document (for example `Chapter 1 > Section 2`), telling you which section a chunk came from.
-- `chunk_type`: `table`, `code`, `list`, or `text` (written only when it is not `text`).
+When the preview cannot open, it names the reason: file too large, your account lacks view/download permission, not signed in, unsupported type, or parse failure. Retry after fixing permission or sign-in problems; format problems require downloading the file.
 
-This metadata is returned with search results and RAG context, so answers can cite their source.
+## Document Information and Automatic Metadata
 
-## What the document detail page does
+The header shows the document name, its knowledge base, file size, chunk count, and processing status; URL documents show the source address.
 
-| Action | Notes | Permission |
-| --- | --- | --- |
-| Preview / edit chunks | Inspect, modify, and delete chunks; tune settings and process an unprocessed document | Write |
-| Retry failed chunks | Available only when status is `error` and failed chunks exist | Write |
-| Reprocess | Deletes old chunks and vectors, then re-runs with new settings (manual edits are lost) | Write |
-| Download original | Downloads the uploaded file (URL documents have no original) | Read |
-| View source URL | Opens the origin address of a URL document | Read |
-| Delete | Deletes the document and its chunks | Write |
+The system also records information automatically for every document and chunk: the document's format (whether it was converted to Markdown), its character count, the embedded images extracted from it, and each chunk's section (for example `Chapter 1 > Section 2`) and chunk type (table/code/list/text). These values are read-only and recomputed on reprocessing, with no field-by-field editing in the interface; they travel with search results so answers can cite their source.
 
-A knowledge base shared into your team (`is_owned = false`) is marked read-only in the UI: upload, import, edit, and delete entry points are hidden or disabled.
-
-## Sharing origin and sharing scope
-
-Two badges in the list and detail page tell ownership apart:
+## Sharing Origin and Read-Only Scope
 
 | Badge | Shown when | Meaning |
 | --- | --- | --- |
-| **From `{team}`** (`sharedFrom`) | `is_owned = false` | The knowledge base belongs to another team and is shared with yours; **read-only**, with all write actions and settings entry points unavailable |
-| **Shared with `{N}` teams** (`sharedCount`) | `is_owned ≠ false` and `shared_with_count > 0` | Your team owns it and has shared it with N other teams |
+| **From `{team}`** | The knowledge base belongs to another team and is shared with yours | Read-only: upload, import, chunk editing, delete, and settings entry points are all unavailable |
+| **Shared with `{N}` teams** | Your team owns it and has shared it with N teams | You can still read and write normally |
 
-The list endpoint's `include_shared` and `own_only` decide whether shared-in knowledge bases appear:
+Cross-team sharing, read-only semantics, and how to revoke are covered in [Create a Knowledge Base](./create-knowledge-base.mdx).
 
-| Request | Result |
-| --- | --- |
-| Default (`include_shared=true`, `own_only=false`) | Includes TEAM/PUBLIC knowledge bases shared into your teams |
-| `include_shared=false` or `own_only=true` | Returns only the knowledge bases you can normally see (your own teams); shared-in ones are dropped |
-| `own_only=true` (non-superuser) | On top of the previous rule, limits to `created_by = current user` |
+## Renaming and Other Limits
 
-For the cross-team sharing steps, read-only semantics, and how to revoke, see [Create a Knowledge Base](./create-knowledge-base.mdx) (the sharing section).
+- The interface has no document rename entry point; the name can only be updated through the API — see the [Knowledge Base API](../../../api/knowledge.mdx#update-document) for the field.
+- Tags, categories, folders, and field-level metadata editing are not implemented.
+- Search cannot filter or boost by metadata; results can only be limited to specific documents. See [Retrieval & Quality Tuning](./retrieval.mdx) for the supported knobs.
+- Images extracted from chunks have no public link and require a signed-in session.
 
-## Editing documents
-
-The only editable document field is the **name** (the frontend currently offers no rename action, so use the API). Knowledge base endpoints accept a JWT user session only, never an API key:
-
-```bash
-curl -X PUT "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/documents/$DOC_ID" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Employee Handbook (2026)"}'
-```
-
-`metadata` is regenerated during reprocessing and there is no dedicated metadata editing endpoint; tags, categories, and folders are not implemented either.
-
-## Usage in retrieval
-
-- Search results and RAG context carry each chunk's `metadata`, used to cite the source.
-- Search requests do **not** support metadata-based filtering or boosting — the only search filter is `filter_doc_ids` (restrict results to specific document IDs).
-- Images inside chunk content are served through the document media endpoint (`/api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/media/{filename}`) and require an authenticated request.
-
-## Related pages
+## Related Pages
 
 - [Import Documents](./import-documents.mdx) — upload, URL import, and status transitions
 - [Chunking and Document Processing](./chunking.mdx) — chunk preview, editing, and failure retries

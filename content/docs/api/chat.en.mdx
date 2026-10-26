@@ -36,7 +36,7 @@ The Agent must be published. The API Key needs the matching permission, and if b
 | POST | `/api/v1/agents/{agent_id}/messages/{message_id}/switch-version` | Switch version |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | Run status (owner-scoped) |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | Replay buffered events after N |
-| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up (`delivery: steer / follow_up / auto`) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up (`delivery: steer / follow_up / stop / auto`) |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | Submit structured answers for a waiting `ask_user` call |
 | GET | `/api/v1/conversations` | List conversations |
 | GET | `/api/v1/conversations/{conversation_id}` | Get a conversation and its messages |
@@ -154,8 +154,29 @@ curl -X POST "https://your-domain.com/api/v1/agents/agent-123/chat" \
 ```
 `rag_context` is `null` when retrieval did not run (for example, RAG is off or the Agent has no knowledge-base associations). It is `[]` when retrieval ran but returned no contexts. Retrieved contexts may include a stable `citation_id`; cite the exact ID with `[[cite:SOURCE_ID]]`.
 
+### Response message fields
 
-### Streaming Response
+Beyond content and usage, a message object carries several groups worth parsing:
+
+| Field | Description |
+| --- | --- |
+| `images` / `file_urls` | Vision images and attachment metadata for that message, shaped like the request fields |
+| `reasoning_content` | Reasoning output from the model (`null` when reasoning is not enabled) |
+| `steps` | Execution trace inside a canonical round; each step has `role`, `content`, `tool_calls`, `tool_name`, `reasoning_content`, `token_usage`, `duration_ms`, and `rag_context` |
+| `round_id` / `round_index` / `round_role` / `is_round_canonical` / `iteration_index` / `round_status` | Round membership and state, used to locate regenerations, version switches, and branches |
+| `is_manually_stopped` | Whether the round was cut short by a user stop |
+| `version_number` / `version_count` | Position in the version group and the total number of versions |
+
+### Citation contract
+
+- **Only sources carrying a `citation_id` are citable.** The ID is stable, and its prefix identifies the source kind: `rag_` (knowledge-base retrieval), `web_` (web search, page fetch, RSS), `asset_` (files and parsed artifacts inside a conversation or workflow run). The ID never changes when ranking changes.
+- **The answer marks sources with the exact marker `[[cite:SOURCE_ID]]`**, where `SOURCE_ID` must match the source's `citation_id` character for character. A claim supported by several sources gets several markers side by side. The marker follows the supported claim and sits outside bold text, links, code, and math.
+- **Clients resolve sources by `citation_id`**: `rag_*` from the message's `rag_context`, `web_*` / `asset_*` from tool-result payloads that include `citation_id`. A marker that does not resolve should not be rendered as a clickable citation.
+- **Both conditions must hold for citations to appear**: the Agent has `enable_citations` turned on (off by default) and has a citable source (a `rag_mode` of `auto` or `agentic`, attachments enabled, or a built-in source tool such as `web_search` / `fetch_webpage`). Otherwise the text contains no markers at all.
+- Numeric references (`[1]`), Markdown footnotes, and bare URLs are not part of the protocol and cannot replace `[[cite:...]]`.
+
+
+## Streaming Response
 
 Streaming is a separate endpoint; there is no `stream` flag on `POST /chat`.
 
@@ -194,9 +215,12 @@ Clients should preserve received SSE event order. Retrieval, compression, reason
 ```text
 event: media_result
 data: {"kind":"media.image","success":true,"images":[{"image":{"url":"/api/v1/upload/files/generated-images/2026/09/9a8b7c6d5e4f_55667788.png","asset_ref":"a1b2","format":"png"}}]}
+
+event: media_result
+data: {"kind":"media.image","success":false,"images":[],"error":"Image generation failed"}
 ```
 
-Fetch protected generated-image and generated-video URLs with the active JWT or API key. Clients should surface unauthenticated, unauthorized, unavailable, and too-large preview states instead of falling back to an unauthenticated raw URL.
+When generation fails, `success` is `false`; read `error` and show a failure state instead of treating the event as a generated asset. Fetch protected generated-image and generated-video URLs with the active JWT or API key. Clients should surface unauthenticated, unauthorized, unavailable, and too-large preview states instead of falling back to an unauthenticated raw URL.
 
 ## Durable Runs and Control
 
@@ -219,7 +243,7 @@ Additional run events:
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` | SSE-subscribe to the run's event stream (resumable) |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}` | Run status (owner-scoped) |
 | GET | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/events?after_sequence=N` | Replay buffered events (non-streaming; handy after packet loss) |
-| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up/stop (`delivery: steer / follow_up / auto`) |
+| POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs` | Queue steering/follow-up/stop (`delivery: steer / follow_up / stop / auto`) |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/answers` | Submit structured answers for a waiting `ask_user` call |
 | POST | `/api/v1/agents/{agent_id}/chat/runs/{run_id}/stop` | Cooperatively stop a run |
 
@@ -269,6 +293,35 @@ Reconnection semantics: track the highest `sequence` you have processed and, aft
 
 Run status values (`RunOut.status` / `RunStartOut.status`): `queued`, `running`, `stopping`, `completing`, `waiting`, `completed`, `stopped`, `failed`, `interrupted`. Of these, `completed`, `stopped`, `failed`, and `interrupted` are terminal.
 
+### Queue steering and follow-ups
+
+```
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/inputs
+```
+
+While a run is active you neither wait for it nor stop the current round — queue a steering instruction (mid-work) or a follow-up (next round):
+
+```json
+{
+  "delivery": "steer",
+  "content": "Answer only the pricing part for now",
+  "attachments": [],
+  "request_id": "client-op-001"
+}
+```
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `delivery` | string | No | `steer` (mid-work), `follow_up` (after this round), or `stop`; defaults to `auto`, and an unrecognized value is queued as `steer` |
+| `content` | string | No | Steering or follow-up text |
+| `attachments` | array | No | Attachment metadata array, defaults to `[]` |
+| `request_id` | string | No | Idempotency key; submitting the same `request_id` for the same run returns the existing input instead of queueing another |
+
+- Inputs queue in `sequence` order and a worker consumes them one at a time; when one is consumed the event stream emits `input_accepted` with `kind`, `content`, and `sequence`.
+- A run in a terminal state accepts nothing new and still returns the current `RunOut` (no error).
+- When a run stops or ends, inputs still queued are marked dropped.
+- While the run is `waiting` (for an `ask_user` answer), submit answers instead of steering, or the round cannot continue with the missing answer.
+
 ### Stop a Run
 
 ```
@@ -283,7 +336,7 @@ No request body. Cooperatively stops a `queued`, `running`, or `waiting` run and
   Access boundaries: every run route is owner-scoped (agent-scoped for an API key). An unknown run — or one that does not belong to the `{agent_id}` in the path — returns `404` (code `4000`, `run_not_found`); a run whose conversation belongs to another user returns `403` (code `1004`, `access_denied`); superusers bypass the ownership check.
 </Callout>
 
-Submit answers for a waiting `ask_user` call:
+### Submit ask_user answers
 
 ```
 POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
@@ -303,12 +356,14 @@ POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `tool_call_id` | string | Yes | Pending tool-call ID from the `run_status` waiting event |
-| `answers` | object | No | ID-keyed answer map; each value is the chosen option or a custom string |
+| `answers` | object | No | Question-ID-keyed answer map; each value is the chosen option or a custom string |
 | `skipped` | boolean | No | Explicitly skip every question (sends `{ "answers": {}, "skipped": true }`) |
 
 The run must be in `waiting` status and the `tool_call_id` must match the pending interaction. On success the run resumes from its paused state.
 
-While a run is active, the composer can queue steering (mid-work) or follow-up (final boundary) instead of being disabled; stop sends a server command and waits for the terminal `run_end` event.
+- **Single consumption**: one `waiting` interaction can be consumed once. With concurrent or duplicate submissions only the first wins; the run has then left `waiting` and later submissions return `409` (`run_not_waiting_for_answers`), as does a mismatched `tool_call_id` (`pending_interaction_mismatch`).
+- **Answer validation**: keys in `answers` must be `id` values from `pending_tool_input.questions[]`; an unknown ID returns `400` (`answers_unknown_question_id`). Questions with `required: true` need a non-empty answer, and a question with `options` requires a non-empty string answer (custom text is allowed, not only the listed options); optional questions may be omitted. `skipped: true` requires empty `answers`. `ask_user` accepts at most 20 questions per call with unique IDs.
+- After the answer is persisted as a TOOL message, the round continues from where it paused; the stream then shows new `run_status` events (`queued` → `running`).
 
 ## Regenerate Response
 

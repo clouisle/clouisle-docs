@@ -1,123 +1,69 @@
 ---
 title: 系统架构
-description: 理解 Clouisle 的技术栈、请求链路、扩展性与安全边界
+description: 了解平台由哪些部分组成，以及一次对话或一次工作流运行如何走完
 icon: Layers
 ---
 
-Clouisle 采用前端、后端与基础设施分层的架构：Next.js 前端负责界面与 SSR，FastAPI 后端承载 Agent/工作流/知识库业务，Celery 处理异步任务，PostgreSQL、Redis 与 Qdrant 分别承担业务数据、缓存队列与向量检索。
+这一页回答三个问题：平台由哪几个部分组成、一次对话或一次工作流运行在你的界面上会经历哪些阶段、多人使用与扩容时你会感受到什么。服务清单、部署拓扑与内部地址属于运维范畴，见[部署架构](../../self-host/architecture.mdx)；这里只讲你能感知到的行为。
 
-### 技术栈
+### 三个部分，各管一件事
 
-| 层 | 组件 | 说明 |
+| 部分 | 负责什么 | 你会感知到什么 |
 | --- | --- | --- |
-| 前端 | Next.js 16（App Router）、TypeScript、Tailwind CSS 4 + shadcn/ui、Bun | 容器运行 Next.js standalone（`node server.js`），**不含 Nginx**；`deploy/nginx/default.conf` 仅是可选的外部反向代理示例 |
-| 后端 | FastAPI（Python 3.13）、Tortoise ORM + asyncpg、Celery + Redis | LangChain 适配器（对话/嵌入/文本切分）；自研 `WorkflowOrchestrator` 执行工作流；LangGraph 已声明但运行时未使用；MarkItDown 做文档转换 |
-| 基础设施 | PostgreSQL 17（`pg_search` 全文检索）、Redis 7（缓存/Celery broker/SSE 事件缓冲/限速与锁定计数）、Qdrant（向量） | 向量按嵌入维度存入独立集合（`{prefix}_{dimension}`），维度由所选嵌入模型决定 |
+| 界面 | 页面、表单、流式输出、预览与下载 | 打开即用；刷新或换设备后内容还在 |
+| 应用层 | 真正执行 Agent 运行、工作流与知识库检索，并判断权限与团队范围 | 谁能看、谁能改由这里决定；停止、审批、重新运行都作用在这里 |
+| 数据层 | 保存会话与运行记录、审批与配置、知识库分块索引、上传附件与生成产物 | 离开页面后运行继续；产物之后仍能打开和下载 |
 
-### 请求链路与执行模型
+数据层由几类存储分工完成：业务记录、检索索引与文件资产各放在合适的位置。具体用到哪些组件、如何备份与恢复，见[部署架构](../../self-host/architecture.mdx)与[存储](../../self-host/operations/storage.mdx)。
 
-#### 1. 基础请求链路
+把界面与执行分开，是为了让「页面」只是观察窗口：页面关掉不影响任务，任务结果也不会只存在某台机器或某个浏览器里。
 
-```text
-浏览器 → （可选外部反代/Ingress）→ Next.js SSR (node server.js) → FastAPI API → PostgreSQL → 响应
-```
-
-#### 2. 对话请求流与持久化 AgentRun 生命周期
-
-Clouisle 为 Agent 会话提供了持久化、解耦的 `AgentRun` 异步执行架构：
+### 一次对话会经过哪些阶段
 
 ```text
-用户消息 ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis 队列 (Celery agent)
-                   │ (202 Accepted, run_id)                           │
-                   ▼                                                  ▼
-              SSE 流式通道                                   Celery Worker (run_agent_task)
- (GET /api/v1/agents/{agent_id}/chat/runs/{id}/stream)                │
-                   ▲                                         获取会话排他锁 (Conversation Lock)
-                   │                                                  │
-          Redis 事件缓冲区 ◄────────────────────────────── AgentLoop ReAct 思考循环
-          (SSE Event Pub/Sub)                                         │
-                                                           ┌──────────┴──────────┐
-                                                           ▼                     ▼
-                                                    工具调用 / RAG 检索      三层上下文压缩
-                                                           │               (微压缩与宏总结)
-                                                           ▼                     │
-                                                    [ask_user 交互挂起]          ▼
-                                                    (状态: WAITING)        带水印摘要消息
+发送消息 → 排队 → 执行（思考 / 检索 / 工具 / 生成）→ 流式返回 → 完成
 ```
 
-1. **持久化 AgentRun**：发起运行提交 Celery 任务并立即返回 `202 Accepted` 与 `run_id`。任务路由到 `agent` 队列，由主 Worker 消费；**如果部署时把 Worker 的 `-Q` 改写掉了 `agent`，运行会永远停在 `queued` 且不报错**，用户只会看到「排队中」（队列映射见[部署架构](../../self-host/architecture.mdx)）。客户端通过 SSE（`/chat/runs/{run_id}/stream`）监听事件流，支持断线后基于 `from_sequence` 无缝重连，后台工具执行不受影响。`agent` 队列任务**不配置自动重试**——模型调用与工具执行有副作用，重试会重复执行；Worker 崩溃导致的中断运行由 Beat 每 2 分钟投递的 `sweep-lost-agent-runs` 回收并标记为 `interrupted`（不会重放）。
-2. **AgentLoop ReAct 引擎**：管理多轮迭代推理与工具调用（最大轮次 `max_iterations`、单轮超时与凭据安全注入）。
-3. **三层上下文压缩机制**：
-   - **微压缩（Micro Compaction）**：自动截断或摘要过长的工具输出和原始 base64 数据，保护 token 预算。
-   - **宏总结（Macro Compaction）**：当会话 token 超过触发预算时，在完整轮次边界启动 LLM 总结历史消息，插入带水印的 `context_summary` 消息，保留最近轮次的原始对话。
-   - **预检与恢复保护**：预留 token 缓冲空间，遇到模型提供商上下文长度超限时自动重试与兜底。
-4. **人机协同（`ask_user`）挂起与恢复**：当模型调用 `ask_user` 时，`AgentRun` 转入 `WAITING` 状态挂起。用户提交答案（`POST /chat/runs/{run_id}/answers`）后，后端使用 ORM 行锁校验并无缝恢复同一运行。
+1. **发送**：消息立刻出现在会话里，运行随即在平台侧开始，不依赖页面保持打开。
+2. **排队**：同一时刻运行较多时，界面先显示「排队中」。正常情况下很快开始；如果长时间毫无进展，通常是执行容量不足或执行服务不可用，应联系运维，不要反复点击发送。
+3. **执行**：模型逐轮思考，按需检索知识库、调用工具、生成图片或视频。思考过程、工具调用卡片与引用会逐步出现在会话里。
+4. **流式返回**：回复边生成边显示。关闭页面、刷新或切换会话都不会中断本轮执行；回来后继续接收剩余内容，已显示的部分不会重复渲染。
+5. **需要你回答**：模型向你提问时，运行停在「等待回答」，不会继续往下猜。填写并提交后，同一轮从暂停处继续，而不是重新开始。
+6. **结束**：点**停止**才真正结束本轮；手动停止、失败或被中断的运行不会自动重跑——重跑会重复执行有副作用的工具调用，所以需要由你重新发送。
 
-#### 3. 工作流引擎执行流
-
-```text
-触发事件 / 用户输入 ──► FastAPI (POST /workflows/{id}/runs) ──► Celery 队列 (workflow)
-                                                                      │
-                                                                      ▼
-                                                           WorkflowOrchestrator
-                                                                      │
-                                                           解析 DAG 图拓扑规划
-                                                           (ExecutionPlan，过滤注释节点)
-                                                                      │
-                                                           执行节点流水线
-                                                           (LLM, Code, Condition,
-                                                            Iteration, Pause...)
-                                                                      │
-                                              ┌───────────────────────┴───────────────────────┐
-                                              ▼                                               ▼
-                                       常规节点并发执行                                人工审批挂起
-                                    (ExecutionContext 上下文)                       (状态: WAITING)
-                                              │                                               │
-                                              ▼                                               ▼
-                                         完成最终输出                                   提交反馈后恢复执行
-```
-
-1. **拓扑规划器（`ExecutionPlan`）**：校验 DAG 依赖，规划可并行批次，自动过滤画布注释等非执行节点（`NON_EXECUTABLE_NODE_TYPES = {"comment"}`）。
-2. **模块化节点执行器**：提供 `llm`、`condition`、`code`（沙箱）、`iteration`/`loop`、`template`、`variable_aggregator`、`knowledge_retrieval`、`tool`、`agent` 与 `sub_workflow` 执行器。
-3. **暂停与恢复机制**：需要人工确认的 `pause` 节点持久化 `WorkflowPauseRequest` 并将状态设为 `WAITING`，待用户提交反馈后恢复执行。
-### 扩展性
-
-前端与 API 无状态，可多副本水平扩展。主 Worker（`python main.py worker -c 4 -Q default,agent,knowledge,workflow`）一次消费 `default`、`agent`、`knowledge`、`workflow` 四个队列；按队列独立扩容时，额外启动只订阅单一队列的 Worker（例如 `-Q agent`）即可，但**任何时刻都必须有 Worker 消费 `default` 和 `agent`**，否则通知、清理任务与 Agent 对话会静默堆积在队列里。代码沙箱是独立的第五个队列 `sandbox`，由专用 `sandbox-worker` 消费，扩容它不影响知识库与工作流。**Celery Beat 必须且只能运行一个副本**——它是裸调度器、无数据库锁，多副本会重复投递定时任务。完整队列映射、Beat 周期任务与扩缩容命令见[部署架构](../../self-host/architecture.mdx)。
-
-### 安全与多租户
-
-- **认证**：密码（bcrypt）、SSO（OAuth2/OIDC/SAML/CAS）、API Key（`clou_` + `Authorization: Bearer`）。
-- **授权**：JWT 校验 + 权限检查（`resource:action` / `admin:resource:action`），超级管理员绕过。
-- **数据隔离**：资源按团队归属，查询按团队成员自动过滤；普通用户只能看到自己的会话（详见 [团队与安全](./security.mdx)）。
-- **审计**：记录操作者、操作与变更前后快照，支持保留天数与归档。
-
-### 性能与缓存
-
-用户会话默认 `30` 天（站点设置 `session_timeout_days` 控制），JWT 兜底令牌 `8` 天；站点设置不缓存、每次直读数据库。
-
-平台没有统一的全局限速中间件，各保护机制按场景独立实现，边界也各不相同：
-
-| 机制 | 限制 | 落地位置 |
-| --- | --- | --- |
-| 登录失败锁定 | 同一账户连续失败 `max_login_attempts`（默认 `5`）次后锁定 `lockout_duration_minutes`（默认 `15`）分钟 | 账户字段 + 站点设置 |
-| TOTP 校验 | 300 秒窗口内失败 `5` 次即锁定 `900` 秒 | Redis 计数 |
-| 管理员批量邮件 | 每个发送者 `100` 封/小时 | Redis 计数（TTL 3600 秒） |
-| 单收件人邮件 | 每个邮箱 `5` 封/天 | Redis 计数（TTL 86400 秒） |
-| API Key 每分钟请求数 | `rate_limit` 字段默认 `1000`/分钟，`0` 表示不限——**仅存储，当前不执行** | 元数据字段 |
-
-<Callout type="warn">
-不要把 API Key 的 `rate_limit` 当成生效的防滥用措施，也不要指望单靠验证码兜住暴力破解：真正拦截登录失败的是账户级锁定与 TOTP 锁定（详见 [团队与安全](./security.mdx)）。
+<Callout type="info">
+「排队」和「断线」是两件事：排队说明任务还没轮到执行，断线只是你的页面暂时看不到进度。断线后回来，运行通常仍在继续。
 </Callout>
 
-### 健康检查
+### 一次工作流运行会经过哪些阶段
 
-- `/api/v1/health` — 公开基础健康检查（容器 HEALTHCHECK 使用）。
-- `/api/v1/admin/observability/system/health` — 管理端观测健康（CPU/内存/磁盘/数据库/Redis/Worker），需 `admin:dashboard:access`。
+1. **提交**：通过运行表单，或由外部调用、定时任务、Webhook 触发。只有已发布的工作流能被正式运行，草稿只能调试。
+2. **排队**：与对话一样先进入待执行状态，容量不足时表现为排队时间变长。
+3. **按图执行**：互不依赖的分支可以同时进行，依赖未满足的节点等待上游完成。每个节点记录自己的输入、输出、状态与耗时。
+4. **停下来等人**：遇到审批节点时整次运行停在「等待审批」，提交反馈后从暂停处继续，已完成的节点不会重跑。
+5. **结束**：最终输出、每个节点的轨迹、耗时、Token 与错误都可以在运行详情里回看。
+
+### 多副本与扩容对你意味着什么
+
+- **状态不在页面上**：平台可以在多台机器上同时运行多份相同服务。无论哪一份处理你的请求，会话与运行记录都来自同一份数据，所以刷新、换设备、排队后被另一份服务接手，看到的内容完全一致。
+- **扩容买到的是并发，不是单次速度**：增加容量意味着更多人能同时跑任务；单个运行受模型与工具本身的速度限制，不会因为扩容而变快。容量不足时最先出现的现象是排队变长。
+- **不同任务分开排队**：对话运行、文档处理、工作流运行各有自己的执行通道，部署可以单独扩某一类。是否互不影响取决于容量是否按使用结构分配充足。
+- **结果可复现**：工作流的路径由编排决定，同一份输入、同一个已发布版本，执行顺序与输出保持一致，不受运行在哪台机器上影响。
+
+容量规划、副本数与高可用方案见[高可用与扩展](../../self-host/operations/high-availability.mdx)。
+
+### 权限与数据边界
+
+- 资源归属团队：团队成员按角色访问，团队之外的访问默认不可见。
+- 私有资源只有创建者能访问；跨团队共享默认只读（例如知识库共享）。
+- 超级管理员可以越过团队边界，但仍会留下操作记录。
+- 删除、发布、恢复版本、审批这类操作会写入审计记录，包含操作者与改动前后的内容。
+
+详见[团队与安全](./security.mdx)与[权限参考](/reference/permissions)。
 
 ---
 
 参见：
-- [部署架构](../../self-host/architecture.mdx) — 3 镜像 5 服务拓扑与卷
-- [Agent](./agent.mdx)、[工作流](./workflow.mdx)、[知识库](./knowledge-base.mdx) — 核心资源概念
-- [团队与安全](./security.mdx) — 多租户与权限边界
-- [环境变量参考](../../self-host/configuration/environment-variables.mdx) — 启动级配置
+- [部署架构](../../self-host/architecture.mdx) — 服务拓扑、数据存放与网络入口
+- [Agent](./agent.mdx)、[工作流](./workflow.mdx)、[知识库](./knowledge-base.mdx) — 三类核心资源
+- [团队与安全](./security.mdx) — 多租户、角色与审计

@@ -7,28 +7,27 @@ icon: Database
 知识库必须归属于一个团队。创建时的两个决定最难回头：**嵌入模型决定向量维度**（文档处理后不可更换），**可见性决定谁能在没有共享的情况下读到它**。名称在团队内必须唯一。
 
 <Callout type="info" title="前置条件">
-  1）你是目标团队的成员，并拥有 `kb:create` 权限；2）团队已获授权一个 `embedding` 模型（未授权会在创建时被拒绝，缺少可用模型则该知识库无法检索）；3）如需重排序，再授权一个 `rerank` 模型。授权与供应商配置见[模型管理](../models/manage-models.mdx)。
+  1）你是目标团队的成员，并拥有创建知识库的权限；2）团队已获授权一个可用的嵌入模型（未授权会在创建时被拒绝，缺少可用模型则该知识库无法检索）；3）如需重排序，再授权一个重排序模型。授权与供应商配置见[模型管理](../models/manage-models.mdx)。
 </Callout>
 
 ## 权限与可见性
 
-| 操作 | 需要的权限 | 团队角色要求 |
-| --- | --- | --- |
-| 查看知识库 / 文档 / 分块 | `kb:read` | 命中可见性规则 |
-| 命中测试（检索） | `kb:test` | 读取权限 |
-| 创建知识库 | `kb:create` | 团队成员 |
-| 编辑设置、上传/处理/删除文档、编辑分块 | `kb:update` | 创建者本人，或团队 owner/admin |
-| 删除知识库 | `kb:delete` | 团队 owner/admin |
-| 共享给其他团队 | `kb:update` | 所属团队 owner/admin |
-| 取消共享 | `kb:delete` | 所属团队 owner/admin |
+| 操作 | 谁可以做 |
+| --- | --- |
+| 查看知识库 / 文档 / 分块 | 团队成员，且符合可见性规则 |
+| 命中测试（检索） | 有查看权限的人 |
+| 创建知识库 | 团队成员 |
+| 编辑设置、上传/处理/删除文档、编辑分块 | 创建者本人，或团队管理员 |
+| 删除知识库 | 团队管理员 |
+| 共享给其他团队 / 取消共享 | 所属团队管理员 |
 
 可见性在创建/编辑对话框中设置：
 
 | 可见性 | 谁可以读 | 说明 |
 | --- | --- | --- |
-| `private` | 仅创建者 | 团队其他成员看不到；**不能共享给其他团队** |
-| `team` | 本团队所有成员 | 写入仍需要创建者或团队管理员 |
-| `public` | 预留值 | 界面不提供，仅作兼容保留 |
+| **私有** | 仅创建者 | 团队其他成员看不到；**不能共享给其他团队** |
+| **团队** | 本团队所有成员 | 写入仍需要创建者或团队管理员 |
+| 公开 | 预留值 | 界面不提供，仅作兼容保留 |
 
 跨团队访问只能通过共享获得，且始终是只读的——见下文「跨团队共享（只读）」。
 
@@ -43,31 +42,31 @@ icon: Database
 | **文档数** | 文档总数 |
 | **分块数** | 分块总数 |
 | **状态** | 当前状态 |
-| **创建时间** | `Created At` |
+| **创建时间** | 创建时间 |
 
-表格另有行选择框与每行的操作入口。列表只渲染**启用 ↔ 归档**的状态切换：筛选面的状态选项只有 `active` 与 `archived`，即使记录还可能是 `processing` 或 `error`。
+表格另有行选择框与每行的操作入口。列表只提供**启用 ↔ 归档**的状态切换；筛选面的状态选项只有**启用**与**归档**。
 
-支持的筛选与查询参数（`GET /api/v1/knowledge-bases`）：`team_id`、`search`（按名称匹配）、`status`、`own_only`、`include_shared`。接收共享的团队用 `include_shared=false` 或 `own_only=true` 只看自己团队的知识库。
+列表还支持按团队、名称关键词和状态筛选；接收共享的团队可以选择只看自己团队的知识库。
 
 ## 创建知识库
 
 1. 前往**知识库**，选择**创建知识库**。
 2. 填写基本信息：
-   - **名称**：`1-100` 字符，**团队内唯一**，重名会报 `kb_name_exists`。
+   - **名称**：`1-100` 字符，**团队内唯一**，重名会报错。
    - **描述**：最多 `500` 字符，说明用途与内容范围。
    - **团队**：使用当前团队（管理后台的创建表单可指定其他团队）。
 3. 选择模型：
-   - **嵌入模型**：团队已授权的 `embedding` 模型。`embedding_model_id` 创建后不可更改。
+   - **嵌入模型**：团队已授权的嵌入模型。创建后不可更改。
    - **重排序模型**：可选，绑定后可在检索时对召回结果二次打分。
 4. 配置分块与重排序：
-   - **分块大小** `chunk_size`：默认 `1000` 字符，最小 `100`（界面建议上限 `2000`）。
-   - **分块重叠** `chunk_overlap`：默认 `100` 字符，最小 `0`（界面建议上限 `500`）。
-   - **自定义分隔符**：可填 `\n\n` 等转义序列，作为硬切分边界。
+   - **分块大小**：默认 `1000` 字符，最小 `100`（界面建议上限 `2000`）。
+   - **分块重叠**：默认 `100` 字符，最小 `0`（界面建议上限 `500`）。
+   - **自定义分隔符**：可填 `\n\n` 等转义写法，作为硬切分边界。
    - **启用重排序**：默认开启；**重排序候选数** 默认 `10`（`1-100`）；**重排序分数阈值** 默认留空（`0-1`）。
-5. 选择**可见性**（`private` 或 `team`）。
+5. 选择**可见性**（**私有**或**团队**）。
 6. 点击**创建知识库**，随后进入知识库详情页；确认状态为**启用**。
 
-编辑已有知识库时，对话框额外提供**启用知识库**开关（关闭即 `archived`，归档后的知识库不参与检索）。
+编辑已有知识库时，对话框额外提供**启用知识库**开关（关闭即归档，归档后的知识库不参与检索）。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/knowledge-base-create-dialog.png" alt="创建知识库对话框" />
@@ -75,41 +74,41 @@ icon: Database
 </figure>
 
 <Callout type="error" title="嵌入模型不可更换">
-  已存储的向量与创建时选择的嵌入模型绑定。更新 `embedding_model_id` 会被直接拒绝（`embedding_model_locked_after_kb_creation`）；而**重排序模型可以随时更换**（更换时会校验团队授权）。要换嵌入模型，只能新建知识库并用新模型重新处理文档。
+  已存储的向量与创建时选择的嵌入模型绑定，更新嵌入模型会被直接拒绝。**重排序模型可以随时更换**（更换时会校验团队授权）。要换嵌入模型，只能新建知识库并用新模型重新处理文档。
 </Callout>
 
 ## 模型与向量维度
 
 ### 嵌入模型
 
-平台 `model_type = embedding` 的模型，通过模型授权分配给团队后才能在创建表单中出现。知识库只引用一个嵌入模型；没有可用模型时，文档处理与检索都无法进行。
+嵌入模型在平台登记并授权给团队后，才会出现在创建表单中。知识库只引用一个嵌入模型；没有可用模型时，文档处理与检索都无法进行。
 
 ### 向量维度
 
-`embedding_dimension` 在**首批文档完成向量化时写入**并固化。此后：
+向量维度在**首批文档完成向量化时写入**并固化。此后：
 
 - 维度一致的文档正常入库；
-- 维度不一致的向量写入抛出维度不匹配错误，检索请求会返回 `configuration_mismatch` 分类提示核对模型与索引维度；
+- 维度不一致的向量会写入失败，检索时界面会提示核对模型与索引维度；
 - 更换嵌入模型不会自动重建索引，需要新建知识库或执行完整的重新处理流程。
 
 ## 分块与检索设置
 
-| 字段 | 默认值 | 范围 | 生效位置 |
+创建对话框和知识库设置里的关键项如下，字段级定义与全部限制见[知识库设置参考](/reference/knowledge-settings)：
+
+| 设置 | 默认值 | 范围 | 生效位置 |
 | --- | --- | --- | --- |
-| `chunk_size` | `1000` | `>=100` 字符 | 文档处理（下次处理/重新处理时生效） |
-| `chunk_overlap` | `100` | `>=0` 字符 | 文档处理 |
-| `separator` | 空 | 任意字符串 | 文档处理，硬切分边界 |
-| `rerank_enabled` | `true` | 布尔 | 检索（需绑定 `rerank` 模型） |
-| `rerank_candidate_k` | `10` | `1-100` | 检索 |
-| `rerank_score_threshold` | 空 | `0-1` | 检索 |
-| `search_mode` | 空（`null`） | `vector` / `fulltext` / `hybrid` | Agent/工作流检索的默认模式 |
-| `top_k` | 空（`null`） | `1-100` | Agent/工作流检索 |
-| `score_threshold` | 空（`null`） | `0-1` | Agent/工作流检索 |
-| `dense_weight` / `lexical_weight` | 空（`null`） | `>=0` | 混合检索权重 |
-| `rrf_k` | 空（`null`） | `1-1000` | 混合融合常数 |
+| 分块大小 | `1000` | `>=100` 字符 | 文档处理（下次处理/重新处理时生效） |
+| 分块重叠 | `100` | `>=0` 字符 | 文档处理 |
+| 自定义分隔符 | 空 | 任意字符串 | 文档处理，硬切分边界 |
+| 启用重排序 | 开启 | 开/关 | 检索（需绑定重排序模型） |
+| 重排序候选数 | `10` | `1-100` | 检索 |
+| 重排序分数阈值 | 空 | `0-1` | 检索 |
+| 检索方式 | 空 | 向量 / 全文 / 混合 | Agent/工作流检索的默认模式 |
+| 返回结果数 | 空 | `1-100` | Agent/工作流检索 |
+| 相似度阈值 | 空 | `0-1` | Agent/工作流检索 |
 
 <Callout type="warn" title="知识库设置与检索请求是两套默认值">
-  知识库设置里的检索类字段默认是**空的**，只有显式设置后才生效；而**检索请求**不传参时按 `search_mode=hybrid`、`top_k=5`、`score_threshold=0`、`rrf_k=60` 执行。命中测试面板会用知识库设置初始化，并可通过**应用到生产**把配置写回知识库。因此「知识库设置里的模式」主要影响 Agent/工作流检索，见[检索与质量调优](./retrieval.mdx)。
+  知识库设置里的检索类字段默认是**空的**，只有显式设置后才生效；而**检索请求**不传参时按混合检索、返回 `5` 条、阈值 `0` 执行。命中测试面板会用知识库设置初始化，并可通过**应用到生产**把配置写回知识库。因此「知识库设置里的模式」主要影响 Agent/工作流检索，见[检索与质量调优](./retrieval.mdx)。
 </Callout>
 
 分块的字符语义、Markdown 与纯文本差异、预览与失败重试见[分块与文档处理](./chunking.mdx)。
@@ -121,7 +120,7 @@ icon: Database
 ### 操作步骤
 
 1. 在**知识库**列表中，把鼠标移到知识库卡片上，打开右上角 **⋯** 菜单，选择**共享**。
-   - 该入口只对「自己团队拥有」的知识库显示，且需要团队 owner/admin 角色。
+   - 该入口只对「自己团队拥有」的知识库显示，且需要团队管理员角色。
 2. 在**共享**对话框中选择**团队**。
    - 候选列表来自你加入的团队，并自动排除当前团队与已共享过的团队。
    - **权限级别**只有**只读**一个选项且不可修改。
@@ -132,37 +131,23 @@ icon: Database
 
 | 规则 | 结果 |
 | --- | --- |
-| `private` 可见性的知识库 | 不能共享，返回 `private_kb_cannot_be_shared`（400） |
-| 共享给本团队 | 拒绝，`kb_cannot_share_to_own_team`（400） |
-| 重复共享同一个团队 | 拒绝，`kb_already_shared`（400） |
-| 接收方团队看到的共享 | 只有可见性为 `team` 或 `public` 的知识库 |
-| 接收方权限 | 仅 `read_only`：可查看、检索、在 Agent/工作流中关联；不能改设置、上传、处理或删除文档 |
-| 撤销一个不存在的共享 | 返回 `kb_share_not_found`（404） |
+| **私有**可见性的知识库 | 不能共享，界面提示私有知识库不可共享 |
+| 共享给本团队 | 拒绝，并提示不能共享给本团队 |
+| 重复共享同一个团队 | 拒绝，并提示已共享过 |
+| 接收方团队看到的共享 | 只有可见性为**团队**或公开的知识库 |
+| 接收方权限 | 仅只读：可查看、检索、在 Agent/工作流中关联；不能改设置、上传、处理或删除文档 |
+| 撤销一个不存在的共享 | 提示共享不存在 |
 
 共享后在双方列表上的标识：
 
-- 接收方：**来自** + 团队名的徽章，进入详情后所有写入入口禁用（`is_owned = false`）。
-- 拥有方：**已共享 N 个团队** 徽章；徽章数量来自 `shared_with_count`。
+- 接收方：**来自** + 团队名的徽章，进入详情后所有写入入口禁用。
+- 拥有方：**已共享 N 个团队** 徽章。
 
-### 通过 API 共享
+### 在 Agent 与工作流中使用共享库
 
-```bash
-# 共享给其他团队（permission 只有一个合法值 read_only）
-curl -X POST "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"team_id": "TARGET_TEAM_UUID", "permission": "read_only"}'
-
-# 查看已共享给哪些团队（仅所属团队成员可读）
-curl "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/shares" \
-  -H "Authorization: Bearer $ACCESS_TOKEN"
-
-# 取消共享
-curl -X DELETE "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share/$TARGET_TEAM_ID" \
-  -H "Authorization: Bearer $ACCESS_TOKEN"
-```
-
-接收方要过滤列表时，`GET /api/v1/knowledge-bases` 支持 `include_shared`（默认 `true`）与 `own_only`（默认 `false`）；设为 `include_shared=false` 或 `own_only=true` 即可只看到自己团队的知识库。
+- 接收团队的 Agent 只能关联**已共享给该团队**的知识库；未共享的知识库不会出现在选择列表中。
+- 关联后可继续为该关联单独设置返回结果数、相似度阈值和检索方式，它们覆盖知识库默认值；共享本身不改变这些覆盖规则。
+- 共享是只读的：接收方可以检索、命中测试、在 Agent/工作流中引用，但不能上传、处理、删除文档或编辑分块；检索按调用者身份与团队权限执行。
 
 ## 文档管理
 
@@ -170,26 +155,29 @@ curl -X DELETE "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share/$TAR
 
 | 能力 | 说明 |
 | --- | --- |
-| 上传 | `POST /api/v1/knowledge-bases/{kb_id}/documents/upload`（multipart）；上传后为 `pending`，不会自动处理 |
-| URL 导入 | 通过安全校验后创建 `url` 文档，进入预览页后由你确认分块 |
+| 上传 | 上传后为**待处理**，不会自动处理 |
+| URL 导入 | 通过安全校验后创建网址文档，进入预览页后由你确认分块 |
 | 支持格式 | PDF、DOC/DOCX、PPTX、TXT、Markdown、HTML、CSV、XLS/XLSX、JSON、URL（不支持 `.ppt`、压缩包与 OCR） |
 | 批量操作 | 勾选多个文档：等待中文档**快速处理**、失败文档**重试失败分段**、**删除** |
-| 单文件上限 | 站点设置 `kb_document_max_upload_size_mb`，默认 `50MB`，范围 `1-1024MB` |
+| 单文件上限 | 站点设置的文档上传上限，默认 `50MB`，范围 `1-1024MB` |
 
 <Callout type="warn">
-  上传与处理是两个阶段：文档出现在列表中不代表已经完成嵌入。只有 `completed` 的文档能被检索，也才适合绑定到 Agent。
+  上传与处理是两个阶段：文档出现在列表中不代表已经完成嵌入。只有**已完成**的文档能被检索，也才适合绑定到 Agent。
 </Callout>
+
+### 批量处理的完成通知与恢复入口
+
+- 勾选多个待处理文档做批量处理，或从预览页批量提交分块时，**全部文档结束后只发一条汇总通知**，而不是每个文档一条。
+- 通知受站点通知类型控制：全部成功发索引完成通知，全部失败发失败通知，部分成功优先按失败提醒（若失败类型被关闭则回退到成功类型）；两类都关闭时不发通知。通知链接指向该知识库。
+- 知识库详情页顶部会出现**待处理文档**横幅（仅知识库创建者或所属团队管理员可见、可关闭；共享库不显示）。点击**继续处理**会一次性拉取该库的全部待处理文档并跳到预览页，离开页面后也能从这里接着做。
 
 ## 统计
 
 知识库详情页顶部显示统计卡片（文档数、分块数、Token 数、各状态计数）；下拉菜单中的**命中测试**进入检索实验室。
 
-`GET /api/v1/knowledge-bases/{kb_id}/stats` 返回：
-
-- `document_count`（按实际文档数重新计算，而非缓存值）
-- `total_chunks`、`total_tokens`（按文档汇总，并回写知识库缓存字段）
-- `documents_by_status`、`documents_by_type`
-- `embedding_dimension` 与 `embedding_stats`
+- 文档数按实际文档重新计算，不使用缓存值。
+- 分块数、Token 数按文档汇总并回写知识库统计。
+- 统计还包含各状态、各类型的文档数量，以及嵌入维度与嵌入统计。
 
 <Callout type="info">
   未实现 / Roadmap：查询量、响应时间、缓存命中率、热门查询等检索分析，存储使用趋势与统计导出均不可用。
@@ -207,20 +195,20 @@ curl -X DELETE "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share/$TAR
 | --- | --- |
 | 文本提取失败（损坏、加密、纯图片） | 转换格式或解除密码后重新上传 |
 | 分块为零 | 确认文件含可提取文本，或关闭文本清理后重试 |
-| 嵌入失败（凭据、配额、维度） | 核对模型授权与 `embedding_dimension`，再重试失败分段 |
-| 索引失败（向量库不可用） | 检查 Qdrant 与 Worker 日志 |
+| 嵌入失败（凭据、配额、维度） | 核对模型授权与向量维度，再重试失败分段 |
+| 索引失败 | 联系管理员检查检索服务状态 |
 
 ### 检索无结果或结果无关
 
-1. 确认文档状态为 `completed`。
-2. 用**命中测试**验证分数：0 条结果时先降低 `score_threshold`，再切换检索模式。
-3. 检查知识库是否被 Agent 关联参数覆盖（Agent 上的 `retrieval_top_k`、`score_threshold`、`search_mode`）。
-4. 检查向量库与 `pg_search` 是否健康；必要时重新处理文档。
+1. 确认文档状态为**已完成**。
+2. 用**命中测试**验证分数：0 条结果时先降低相似度阈值，再切换检索模式。
+3. 检查 Agent 是否为该知识库覆盖了返回结果数、阈值或检索方式。
+4. 联系管理员检查检索服务是否健康；必要时重新处理文档。
 
 ### 成本或性能异常
 
 - 成本偏高：减少不必要的重新处理，优化分块（更大的分块、更少的重叠），换用更经济的嵌入模型，删除冗余文档。
-- 检索慢：降低 `top_k`、对简单查询关闭重排序、缩小文档范围，并检查向量库资源。
+- 检索慢：降低返回结果数、对简单查询关闭重排序、缩小文档范围，并联系管理员检查检索服务资源。
 
 <Callout type="info">
   未实现 / Roadmap：每知识库文档上限、每日嵌入配额与成本告警均不可用。
@@ -231,51 +219,9 @@ curl -X DELETE "https://your-domain.com/api/v1/knowledge-bases/$KB_ID/share/$TAR
 - ✅ 名称写清楚内容范围，避免「文档」「资料」这类无信息量的名字。
 - ✅ 先用默认分块（`1000`/`100`）跑通一条代表性文档，再用命中测试对比调整。
 - ✅ 定期清理过期文档；重复内容会互相竞争排名。
-- ✅ 私有知识库只用于个人草稿；团队共用的内容用 `team` 可见性。
-- ❌ 不要指望手工「添加元数据」提升检索——`metadata` 由处理管线自动生成，没有编辑入口。
+- ✅ 私有知识库只用于个人草稿；团队共用的内容用**团队**可见性。
+- ❌ 不要指望手工「添加元数据」提升检索——元数据由处理流程自动生成，没有编辑入口。
 - ❌ 不要在生产环境直接更换嵌入模型，也不要跳过检索验证直接放大分块。
-
-## API 访问
-
-通过 API 管理知识库，端点清单见 [知识库 API](/api/knowledge)。知识库端点只接受已登录用户的 JWT 会话（`Authorization: Bearer <ACCESS_TOKEN>`），**不接受 `clou_` 开头的 API Key**。
-
-```python
-# 列出知识库 — 支持 team_id、search、status、own_only、include_shared
-kbs = api.get("/api/v1/knowledge-bases", params={"team_id": "team-123", "include_shared": True})
-
-# 为团队创建知识库
-kb = api.post("/api/v1/knowledge-bases", json={
-    "name": "Product Docs",
-    "team_id": "team-123",
-    "embedding_model_id": "model-456",
-    "visibility": "team",
-    "settings": {"chunk_size": 1000, "chunk_overlap": 100, "rerank_enabled": True}
-})
-
-# 上传文档
-with open("document.pdf", "rb") as f:
-    doc = api.post(
-        f"/api/v1/knowledge-bases/{kb_id}/documents/upload",
-        files={"file": f}
-    )
-
-# 检索知识库
-results = api.post(f"/api/v1/knowledge-bases/{kb_id}/search", json={
-    "query": "How to reset password?",
-    "top_k": 5
-})
-```
-
-**文档处理 API：**
-
-| 端点 | 说明 |
-| --- | --- |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process` | 处理等待中的文档（可传分块设置） |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/process-with-chunks` | 提交预览确认后的分块 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/reprocess` | 删除旧分块后重新处理 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/rechunk` | 用新分块设置重新分块 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/retry-failed-chunks` | 仅重试失败分块的嵌入 |
-| `POST /api/v1/knowledge-bases/{kb_id}/documents/{doc_id}/chunks/{chunk_id}/retry-embedding` | 重试单个分块嵌入 |
 
 ## 相关页面
 
@@ -284,3 +230,4 @@ results = api.post(f"/api/v1/knowledge-bases/{kb_id}/search", json={
 - [浏览文档与元数据](./browse-documents.mdx) — 共享徽章与系统字段
 - [检索与质量调优](./retrieval.mdx) — 检索实验室与诊断
 - [知识库设置参考](/reference/knowledge-settings) — 全部字段与限制
+- [知识库 API](/api/knowledge) — 端点、请求与响应

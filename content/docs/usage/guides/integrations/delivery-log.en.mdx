@@ -1,0 +1,71 @@
+---
+title: Delivery Log
+description: Inspect outbound message and artifact delivery results for Feishu and WeChat Agent chat
+icon: ScrollText
+---
+
+The **Delivery log** (`/deliveries`) is the **outbound send record** shared by Feishu Agent chat and WeChat Agent chat. It answers "did this reply or artifact reach the provider", not "what was the message history": **Sent** only means the provider accepted the reply request, not that the recipient read it, opened a card, or downloaded an attachment.
+
+## Using the page
+
+The page lives under **Monitoring** in the sidebar.
+
+- **Integration** filter: Feishu and WeChat, multi-select (values are ORed).
+- **Status** filter: Pending, Sending, Sent, Error, Unavailable, Unknown, multi-select.
+- The two filters combine with AND.
+- The search box accepts a **Run ID** or a **file-name substring**: a complete Run ID filters by that exact run; anything else performs a case-insensitive substring match on file names. The search term is preserved in the page URL.
+- The default page size is **20** rows, switchable between `10`, `20`, `50`, and `100`. Changing any filter resets to page 1.
+- Rows are ordered **newest first**. Failed rows show the provider's original error; long errors wrap in the table instead of being truncated.
+
+## Table columns
+
+| Column | Description |
+| --- | --- |
+| Time | When the record was created (with seconds) |
+| Provider | Feishu or WeChat |
+| Type | Text, Markdown, or artifact |
+| File / event | Artifact file name (content type when there is no file name), with the event this record belongs to underneath |
+| Status | See the status meanings below |
+| Original error | The provider's original error text, or the stable failure identifier when empty |
+| Run | The originating Run ID |
+
+## Status meanings
+
+| Status | Meaning |
+| --- | --- |
+| Pending | Registered but not yet being sent; preserved across restarts and feature pauses |
+| Sending | Being sent. If sending is interrupted, the row becomes **Unknown** and is never resent automatically |
+| Sent | The provider accepted the reply request |
+| Error | A permanent failure, such as a provider rejection or an unavailable artifact |
+| Unavailable | The run finished, but the reply must not be sent (channel disabled, access revoked, missing conversation context) |
+| Unknown | A timeout after transmission; the result is uncertain and must not be resent blindly |
+
+Pending, Sending, and Unknown are **intermediate states**, not final conclusions. Do not retry merely because a row says Unknown; read the original error and the originating run first.
+
+Failure information has two layers: a stable failure identifier for classifying the problem, and `error_detail` with the provider's original text, HTTP status, and error code. The page shows `error_detail` when present and falls back to the identifier. Use the original text when diagnosing permissions, parameters, or size limits.
+
+## Permissions and visibility
+
+The page is read-only and requires the integration service-settings view permission; superusers bypass this restriction. Message text, provider media identifiers, credentials, and file contents are never displayed.
+
+## Troubleshooting order
+
+Follow three steps:
+
+1. Filter by Run ID to confirm that the run actually produced this delivery.
+2. Read the status to separate "not sent", "sending", "provider rejected", and "result uncertain".
+3. Read the original error to locate provider permissions, fields, or size limits.
+
+Channel-specific failure meanings are covered in [Feishu](./feishu.mdx) and [WeChat iLink](./wechat.mdx).
+
+## Not the notification record
+
+This page covers only Feishu/WeChat Agent-chat replies and artifacts. In-app notifications sent through email, Webhook, or Feishu are recorded in the notification detail, with the states Pending, Sending, Sent, Failed, or Skipped. The two are different data and should not be mixed. WeChat is **not** a notification channel. See [Notifications and external channels](../administration/notifications.mdx).
+
+## Related
+
+- [Feishu](./feishu.mdx) — Feishu configuration and failure troubleshooting
+- [WeChat iLink](./wechat.mdx) — WeChat purposes, limits, and failure messages
+- [Messaging integrations overview](./index.mdx) — administration vs. personal boundaries and the capability matrix
+- [Admin API](../../../api/admin.mdx) — query parameters, response fields, and permissions
+- [Upgrade guide](../../../self-host/operations/upgrade.mdx) — compatibility requirements during upgrades

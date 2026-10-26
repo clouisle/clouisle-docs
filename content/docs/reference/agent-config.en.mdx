@@ -23,6 +23,7 @@ The Agent create and update endpoints correspond to the editor's basic settings 
 | `hide_message_actions` | boolean | `false` | Hide message stats such as token usage/speed |
 | `hide_reasoning` | boolean | `false` | Hide the reasoning/chain-of-thought |
 | `hide_artifact_list` | boolean | `false` | Hide the generated files list below assistant messages in chat; files are not deleted |
+| `enable_citations` | boolean | `false` | Attach source citations to replies |
 | `opening_message` | string or null | null | Conversation opening message |
 | `suggested_questions` | string[] | `[]` | Suggested questions |
 | `powered_by_text` | string or null | null | Chat page footer attribution, at most `200` characters |
@@ -41,6 +42,10 @@ Both the create schema and the data model default `visibility` to `private` (vis
 | `variables` | array | `[]` | User input fields; `name` is `1-50` characters and `type` is `text`, `paragraph`, `select`, `number`, or `checkbox` |
 | `enable_user_input_request` | boolean | `false` | Let the model call the `ask_user` tool to request structured input |
 
+<Callout type="warn" title="web_search only accepts an engine">
+  For `type: builtin` + `name: web_search`, `config` accepts only `engine` (`auto`, `tavily`, `bocha`, `searxng`, `deepseek`); any other key is rejected. `tools_credentials` containing `TAVILY_API_KEY`, `BOCHA_API_KEY`, `SEARXNG_AUTH_TOKEN`, or `DEEPSEEK_API_KEY` is rejected too. Search credentials and endpoints belong to the site — see [Built-in Tools](/en/usage/guides/tools/built-in).
+</Callout>
+
 ## Memory & Context Compression
 
 | Field | Type | Default | Limits/Notes |
@@ -55,16 +60,18 @@ Both the create schema and the data model default `visibility` to `private` (vis
 
 ## Attachments
 
-| Field | Type | Default | Limits/Notes |
+| Field | Type | Default | Limits / notes |
 | --- | --- | --- | --- |
 | `enable_attachments` | boolean | `false` | Allow file and image uploads |
 | `attachment_config.max_file_size` | bytes | `10485760` (`10MB`) | `1024` (`1KB`)–`52428800` (`50MB`) |
-| `attachment_config.max_files` | integer | `5` | Maximum files per message, `1-10` |
-| `attachment_config.max_content_length` | integer | `100000` | Maximum parsed content length in characters, `1000-500000` |
-| `attachment_config.truncate_strategy` | string | `end` | Truncation strategy: `end` (keep start), `start` (keep end), `middle` (keep start and end) |
-| `attachment_config.allowed_extensions` | string[] | Listed below | Allowed file extensions |
+| `attachment_config.max_files` | integer | `5` | Max files per message, `1-10` |
+| `attachment_config.allowed_extensions` | string[] | see below | Allowed extensions |
 
 Default allowed extensions: `.pdf`, `.docx`, `.doc`, `.pptx`, `.ppt`, `.xlsx`, `.xls`, `.txt`, `.md`, `.csv`, `.json`, `.html`.
+
+<Callout type="info" title="These fields are not part of attachment_config">
+  `max_content_length` (default `100000` characters, `1000-500000`) and `truncate_strategy` (`end` keeps the head, `start` keeps the tail, `middle` keeps both ends; default `end`) are **file-parse request** parameters, not Agent `attachment_config` fields. Agent attachments declare size, count, and extensions only.
+</Callout>
 
 ## Media Generation
 

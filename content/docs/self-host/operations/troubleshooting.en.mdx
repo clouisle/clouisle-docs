@@ -43,6 +43,51 @@ bwrap: No permissions to create new namespace, likely because the kernel does no
 
 The supplied deployments (Docker Compose, Helm, Kubernetes) run the sandbox worker as root with `CAP_SYS_ADMIN`, so user namespace creation is privileged and this error should not occur. It typically means the worker is not running with the supplied security configuration (for example a custom deployment kept the worker non-root, `cap_add: SYS_ADMIN` is missing, or `seccomp=unconfined` was overridden). Custom non-root deployments must enable unprivileged user namespaces at the **node level** (`seccomp=unconfined` does not help): on Ubuntu 23.10+ run `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`; on Debian run `sysctl -w kernel.unprivileged_userns_clone=1`, persist via `/etc/sysctl.d/`, and verify with `unshare -U true`. In Kubernetes apply the sysctl to every node; it cannot be set per pod. Full details: [Code Sandbox → Host Kernel Requirements](../../usage/concepts/sandbox.mdx#kernel-requirements).
 
+## Delivery Fails or a Message Never Arrives [#delivery-failures]
+
+Check the admin **Delivery Log** (`/deliveries`, API `GET /api/v1/admin/deliveries`) before reading Agent logs:
+
+- **No record**: nothing was produced upstream. Confirm the AgentRun finished, the integration's Agent chat capability is enabled, and personal settings have not paused new messages or queueing.
+- **`status=error`**: `error` and `error_detail` carry the provider's reason, usually expired credentials, a bot not present in the chat, an unbound recipient, or an artifact over the limit (images `10 MiB`; MP4 and other files `30 MiB`).
+- **`status=pending` for a long time**: no worker consumes that provider's tasks. Check that `worker` runs and its `-Q` includes `agent` (Feishu) and `default` (WeChat polling).
+- **`status=sending` stuck**: the provider request timed out or the network is blocked; look for provider errors in the `worker` log.
+- **`status=unavailable`**: the integration was disabled or is outside the current team; re-enable the capability and retry.
+
+Deliveries live in the single `integration_deliveries` table. If it is empty and logs report a missing relation after an upgrade, the migration did not finish or worker and API versions differ; redo the [upgrade](./upgrade.mdx) sequence.
+
+## Feishu Long Connection Shows Connected but No Messages Arrive [#feishu-connected-no-messages]
+
+A successful long connection only means the WebSocket is up; inbound messages also need event subscription and permissions:
+
+1. The Feishu app must subscribe to `im.message.receive_v1` (**Receive messages**) and publish a version approved by an administrator.
+2. The app needs `im:message.p2p_msg:readonly` (private messages), `im:message:send_as_bot` (send), `im:resource` (attachments), and `contact:user.base:readonly` (identity). Group-mention receive permissions do not replace private-message intake.
+3. The backend needs at least one worker consuming the `agent` queue: only those workers supervise the receiver, and a Redis lease elects the holder. If `-Q` omits `agent`, nothing takes over the long connection.
+4. If personal settings paused new messages, they are dropped without creating an AgentRun; resume them and send another message.
+5. Group mentions, bot-authored messages, and users without a bound identity are intentionally ignored.
+
+After fixing the configuration, verify with a **new** private message; messages that were not received earlier are not guaranteed to be replayed.
+
+## WeChat Polling Pauses [#wechat-polling-paused]
+
+Beat registers WeChat polling entries from the integration's capabilities. When the whole path stops, check in order:
+
+1. **Platform switches**: the WeChat iLink Agent chat or knowledge collection capability must be enabled; with both off, Beat removes the polling entries and no error is logged.
+2. **Beat runs with a single replica**: `docker compose ps beat` / `kubectl get pods -l app=beat`. After an upgrade, Beat must have been restarted once, or it may still run the old scheduler.
+3. **A `default`-queue consumer exists**: the dispatch task routes to `default`, so the worker's `-Q` must include it.
+4. **Batch slots are exhausted**: when all `WECHAT_POLL_MAX_BATCHES` slots (default `8`) hold unexpired claims, a new round claims nothing. Batches stop at 30 seconds and claims expire after 90, so it self-heals within a few rounds; persistent exhaustion means polling requests time out — check the network and WeChat rate limits.
+5. **Binding state**: only `status=connected` bindings are polled; an expired QR authorization must be rebound.
+
+## Sandbox Session Cannot Be Recovered or Checkpointing Fails [#sandbox-session-recovery]
+
+A session's runs, checkpoints, and cleanup all route to the sandbox worker where it first landed. Such errors usually point at disk identity or the checkpoint path:
+
+- **Startup reports a worker ID conflict**: `SANDBOX_WORKER_ID` disagrees with `.worker-identity.json` on disk. Restore the original value or start from an empty disk so the system generates a new identity; never attach one `SANDBOX_WORKER_ID` to different disks.
+- **Checkpoints keep failing**: `SANDBOX_CHECKPOINT_ROOT` must sit outside `SANDBOX_WORKSPACE_ROOT` and on the same persistent disk. Compose uses the `sandbox_data` volume and Kubernetes a node `hostPath`; if the mount path changes after a container rebuild, old checkpoints are gone.
+- **Reset budget exhausted**: `SANDBOX_SESSION_MAX_RESETS` defaults to `1`; past that the session is no longer recovered from its checkpoint, and the user must start a new one.
+- **Node or disk lost**: sessions on that node cannot migrate and must re-run; export or upload anything you need to keep to object storage.
+
+Diagnose in order: read worker_id, storage_id, and checkpoint errors in the `sandbox-worker` log → confirm the mount path did not change → confirm the disk is not full (`SANDBOX_MAX_DISK_MB`) → only then consider raising `SANDBOX_SESSION_MAX_RESETS`.
+
 ## Redis Connection Fails
 
 Confirm Redis is running: `docker compose ps redis` and `docker compose logs redis`; test with `docker compose exec redis redis-cli ping` (expect `PONG`, add `-a <password>` when a password is set); check `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`. The Celery broker and result backend are derived from `REDIS_*`; no separate configuration exists.
@@ -84,6 +129,8 @@ Custom HTTP tools, workflow HTTP request nodes, Knowledge Base URL import/previe
 - CIDR subnet: `10.10.0.0/16`, `172.20.0.0/24`
 - Exact domain: `oa.company.local`, `api.internal.service`
 - Wildcard domain: `*.corp.internal`
+
+The sandbox egress allowlist (**Site Settings** > **Security**, `sandbox_network_allowlist`, controlled by `sandbox_network_allowlist_enabled`) is a separate list: it accepts exact DNS hostnames only — none of the wildcard domains, CIDRs, or IPs above — and does not apply to server-initiated HTTP requests.
 
 <Callout type="warn">
   The following targets are rejected whether or not they appear in the allowlist, checked both on save and during request execution: cloud metadata (`169.254.169.254`, `169.254.0.0/16`, `fe80::/10`, `metadata.google.internal`); unspecified addresses (`0.0.0.0`, `0.0.0.0/32`, `::`); multicast (`224.0.0.0/4`); universal wildcards (`*`, `0.0.0.0/0`, `::/0`); and loopback addresses (`127.0.0.1`, `localhost`, `::1`).

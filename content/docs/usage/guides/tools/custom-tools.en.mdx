@@ -30,11 +30,11 @@ Tool names can only contain letters, digits, and underscores, and must start wit
 6. After saving, select **Run Test** and confirm the result path and error behavior.
 
 <Callout type="warn" title="The URL must be static">
-  A custom HTTP tool's **URL allows no placeholders at all**: if the URL contains `{param}`, `{{param}}`, or a bare `{{` / `}}`, execution is rejected outright (`http_tool_url_templates_not_supported`). Put variables in the **Query Parameters**, **Request Headers**, or **Body Template** fields — those three support `{{param}}` substitution.
+  A custom HTTP tool's **URL allows no placeholders at all**: if the URL contains `{param}`, `{{param}}`, or a bare `{{` / `}}`, execution is rejected outright. Put variables in the **Query Parameters**, **Request Headers**, or **Body Template** fields — those three support `{{param}}` substitution.
 </Callout>
 
 <Callout type="info">
-  The URL also passes an SSRF check (a domain/IP allowlist that blocks private addresses); the request is only issued when it passes.
+  The URL also passes the site security check: private addresses are blocked by default, and only a validated address receives a request. To reach a private service, ask an administrator to add the target to the allowlist.
 </Callout>
 
 ### HTTP Tool Configuration Example: Customer Lookup
@@ -143,26 +143,38 @@ Artifact paths must be under `/workspace` and can be marked optional.
 A database tool lets an Agent query an external database directly. The connection details (host, port, credentials, connection URL) stay **hidden from the model** — the Agent only sees the tool name and description, so the description should say what the database holds and which questions it answers.
 
 1. Under **Capabilities** > **Tools**, select **Create Tool** > **Database Tool**.
-2. Pick the database type: `postgresql`, `mysql`, `redis`, or `mongodb`.
+2. Pick the database type: PostgreSQL, MySQL, Redis, or MongoDB.
 3. Fill in the connection, using either mode:
-   - **Field mode**: host (`host`), port (`port`), database (`database`), username (`username`), password (`password`), SSL.
-   - **Connection URL mode**: fill in `url` directly (common for Redis / MongoDB); Redis can also set the logical database index `db`, and MongoDB can set the auth database `auth_source`.
-4. Set the **query timeout** (`timeout`, default `15`s, range `1-120`) and the **maximum returned rows** (`max_limit`, default `100`, range `1-1000`).
-5. Select **Test connection** (which calls `POST /api/v1/admin/tools/database/test-connection` and also passes the SSRF check), then save once it succeeds.
+   - **Field mode**: host, port, database, username, password, SSL.
+   - **Connection URL mode**: enter the connection address directly (common for Redis / MongoDB); Redis can also set a logical database index, and MongoDB can set an auth database.
+4. Set the **query timeout** (default `15`s, range `1-120`) and the **maximum returned rows** (default `100`, range `1-1000`).
+5. Select **Test connection** (which also passes the site security check), then save once it succeeds.
 
-### Actions the Agent can call
+### What the Agent can do
 
-| Action | Parameters | Description |
-| --- | --- | --- |
-| `schema` (default) | `tables` (optional list), `include_samples` (optional) | Read the table structure so the model first learns which tables and columns exist |
-| `query` | `sql` (required), `limit` (optional, default `50`, capped by `max_limit`) | Execute a **read-only** SQL statement |
+| Database type | Capabilities |
+| --- | --- |
+| PostgreSQL / MySQL | Read the table structure first (optionally for specific tables or with sample rows) so the model learns which tables and columns exist; then run **read-only** SQL queries |
+| Redis | Scan keys (with an optional match pattern, 20 per batch by default and at most 100, for at most 100 batches); read a single key (lists/sets/sorted sets return at most the first 50 members); run read-only whitelist commands such as `GET`, `HGETALL`, `LRANGE`, `ZRANGE` |
+| MongoDB | List collections with estimated counts, or infer one collection's fields; query documents by filter, count matching documents, or run an aggregation |
+
+Returned rows are always capped by **maximum returned rows**, so an Agent's own limit can only be smaller; queries return 50 rows by default, and MongoDB queries and aggregations return 20.
 
 <Callout type="warn">
-  Database tools allow read-only queries only: non-query statements (`INSERT` / `UPDATE` / `DELETE` / DDL) and dangerous keywords are rejected by `validate_readonly_sql`, and only one statement is permitted per call. Use an HTTP API or code tool when you need writes.
+  Database tools are read-only.
+  - For PostgreSQL / MySQL, write statements (`INSERT` / `UPDATE` / `DELETE` / DDL) and dangerous keywords are rejected; only one statement is allowed per call and SQL is limited to `65536` characters.
+  - Redis blocks dangerous commands such as `FLUSHALL`, `CONFIG`, `EVAL`, `SCRIPT`, and `KEYS`; anything outside the whitelist is rejected.
+  - MongoDB aggregations may not write results back into a collection.
+
+  Use an HTTP API or code tool when you need writes.
+</Callout>
+
+<Callout type="info" title="Timeouts and returned volume">
+  **Query timeout** (default `15`s, `1-120`) bounds a single query, connection and execution included; **maximum returned rows** (default `100`, `1-1000`) is the hard cap on records returned by any operation. Redis scanning additionally caps each batch at 100 keys and the scan at 100 batches, preventing unbounded scans on large databases.
 </Callout>
 
 <Callout type="error">
-  Connection details are stored server-side and never sent to the model, but always use a **read-only** database account with least privilege. Testing connectivity also requires the `tool:create` permission.
+  Connection details are stored server-side and never sent to the model, but always use a **read-only** database account with least privilege. Testing connectivity requires permission to create tools.
 </Callout>
 
 ## Editing and Deleting Tools
@@ -188,37 +200,39 @@ A database tool lets an Agent query an external database directly. The connectio
 
 ## Testing Tools
 
-### Running Tests
+### Running a Test
 
 1. Select the tool
 2. Select the **Test** button
 3. Enter test parameters
 4. Select **Run Test**
 
-### Test Result Examples
+### Example Test Results
+
+For web search, choose an engine (site default or an enabled engine) and fill in the query and result count.
 
 ```yaml title="Web Search Test Result"
 Tool: Web Search
 Test Parameters:
   query: "artificial intelligence"
-  max_results: 5
+  num_results: 5
+  engine: site default
 
 Status: Success
-Response Time: 1.2 seconds
-Results:
-  - title: "Artificial Intelligence - Wikipedia"
-    url: "https://en.wikipedia.org/wiki/Artificial_intelligence"
-    snippet: "Artificial intelligence (AI) is intelligence..."
+Response:
+  results:
+    - title: "Artificial Intelligence - Wikipedia"
+      url: "https://en.wikipedia.org/wiki/Artificial_intelligence"
+      content: "Artificial intelligence (AI) is intelligence..."
 
-  - title: "What is AI? | IBM"
-    url: "https://www.ibm.com/topics/artificial-intelligence"
-    snippet: "Artificial intelligence leverages computers..."
-
-Metadata:
-  total_results: 5
-  search_time: 0.8s
-  api_calls: 1
+    - title: "What is AI? | IBM"
+      url: "https://www.ibm.com/topics/artificial-intelligence"
+      content: "Artificial intelligence leverages computers..."
 ```
+
+<Callout type="info">
+  On the tool test page, web search shows an engine selector listing only enabled engines plus the site default. Search credentials are managed site-wide and cannot be entered here; a disabled engine or failed call shows the error directly and never silently falls back to another engine.
+</Callout>
 
 ```yaml title="CRM Lookup Test Result"
 Tool: CRM Lookup
@@ -244,205 +258,149 @@ Validation: Passed
 
 ## Credentials and Sharing
 
-Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with **Read-only** or **Read & Execute** permission.
+Credentials are stored server-side and injected at call time. Custom tools can be shared with other teams with either **read-only** or **read and execute** permission.
 
 | Permission | Description |
 | --- | --- |
-| **Read-only** | Receiving team can view tool configuration but cannot execute |
-| **Read & Execute** | Receiving team can view and execute the tool |
+| **Read-only** | The receiving team can view the tool configuration but cannot execute it |
+| **Read and execute** | The receiving team can view and execute the tool |
 
-<Callout type="warn" title="Sharing Restrictions">
+<Callout type="warn" title="Sharing limits">
   - Built-in tools cannot be deleted or shared
-  - Shared tools cannot have their owner's configuration modified by the receiving team
+  - A shared tool's owner configuration cannot be modified by the receiving team
 </Callout>
 
-The tool API response's `share_permission` (`null` when not shared) and `shared_with_count` fields reflect the sharing state and the number of receiving teams.
+The tool list shows the sharing state and how many teams the tool is shared with.
 
-## Tool Status Management
+## Tool Status
 
-Tools have two statuses: enabled and disabled:
+Tools are either enabled or disabled:
 
 | Status | Description |
 | --- | --- |
-| **Enabled** | Tool is operational and appears in tool selection |
-| **Disabled** | Tool is disabled and hidden from users |
+| **Enabled** | The tool works and appears in tool selection |
+| **Disabled** | The tool cannot be used and is hidden from users |
 
 <Callout type="info">
-  Tools have a single enabled/disabled state. There are no `testing` or `deprecated` statuses. Custom tools can be toggled via `POST /api/v1/admin/tools/{tool_id}/toggle`.
+  Tools only have enabled/disabled states — there is no “testing” or “deprecated” state. Use the **Enable**/**Disable** action in the tool list menu to switch.
 </Callout>
 
-## Failure Handling
+## Handling Failures
 
-### HTTP Tool Test Failures
-
-Check the following:
-- URL is correct
-- TLS certificate is valid
-- Authentication credentials are not expired
-- Request body JSON format is correct
-- Response path matches the actual response structure
-
-### Code Tool Test Failures
+### HTTP Tool Test Failure
 
 Check the following:
-- Packages use pinned versions (`package==version`)
-- Standard output does not exceed 256KB cap
-- Disk usage does not exceed 1024MB cap
-- Execution does not exceed timeout (default 30 seconds)
-- Artifact paths are under `/workspace`
+- Whether the URL is correct
+- Whether the TLS certificate is valid
+- Whether credentials have expired
+- Whether the request body is valid JSON
+- Whether the response path matches the actual response structure
+
+### Code Tool Test Failure
+
+Check the following:
+- Whether packages use pinned versions (`package==version`)
+- Whether stdout exceeds the 256KB cap
+- Whether disk usage exceeds the 1024MB cap
+- Whether execution timed out (default 30 seconds)
+- Whether artifact paths are under `/workspace`
 
 ## Best Practices
 
 ### Tool Configuration
 
-**✅ Do:**
-- Test tools before enabling
+**✅ Recommended:**
+- Test tools before enabling them
 - Rotate credentials regularly
-- Document tool purposes
-- Keep tools updated
-- Use error handling
+- Document what each tool is for
+- Keep tools up to date
+- Handle errors
 
-**❌ Don't:**
-- Enable untested tools
-- Use static credentials forever
-- Skip documentation
-- Ignore errors
+**❌ Avoid:**
+- Enabling untested tools
+- Using static credentials long-term
+- Skipping documentation
+- Ignoring errors
 
 ### Security
 
-**✅ Do:**
-- Use secure authentication
+**✅ Recommended:**
+- Use strong authentication
 - Rotate API keys regularly
-- Restrict tool access
-- Enable audit logging
-- Monitor for abuse
+- Limit tool access scope
+- Enable audit logs
+- Monitor unusual usage
 - Use HTTPS only
-- Validate responses
+- Validate response data
 
-**❌ Don't:**
-- Use weak authentication
-- Use static API keys forever
-- Allow unrestricted access
-- Disable audit logs
-- Ignore suspicious activity
-- Allow HTTP connections
-- Trust responses blindly
+**❌ Avoid:**
+- Weak authentication
+- Long-lived static API keys
+- Unrestricted access
+- Disabling audit logs
+- Ignoring suspicious activity
+- Allowing plain HTTP
+- Trusting responses blindly
 
 ### Performance
 
-**✅ Do:**
-- Set appropriate timeouts
-- Use caching where possible
+**✅ Recommended:**
+- Set sensible timeouts
+- Cache where possible
 - Monitor response times
 - Optimize tool calls
 - Handle errors gracefully
 
-**❌ Don't:**
-- Use very long timeouts
-- Skip caching
-- Ignore performance metrics
-- Make unnecessary calls
-- Ignore errors
+**❌ Avoid:**
+- Excessively long timeouts
+- Skipping caching
+- Ignoring performance metrics
+- Making unnecessary calls
+- Ignoring errors
 
-## API Endpoints
+## Tool Naming and Thinking Status Display
 
-The Tools API supports full CRUD operations, primarily for user-side tool management. See [Tools API](/en/api/tools) for details.
+When an Agent calls tools mid-conversation, the **thinking panel** at the top recognizes and shows the current tool's intent without being expanded. To keep that display natural and clear, follow these naming conventions:
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/v1/tools` | List all tools (supports pagination, search, filters) |
-| GET | `/api/v1/tools/id/{tool_id}` | Get tool details by ID |
-| GET | `/api/v1/tools/name/{tool_name}?team_id={team_id}` | Get tool details by name |
-| POST | `/api/v1/tools/test` | Single test execution |
-| POST | `/api/v1/tools/execute-code` | Run code directly in sandbox |
-| POST | `/api/v1/tools/database/test-connection` | Test database-tool connectivity (requires `tool:create`; also mounted under `/api/v1/admin/tools`) |
-| POST | `/api/v1/tools?team_id={team_id}` | Create custom tool |
-| PUT | `/api/v1/tools/{tool_id}` | Update tool configuration |
-| DELETE | `/api/v1/tools/{tool_id}` | Delete custom tool |
+### 1. Naming Conventions and Recommended Verb Prefixes
 
-### Admin Endpoints
-
-Admin endpoints live under `/api/v1/admin/tools` and require `admin:capability:*` permissions:
-
-```python
-# List tools (admin)
-tools = api.get("/api/v1/admin/tools", params={"page": 1, "page_size": 20})
-
-# Get filter options
-filters = api.get("/api/v1/admin/tools/filters")
-
-# Test a tool (builtin, custom, or MCP)
-result = api.post("/api/v1/admin/tools/test", json={
-    "tool_name": "web_search",
-    "arguments": {"query": "artificial intelligence", "max_results": 5}
-})
-
-# Execute code directly
-code_result = api.post("/api/v1/admin/tools/execute-code", json={
-    "language": "python",
-    "code": "return params['a'] + params['b']",
-    "params": {"a": 1, "b": 2}
-})
-```
-
-<Callout type="info">
-  Admin endpoints `POST /api/v1/tools/web_search/call` and `GET /api/v1/tools/web_search/usage` do not exist. Tool configuration (e.g. `TAVILY_API_KEY`) is managed via `GET/POST/PUT/DELETE /api/v1/admin/tools/config[/{tool_name}]`.
-</Callout>
-
-### Permissions
-
-All endpoints require an authenticated JWT user session:
-
-| Permission | Description |
-| --- | --- |
-| `tool:read` | View tools |
-| `tool:create` | Create tools |
-| `tool:update` | Update tools |
-| `tool:delete` | Delete tools |
-| `tool:execute` | Execute/test tools |
-
-## Custom Tool Naming Conventions & Chat Status Visibility
-
-When an Agent calls tools during reasoning, the top **Chain of Thought header** automatically surfaces the action without requiring users to expand the collapsible panel. Follow these naming conventions to ensure intuitive status display:
-
-### 1. Recommended Verb Prefixes
-
-| Action Type | Recommended Prefix / Keywords | CoT Header Display |
+| Operation type | Recommended verbs/roots | What the panel shows |
 | :--- | :--- | :--- |
-| **Query / Retrieval** | `query_`, `fetch_`, `get_`, `search_`, `find_`, `check_` | `Querying {tool}...` |
-| **Sending / Notifications** | `send_`, `post_`, `push_`, `notify_`, `mail_` | `Sending {tool}...` |
-| **Creation** | `create_`, `add_`, `insert_`, `new_`, `build_` | `Creating {tool}...` |
-| **External API / Requests** | `api_`, `http_`, `rest_`, `request_`, or input has `url`/`endpoint` | `Requesting {tool}...` |
-| **Computation / Analysis** | `calc_`, `math_`, `count_`, `analyze_`, `stat_` | `Calculating...` |
-| **Artifacts & Downloads** | `artifact`, `artifacts`, contains `Create Download Link` | `Collecting artifacts...` |
-| **Files / Documents** | `read_`, `write_`, `open_file`, `save_file` | `Reading / Editing file...` |
+| **Data/information lookup** | `query_`, `fetch_`, `get_`, `search_`, `find_`, `check_`, `查_`, `获取_` | `Looking up: {tool name}...` |
+| **Sending and notification** | `send_`, `post_`, `push_`, `notify_`, `mail_`, `发_`, `推送_` | `Sending: {tool name}...` |
+| **Creating** | `create_`, `add_`, `insert_`, `new_`, `build_`, `建_`, `新增_` | `Creating: {tool name}...` |
+| **External API calls** | `api_`, `http_`, `rest_`, `request_`, `接口_`, or parameters containing `url`/`endpoint` | `Requesting API: {tool name}...` |
+| **Calculation and analysis** | `calc_`, `math_`, `count_`, `analyze_`, `计算_`, `统计_` | `Calculating and analyzing...` |
+| **Artifact collection and export** | `artifact`, `artifacts`, or a name containing `生成下载链接` | `Collecting artifacts...` |
+| **File and document operations** | `read_`, `write_`, `open_file`, `save_file` | `Reading/editing file...` |
 
 ### 2. Display Name Tips
 
-- **Provide a friendly Display Name**: If configured (e.g. `Fetch Stock Quotes` or `Send Slack Notification`), the CoT header directly uses this name for status rendering.
-- **Automatic Identifier Beautification**: Raw identifiers like `fetch_user_orders` or `syncCrmAccount` are automatically converted to clean phrases (e.g. `Querying Fetch User Orders...`).
-- **Parallel Call Aggregation**: When multiple tools execute simultaneously, the header aggregates them into `Calling {N} tools in parallel...` to preserve clean UI presentation.
+- **Set a friendly display name**: if the tool has one (for example `查询股票行情` or `发送飞书通知`), the status bar shows it directly, such as `Looking up: 查询股票行情...`.
+- **Identifiers are prettified**: if a tool only has an identifier such as `fetch_user_orders` or `syncCrmAccount`, the system turns it into natural words in the status, such as `Looking up: Fetch User Orders...`.
+- **Parallel calls are grouped**: when an Agent runs several tools in one thinking round, the panel collapses them into `Calling {N} tools in parallel...`.
+
 ## Troubleshooting
 
-### Tool Call Failed
+### Tool Call Fails
 
-1. **Check tool configuration:** Verify credentials, endpoint URL, test connectivity
-2. **Check audit logs:** Review audit log entries for the tool's team
+1. **Check the tool configuration:** verify credentials and the endpoint URL, and test connectivity
+2. **Check the audit log:** review entries for the team that owns the tool
 3. **Common errors:**
-   - **Authentication failed:** Invalid credentials
-   - **Timeout:** Increase timeout or check endpoint
-   - **Invalid parameters:** Check parameter format
-4. **Test tool:** Use the test panel to review results
+   - **Authentication failure:** invalid credentials
+   - **Timeout:** increase the timeout or check the endpoint
+   - **Invalid parameters:** check the parameter format
+4. **Test the tool:** use the test panel to see the result
 
-### Slow Response
+### Slow Responses
 
-1. Use the tool test panel to measure response time
-2. Optimize: increase timeout, reduce data transfer, optimize endpoint
-3. Check external service status for outages
+1. Use the test panel to measure response time
+2. Optimize: increase the timeout, send less data, improve the endpoint
+3. Check the external service status for outages
 
-## Related Documentation
+## Related Pages
 
-- [Built-in Tools](/en/usage/guides/tools/built-in) — Enable time, math, web, file, and media system capabilities
-- [MCP Services](/en/usage/guides/tools/mcp) — Connect MCP Servers via stdio, SSE, or HTTP
-- [Skills & Packages](/en/usage/guides/tools/skills) — Import reusable Skill packages and manage resources
-- [Tools API](/en/api/tools) — Complete API endpoint reference
+- [Built-in Tools](/en/usage/guides/tools/built-in) — system capabilities such as time, computation, web, files, and media
+- [MCP Servers](/en/usage/guides/tools/mcp) — connect MCP Servers over stdio, SSE, or HTTP
+- [Skills and Packages](/en/usage/guides/tools/skills) — import reusable Skill packages and manage resources
+- [Tools API](/en/api/tools) — full endpoint, field, and permission reference

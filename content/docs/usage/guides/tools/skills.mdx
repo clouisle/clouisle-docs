@@ -1,32 +1,30 @@
 ---
 title: 技能中心（Skills）
-description: 导入、管理与在 Agent 中使用可复用技能包
+description: 用 ZIP 或 Git 包导入可复用技能，在 Agent 中调用
 icon: PackageOpen
 ---
 
-Skills 是把提示词指令、运行脚本、依赖声明和执行约定封装在一起的可复用能力包。与单一 HTTP/代码工具不同，Skill 可以既包含供 Agent 阅读遵循的详细规约（`instructions` 模式），也可以在沙箱内直接运行脚本并生成产物（`script` 模式）。
+Skills 是把提示词指令、运行脚本、依赖声明和执行约定封装在一起的可复用能力包。与单一 HTTP / 数据库工具不同，Skill 既可以只提供 Agent 需要遵循的详细规约（**指令型**），也可以在隔离沙箱里运行脚本并产出文件（**脚本型**）。
 
-平台通过**能力** > **Skills**（`/app/capabilities?tab=skills`）提供技能中心；管理员可在管理后台（`/capabilities?tab=skills`）统一审核系统级与团队级技能包。
+平台入口是**能力** > **Skills**（`/app/capabilities?tab=skills`）；平台管理员还可以在**管理后台** > **能力** > **Skills**（`/capabilities?tab=skills`）统一查看系统级与团队级 Skill，并从这里导入。
 
 <Callout type="info">
-  查看 Skills 需要 `skill:read` 权限；导入需要 `skill:create`；启用/禁用/修改需要 `skill:update`；沙箱执行测试需要 `skill:execute`；删除需要 `skill:delete`。
+查看 Skill 需要技能查看权限，导入与维护需要技能管理权限，沙箱测试需要沙箱执行权限。普通成员通常只有查看权限：可以在 Agent 编排里选用已安装的 Skill，但不能导入或修改。权限由平台管理员在角色中授予，见[角色与权限](/usage/guides/administration/roles-permissions)。
 </Callout>
 
-## Skill 包结构与规范
+## Skill 包结构
 
-每个 Skill 包以目录形式组织，核心入口为根目录下的 `SKILL.md` 文件（UTF-8 编码）。
+每个 Skill 是包里的一个目录，目录根下必须有 `SKILL.md`（UTF-8 编码）：
 
 ```
 my-skill/
-├── SKILL.md              # 必须：前置元数据与提示词指令
+├── SKILL.md              # 必须：元数据与提示词指令
 ├── scripts/
-│   └── run.py            # 可选：script 模式下执行的脚本
+│   └── run.py            # 可选：脚本型 Skill 执行的脚本
 └── assets/               # 可选：模板、规则或静态资源
 ```
 
-### SKILL.md 格式
-
-`SKILL.md` 由 YAML Frontmatter 与 Markdown 正文组成：
+`SKILL.md` 由 YAML 前置元数据与 Markdown 正文组成：
 
 ```markdown
 ---
@@ -55,99 +53,107 @@ x-clouisle:
 3. 保留关键数据并给出事实溯源。
 ```
 
+**必填**：`name`（小写字母、数字、下划线或中划线）与 `description`。**可选**：`display_name`（界面展示名，缺省用 `name`）、`version`、`category`、`icon`，以及 `x-clouisle` 下的执行模式与输入参数结构。正文就是 Agent 会读到的指令。
+
 ### 执行模式
 
-| 模式 | 运行机制 | 适用场景 |
+| 模式 | 运行方式 | 适用场景 |
 | --- | --- | --- |
-| `instructions`（默认） | 不在沙箱执行代码。系统将 `SKILL.md` 正文中的规约注入 Agent 运行时上下文，指导模型按特定流程思考和回复。 | 写作规范、分析流程、代码审查准则、行业 SOP |
-| `script` | 在独立代码沙箱中运行 `execution.script` 指定的脚本（支持 Python / Node.js），捕获 `stdout`/`stderr` 并支持产生持久化文件产物（Artifact）。 | 复杂计算、数据统计、图表绘制、文件批量转换 |
+| **指令型**（默认） | 不执行代码。`SKILL.md` 正文会作为规约注入 Agent 上下文，指导模型按固定流程工作。 | 写作规范、分析流程、代码审查准则、行业 SOP |
+| **脚本型** | 在隔离沙箱里运行包内声明的脚本（Python / Node.js），返回标准输出、错误与生成的文件（产物）。 | 复杂计算、数据统计、图表绘制、批量文件转换 |
 
-### 限制与校验规则
+Skill 卡片与详情页会标明来源（**Zip**、**Git** 或**旧版**）；**旧版**表示由迁移前的沙箱 Skill 配置转为技能包。执行模式写在 `SKILL.md` 里，导入后不能在界面单独修改。
 
-- **Zip 上传限制**：上传文件必须为 `.zip` 格式，单文件上限 **50 MB**，解压展开后总大小上限 **50 MB**，压缩包内最多包含 **500** 个文件，单个解压文件上限 **10 MB**。
-- **禁止危险内容**：Zip 包内禁止包含符号链接（Symlink）、嵌套压缩包（Nested Archive）或跨目录逃逸路径（`../`）。
-- **字段要求**：`name`（小写字母、数字、下划线与中划线）与 `description` 为必填项。
+### 包限制与校验
+
+- **ZIP 上传**：只接受 `.zip`，单文件上限 **50 MB**，解压后总大小上限 **50 MB**，最多 **500** 个文件，单个解压文件上限 **10 MB**。
+- **禁止危险内容**：包内不能有符号链接、嵌套压缩包或 `../` 这类跨目录路径。
+- **Git 仓库**：必须是公开的 HTTPS 仓库，可指定分支、标签或提交；拉取超时 **180 秒**。
+- 缺少 `SKILL.md`、元数据格式错误或名称不合法的包会在预览里标为无效，不会安装。
 
 ## 导入 Skill 包
 
 <Callout type="warn" title="Skill 只能通过导入创建">
-  平台**没有“手动新建 Skill”入口**，也没有 Skill 的文件子资源端点（如 `/files`）。创建 Skill 的唯一方式是导入 ZIP 或 Git 仓库（**预览 → 安装**两步）。安装后只能用 `PATCH /api/v1/skills/{skill_id}` 修改**元数据**（显示名、描述、图标、分类、启用状态、默认配置）——要改 `SKILL.md` 正文或脚本内容必须重新导入。
+平台**没有「新建 Skill」的手动入口**，创建 Skill 的唯一方式是导入 ZIP 或 Git 仓库。导入后只能调整**元数据**（显示名、描述、图标、分类、启用状态、默认配置）；要改 `SKILL.md` 正文或脚本内容，必须重新导入。
 </Callout>
 
-平台提供**上传 Zip**与 **Git 仓库**两种导入方式：
-
-1. 前往**能力**页（`/app/capabilities`），切换至 **Skills** 标签。
+1. 前往**能力**页（`/app/capabilities`），切到 **Skills** 标签。
 2. 点击右上角**导入 Skills**。
-3. 选择导入来源：
-   - **上传 Zip**：拖入或选择包含一个或多个 Skill 目录的 `.zip` 归档。
-   - **Git 仓库**：输入公开 HTTPS Git 仓库地址（`repo_url`），以及可选的分支、标签或提交哈希（`ref`，如 `main` 或 `v1.0.0`）。
-4. 系统自动解包并进入**扫描预览**步骤，列出包路径、Skill 名称、模式（instructions / script）与校验状态。
-5. 若存在同名冲突或重复项，界面会标红提示冲突原因。检查无误后，勾选要安装的条目并点击**安装选中项**。
+3. 选择来源：
+   - **上传 Zip**：选择包含一个或多个 Skill 目录的 `.zip`。
+   - **Git 仓库**：填写公开 HTTPS 仓库地址，可选填**分支、标签或提交**（如 `main`、`v1.0.0`）。
+4. 点击**扫描预览**。预览表为每个 `SKILL.md` 目录列出一行：
+   - **包路径**与 **Skill**（展示名 + 描述）。
+   - **状态**：有效、冲突（团队里已有同名 Skill）、名称重复（同一来源里出现多次）。
+   - **操作**：安装、更新、跳过。
+5. 无冲突项默认勾选；冲突项默认不勾选，需要覆盖时手动勾选并选择**更新**（会用新包覆盖同名 Skill，名称与归属不变）。同一来源里重名的包默认只安装第一个。
+6. 确认后点击**安装选中项**，列表随即出现新 Skill，状态为**已启用**。
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/skill-import-dialog.png" alt="导入 Skill 包" />
   <figcaption>导入 Skill 包</figcaption>
 </figure>
 
-## 沙箱测试
+## 查看 Skill 详情
 
-在将 Skill 绑定到生产 Agent 前，可在技能中心直接进行隔离运行测试：
+点击列表中的 Skill 卡片（管理后台为名称）进入详情页，可看到：
 
-1. 在 Skills 列表中找到目标 Skill，点击操作列的**测试**按钮。
-2. 在弹出的测试抽屉中输入 JSON 格式的调用参数（`arguments`）。
-3. 点击**运行测试**：
-   - 若为 `instructions` 模式，直接预览将要注入给 Agent 的完整提示词与指令内容。
-   - 若为 `script` 模式，调用沙箱网关（Sandbox Gateway）创建隔离运行会话，执行脚本并实时展示运行状态、执行耗时（毫秒）、控制台标准输出（`stdout`）、标准错误（`stderr`）以及产物文件列表（Artifacts）。可直接在界面上下载产物。
+- **状态**（已启用 / 已禁用）、**范围**（系统 / 团队）、分类、版本与来源。
+- **包路径**、**参数**（`SKILL.md` 声明的输入参数名）与**更新时间**。
+- **指令**正文，即 Agent 使用前会读到的完整规约。
+
+详情页用来在上线前核对 Agent 将看到的说明与参数是否符合预期。
 
 ## 在 Agent 中绑定与调用
 
-1. 打开目标 Agent 的编排页面（`/app/apps/{agent_id}`）。
-2. 在**工具**配置区域选择**添加工具/技能**，切换至 **Skills** 类别。
-3. 勾选需要启用的 Skill。Agent 在对话与推理过程中，将根据系统提示词和任务目标自主决定是否调用该 Skill。
-4. 调试无误后点击**发布**。
+1. 打开目标 Agent 的编排页（`/app/apps/{agent_id}`）。
+2. 在**工具**区域选择**添加工具/技能**，切到 **Skills** 分类。
+3. 选择要启用的 Skill。选择器只列出**已启用**的 Skill。
+4. 保存后，Agent 在对话与推理过程中会根据系统提示词和任务目标自主决定是否调用它。
+5. 调试无误后**发布**。
 
-<Callout type="warn">
-  **引用保护机制**：若某个 Skill 已被任意 Agent 绑定引用，系统将**禁止删除**该 Skill 并提示引用冲突。删除前需先在对应 Agent 的编排中解除绑定。
-</Callout>
+## 启用状态
 
-## 作用域与权限
+卡片与详情页都会显示**已启用** / **已禁用**：
 
-- **系统技能（System Skills）**：`team_id` 为空，全平台所有团队可见。仅超级管理员可在管理后台创建、修改、导入或删除。
-- **团队技能（Team Skills）**：绑定到特定团队，仅该团队成员可见与使用。团队管理员及拥有 `skill:*` 权限的成员可自主管理。
+- 禁用的 Skill 不会出现在 Agent 的工具选择器里；已绑定的 Skill 被禁用后，运行时也不会再调用它。
+- 当前界面只展示状态，没有开关：需要停用或重新启用时，由平台管理员通过[技能 API](/api/skills) 调整。新导入的包默认启用。
 
-## API 端点
+## 运行测试
 
-```http
-# 列出团队可用技能（含系统技能）
-GET /api/v1/skills?team_id={team_id}&include_system=true
+Skill 支持在隔离环境中先跑一次再上线，测试通过[技能 API](/api/skills) 的测试操作发起（界面暂未提供测试按钮）：
 
-# 预览 Zip / Git 导入
-POST /api/v1/skills/import/preview-zip
-POST /api/v1/skills/import/preview-git
+- **指令型**：直接返回 `SKILL.md` 的指令内容，用来预览 Agent 将读到的上下文，不执行任何代码。
+- **脚本型**：在沙箱中执行脚本，返回运行成功或失败、耗时、标准输出、标准错误与产物文件列表，产物可下载。
+- 输入参数需符合 `SKILL.md` 里声明的结构；参数缺失或类型不符会直接报校验错误。
 
-# 确认安装导入会话中的技能
-POST /api/v1/skills/import/{session_id}/install
+脚本型 Skill 依赖平台已启用代码沙箱；沙箱不可用时测试与运行时调用都会失败，见[代码沙箱](/usage/concepts/sandbox)。
 
-# 获取 Skill 详情 / 更新 / 删除
-GET    /api/v1/skills/{skill_id}?team_id={team_id}
-PATCH  /api/v1/skills/{skill_id}
-DELETE /api/v1/skills/{skill_id}
+## 作用域与可见性
 
-# 沙箱运行测试
-POST /api/v1/skills/{skill_id}/test
-```
+- **系统（System）**：不属于任何团队，全平台所有团队可用；只有平台管理员能导入、维护与删除。
+- **团队（Team）**：只属于一个团队，仅该团队成员可见可用；团队管理员可管理。
+- Skill **没有跨团队共享入口**：可见范围完全由系统级或团队级归属决定。需要跨团队复用，请让平台管理员导入为系统级 Skill。
+- 已被 Agent 引用的 Skill **不能删除**，需先在对应 Agent 的编排中解除绑定；系统级 Skill 只有平台管理员能删除。
 
 ## 排查
 
 ### 导入失败
 
-1. **Zip 文件过大**：确认压缩包大小未超过 `50MB`，解压后未超过 `50MB`。
-2. **缺少 SKILL.md**：确认目录根下存在大写的 `SKILL.md`，且为有效的 UTF-8 文本编码。
-3. **Frontmatter 格式有误**：确认 YAML 缩进无语法错误，且包含必填的 `name` 与 `description`。
-4. **Git 超时**：公共 Git 仓库拉取超时时间为 `180` 秒；确认仓库地址公开可达。
+1. **文件过大**：确认 ZIP 未超过 `50MB`，解压后未超过 `50MB`。
+2. **缺少 SKILL.md**：确认每个 Skill 目录根下存在大写的 `SKILL.md`，且为 UTF-8。
+3. **元数据格式错误**：检查 YAML 缩进，确认 `name` 与 `description` 都已填写且名称只含小写字母、数字、下划线或中划线。
+4. **Git 超时**：公开仓库拉取超过 `180` 秒会失败；确认仓库可公开访问、`ref` 存在。
 
 ### 执行报错
 
-1. 在技能中心点击**测试**，观察 `stderr` 报错日志。
-2. 对于 `script` 模式，检查脚本声明的依赖是否已在运行环境中安装。
-3. 检查输入参数是否符合 `x-clouisle.input_schema` 定义的类型要求。
+1. 查看测试返回的标准错误输出，定位脚本异常。
+2. 脚本型 Skill 需确认声明的依赖能在沙箱环境中安装；平台沙箱需要管理员开启。
+3. 核对输入参数是否符合 `SKILL.md` 中声明的类型与必填项。
+
+## 相关页面
+
+- [技能 API](/api/skills) — 导入、查询、更新、删除与测试接口
+- [自定义 HTTP 与代码工具](./custom-tools.mdx) — HTTP、数据库与 MCP 工具
+- [代码沙箱](/usage/concepts/sandbox) — 沙箱执行环境与限制
+- [创建与编排 Agent](/usage/guides/agent/create-agent) — 编排、绑定工具与发布

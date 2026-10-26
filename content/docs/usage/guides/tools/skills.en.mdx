@@ -1,30 +1,28 @@
 ---
 title: Skills Center
-description: Import, manage, and use reusable Skill packages in Agents
+description: Import reusable Skills from ZIP bundles or Git repositories and call them from Agents
 icon: PackageOpen
 ---
 
-A Skill is a reusable capability package that bundles prompt instructions, runtime scripts, dependency declarations, and execution conventions. Unlike a single HTTP or code tool, a Skill can either carry a detailed specification the Agent reads and follows (`instructions` mode) or run a script directly inside the sandbox and produce artifacts (`script` mode).
+A Skill is a reusable capability package that bundles prompt instructions, runtime scripts, dependency declarations, and execution conventions. Unlike a single HTTP or database tool, a Skill can either carry a detailed specification the Agent reads and follows (**instructions mode**) or run a script in an isolated sandbox and produce files (**script mode**).
 
-The platform exposes the Skills center under **Capabilities** > **Skills** (`/app/capabilities?tab=skills`); administrators review system and team packages in the admin panel (`/capabilities?tab=skills`).
+The entry point is **Capabilities** > **Skills** (`/app/capabilities?tab=skills`). Platform administrators can also review both system and team Skills, and import from there, in **admin panel** > **Capabilities** > **Skills** (`/capabilities?tab=skills`).
 
 <Callout type="info">
-  Viewing Skills requires `skill:read`; importing requires `skill:create`; enabling, disabling, or editing requires `skill:update`; sandbox test runs require `skill:execute`; deleting requires `skill:delete`.
+Viewing Skills needs skill view permission, importing and maintaining need skill management permission, and sandbox tests need sandbox execution permission. Regular members usually have view access only: they can pick installed Skills while configuring an Agent but cannot import or modify them. Permissions are granted by the platform administrator in roles; see [Roles and permissions](/usage/guides/administration/roles-permissions).
 </Callout>
 
-## Package Structure and Specification
+## Skill package structure
 
-Every Skill package is a directory whose root contains a `SKILL.md` file (UTF-8 encoded).
+Each Skill is a directory in the bundle, and the directory root must contain `SKILL.md` (UTF-8):
 
 ```
 my-skill/
-├── SKILL.md              # Required: frontmatter and prompt instructions
+├── SKILL.md              # Required: metadata and prompt instructions
 ├── scripts/
-│   └── run.py            # Optional: script executed in script mode
+│   └── run.py            # Optional: script run by a script-mode Skill
 └── assets/               # Optional: templates, rules, or static resources
 ```
-
-### SKILL.md Format
 
 `SKILL.md` combines YAML frontmatter with a Markdown body:
 
@@ -55,99 +53,107 @@ You are a professional long-form summarization expert. When the user supplies a 
 3. Preserve critical figures and cite each source.
 ```
 
-### Execution Modes
+**Required**: `name` (lowercase letters, digits, underscores, or hyphens) and `description`. **Optional**: `display_name` (shown in the UI, defaults to `name`), `version`, `category`, `icon`, plus the execution mode and input schema under `x-clouisle`. The Markdown body is what the Agent reads.
+
+### Execution modes
 
 | Mode | How it runs | Typical use |
 | --- | --- | --- |
-| `instructions` (default) | No code runs in the sandbox. The `SKILL.md` body is injected into the Agent runtime context to steer how the model reasons and replies. | Writing standards, analysis procedures, code review rules, domain SOPs |
-| `script` | Runs the script named by `execution.script` (Python or Node.js) in an isolated code sandbox, captures `stdout`/`stderr`, and can persist file artifacts. | Heavy computation, statistics, chart rendering, batch file conversion |
+| **Instructions** (default) | No code runs. The `SKILL.md` body is injected into the Agent context as a specification that steers the model. | Writing standards, analysis procedures, code review rules, domain SOPs |
+| **Script** | Runs a script declared in the package (Python / Node.js) in an isolated sandbox and returns stdout, stderr, and generated files (artifacts). | Heavy computation, statistics, chart rendering, batch file conversion |
 
-### Limits and Validation Rules
+Skill cards and the detail page show the source (**Zip**, **Git**, or **Legacy**); **Legacy** means the Skill was converted from the pre-migration sandbox configuration. The execution mode lives in `SKILL.md` and cannot be changed separately in the UI after import.
 
-- **Zip upload limits**: the upload must be a `.zip` file, at most **50 MB**, expanding to at most **50 MB** uncompressed, with at most **500** files inside and a **10 MB** limit per extracted file.
-- **Forbidden content**: Zip archives may not contain symlinks, nested archives, or path-escape entries (`../`).
-- **Required fields**: `name` (lowercase letters, digits, underscores, and hyphens) and `description` are mandatory.
+### Package limits and validation
 
-## Import a Skill Package
+- **Zip upload**: `.zip` only, at most **50 MB** for the file, at most **50 MB** uncompressed, at most **500** files, and at most **10 MB** per extracted file.
+- **Forbidden content**: no symlinks, nested archives, or path-escape entries such as `../`.
+- **Git repository**: must be a public HTTPS repo; you can pin a branch, tag, or commit; cloning times out after **180 seconds**.
+- Packages missing `SKILL.md`, with invalid metadata, or with illegal names are marked invalid in the preview and are not installed.
+
+## Importing a Skill package
 
 <Callout type="warn" title="Skills can only be created by importing">
-  The platform has **no "create Skill manually" entry point** and no Skill file-subresource endpoints (such as `/files`). The only way to create a Skill is to import a ZIP or a Git repository (a two-step **preview → install** flow). After installation, `PATCH /api/v1/skills/{skill_id}` can only change **metadata** (display name, description, icon, category, enabled flag, default config) — changing the `SKILL.md` body or scripts requires a re-import.
+There is **no manual "create Skill" entry point**. The only way to create a Skill is to import a ZIP or Git repository. After importing, only **metadata** (display name, description, icon, category, enabled state, default config) can be adjusted; changing the `SKILL.md` body or scripts requires a re-import.
 </Callout>
 
-The platform supports **Upload Zip** and **Git Repository** imports:
-
-1. Go to **Capabilities** (`/app/capabilities`) and select the **Skills** tab.
+1. Open **Capabilities** (`/app/capabilities`) and switch to the **Skills** tab.
 2. Select **Import Skills** in the top-right corner.
-3. Choose the source:
-   - **Upload Zip**: drop in or select a `.zip` archive containing one or more Skill directories.
-   - **Git Repository**: enter a public HTTPS Git repository URL (`repo_url`) plus an optional branch, tag, or commit (`ref`, such as `main` or `v1.0.0`).
-4. The system extracts the archive and opens the **preview** step, listing the package path, Skill name, mode (instructions / script), and validation status.
-5. Name conflicts and duplicates are flagged in red with the reason. Review the list, tick the entries to install, and select **Install selected**.
+3. Choose a source:
+   - **Zip Upload**: pick a `.zip` containing one or more Skill directories.
+   - **Git Repository**: enter a public HTTPS repository URL and optionally a **branch, tag, or commit** (such as `main` or `v1.0.0`).
+4. Select **Scan Preview**. The preview lists one row per `SKILL.md` directory:
+   - **Package path** and **Skill** (display name plus description).
+   - **Status**: valid, conflict (a Skill with the same name already exists in the team), or duplicate name (the same name appears twice in one source).
+   - **Action**: Install, Update, or Skip.
+5. Non-conflicting entries are ticked by default. Conflicting entries start unticked; to overwrite, tick one and choose **Update** (the new package replaces the same-name Skill, keeping its name and ownership). When a source contains duplicate names, only the first is installed by default.
+6. Select **Install Selected**. The new Skill appears in the list with the status **Enabled**.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/skill-import-dialog.png" alt="Import a Skill package" />
   <figcaption>Import a Skill package</figcaption>
 </figure>
 
-## Sandbox Testing
+## Viewing Skill details
 
-Test a Skill in isolation before binding it to a production Agent:
+Select a Skill card (or its name in the admin panel) to open the detail page, which shows:
 
-1. Find the Skill in the Skills list and select **Test** in the actions column.
-2. Enter the JSON call arguments (`arguments`) in the test drawer.
-3. Select **Run test**:
-   - In `instructions` mode, preview the exact prompt and instructions that will be injected into the Agent.
-   - In `script` mode, the sandbox gateway creates an isolated session, runs the script, and shows status, duration in milliseconds, `stdout`, `stderr`, and the artifact list. Artifacts can be downloaded directly in the UI.
+- **Status** (Enabled / Disabled), **scope** (System / Team), category, version, and source.
+- **Package path**, **parameters** (the input parameter names declared in `SKILL.md`), and the last update time.
+- The **Instructions** body — the full specification the Agent reads before using the Skill.
 
-## Bind a Skill to an Agent
+Use the detail page to verify the description and parameters the Agent will see before going live.
+
+## Binding and calling a Skill in an Agent
 
 1. Open the target Agent's orchestration page (`/app/apps/{agent_id}`).
-2. In the **Tools** section, select **Add tool/Skill** and switch to the **Skills** category.
-3. Tick the Skills to enable. During conversations the Agent decides on its own whether to call the Skill, based on the system prompt and the task.
-4. Once debugging passes, select **Publish**.
+2. In the **Tools** area select **Add tool/Skill** and switch to the **Skills** category.
+3. Pick the Skill to offer. The picker lists only **enabled** Skills.
+4. After saving, the Agent decides during conversations whether to call it, based on the system prompt and the task.
+5. Once debugging passes, select **Publish**.
 
-<Callout type="warn">
-  **Reference protection**: once any Agent binds a Skill, the system **refuses to delete** it and reports a reference conflict. Unbind it in every Agent's orchestration first.
-</Callout>
+## Enabled state
 
-## Scope and Permissions
+Cards and the detail page show **Enabled** / **Disabled**:
 
-- **System Skills**: `team_id` is empty and every team on the platform can see them. Only superadmins can create, edit, import, or delete them in the admin panel.
-- **Team Skills**: bound to one team and visible only to its members. Team administrators and members with `skill:*` permissions manage them.
+- A disabled Skill does not appear in the Agent tool picker, and a Skill that gets disabled after being bound is no longer called at runtime.
+- The UI only displays the state and offers no switch: to disable or re-enable a Skill, a platform administrator changes it through the [Skills API](/api/skills). Newly imported packages are enabled by default.
 
-## API Endpoints
+## Running a test
 
-```http
-# List Skills available to a team (including system Skills)
-GET /api/v1/skills?team_id={team_id}&include_system=true
+A Skill can be exercised in isolation before going live. Tests are started through the test operation of the [Skills API](/api/skills); the UI does not expose a test button yet:
 
-# Preview Zip / Git imports
-POST /api/v1/skills/import/preview-zip
-POST /api/v1/skills/import/preview-git
+- **Instructions mode**: returns the `SKILL.md` instructions so you can preview the context the Agent will read; no code runs.
+- **Script mode**: runs the script in the sandbox and returns success or failure, duration, stdout, stderr, and the artifact list. Artifacts can be downloaded.
+- Arguments must match the structure declared in `SKILL.md`; missing or mistyped arguments fail validation immediately.
 
-# Install Skills from an import session
-POST /api/v1/skills/import/{session_id}/install
+Script-mode Skills depend on the code sandbox being enabled. When the sandbox is unavailable, both tests and runtime calls fail — see [Code sandbox](/usage/concepts/sandbox).
 
-# Read / update / delete a Skill
-GET    /api/v1/skills/{skill_id}?team_id={team_id}
-PATCH  /api/v1/skills/{skill_id}
-DELETE /api/v1/skills/{skill_id}
+## Scope and visibility
 
-# Run a sandbox test
-POST /api/v1/skills/{skill_id}/test
-```
+- **System**: belongs to no team and is available to every team on the platform; only platform administrators can import, maintain, and delete it.
+- **Team**: belongs to one team and is visible only to its members; team administrators manage it.
+- Skills have **no cross-team sharing dialog**: visibility is determined entirely by system or team ownership. To reuse a Skill across teams, have a platform administrator import it as a system Skill.
+- A Skill referenced by an Agent **cannot be deleted**; unbind it in each Agent's configuration first. Only platform administrators can delete system Skills.
 
 ## Troubleshooting
 
 ### Import fails
 
-1. **Zip too large**: confirm the archive is under `50MB` and expands to under `50MB`.
-2. **Missing SKILL.md**: confirm a capitalised `SKILL.md` sits in the directory root and is valid UTF-8 text.
-3. **Invalid frontmatter**: check YAML indentation and confirm the required `name` and `description` fields exist.
-4. **Git timeout**: cloning a public repository times out after `180` seconds; confirm the URL is publicly reachable.
+1. **File too large**: confirm the ZIP is under `50MB` and expands to under `50MB`.
+2. **Missing SKILL.md**: confirm each Skill directory root has an uppercase `SKILL.md` encoded as UTF-8.
+3. **Invalid metadata**: check YAML indentation and confirm `name` and `description` are present, with the name limited to lowercase letters, digits, underscores, and hyphens.
+4. **Git timeout**: cloning a public repository fails after `180` seconds; confirm the repository is publicly reachable and the `ref` exists.
 
 ### Execution errors
 
-1. Select **Test** in the Skills center and read the `stderr` output.
-2. For `script` mode, check that the dependencies declared by the script exist in the runtime.
-3. Check that the arguments match the types declared in `x-clouisle.input_schema`.
+1. Read the standard error returned by the test to locate the script failure.
+2. For script-mode Skills, confirm the declared dependencies can be installed in the sandbox; the platform sandbox must be enabled by an administrator.
+3. Check that arguments match the types and required fields declared in `SKILL.md`.
+
+## Related pages
+
+- [Skills API](/api/skills) — import, read, update, delete, and test endpoints
+- [Custom HTTP and Code Tools](./custom-tools.mdx) — HTTP, database, and MCP tools
+- [Code sandbox](/usage/concepts/sandbox) — sandbox environment and limits
+- [Create and Orchestrate an Agent](/usage/guides/agent/create-agent) — orchestration, tool binding, and publishing

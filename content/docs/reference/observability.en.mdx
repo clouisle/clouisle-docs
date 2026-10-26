@@ -19,6 +19,21 @@ The `summary`, `runs`, and `dependencies` endpoints share one time-window model:
 
 Invalid window parameters return `422`.
 
+## Console Views
+
+The admin **Observability** page (`/dashboard/observability`) has six views that share the top time range:
+
+| View | Content |
+| --- | --- |
+| Overview | Agent and workflow throughput, success rates, latency, tokens, and recent trends |
+| Runs | Filterable run list; open a run for its detail |
+| Dependencies | Model, tool, and retrieval aggregates |
+| Queues | Worker and queue snapshots |
+| Infrastructure | API instances, dependency health, and PostgreSQL slow queries |
+| Alerts | Alert events and rules |
+
+The time-range button opens a **two-month calendar**: after you pick dates and apply, both ends include their whole local day in the browser time zone (including daylight-saving transitions); cancelling or dismissing keeps the applied interval. The popover's quick ranges apply the last 15 minutes, 1 hour, or 24 hours. Custom intervals travel as `period=custom` plus ISO 8601 `start_time` / `end_time`, normalized to UTC by the backend; missing, naive, equal, or reversed bounds, or explicit bounds combined with a preset, return `422`. The URL preserves the interval across reloads, view changes, and run pagination. Telemetry retention is `30` days, and choosing an older interval does not restore expired samples.
+
 ## Run Summary
 
 Endpoint: `GET /api/v1/admin/observability/summary`
@@ -46,14 +61,19 @@ Detail endpoint: `GET /api/v1/admin/observability/runs/{source}/{run_id}`
 - `{source}` accepts only `agent` or `workflow` (not `all`); `run_id` is a UUID.
 - Unknown runs return `404`. Permission is checked before any trace content loads.
 
+On-demand payload endpoints (read permission; `404` when not captured or absent):
+
+- `GET /api/v1/admin/observability/runs/{source}/{run_id}/tools/{tool_call_id}`: load one recorded tool input/result pair; only `agent` runs record tool payloads, and other sources return `404`.
+- `GET /api/v1/admin/observability/runs/{source}/{run_id}/trajectory/{entry_id}`: load one model, tool, or workflow-node snapshot.
+
 ## Dependency Aggregates
 
 Endpoint: `GET /api/v1/admin/observability/dependencies`
 
-Accepts the same time-window parameters as `summary`. Returns model, tool, and retrieval aggregates when supported by recorded telemetry.
+Accepts the same time-window parameters as `summary`. Returns `models`, `tools`, and `retrieval` groups, each with requests, completed, failed, success rate, `p50`/`p95` latency, tokens, and sample count (the model group also reports first-token `p95`).
 
-<Callout type="warn">
-Tool and retrieval child spans are not yet captured, so their aggregates are reported as unavailable rather than inferred.
+<Callout type="info">
+  AgentRun tool and retrieval spans are captured and included in these aggregates. Each run retains at most `128` dependency spans; run detail marks a trace exceeding the cap as incomplete, so aggregates only reflect the retained samples, and historical runs are not backfilled.
 </Callout>
 
 ## Queue and Infrastructure Snapshots
@@ -102,5 +122,5 @@ Alert rules are evaluated on alert reads, so evaluation depends on the API being
 ## Recording Boundaries
 
 - Run summaries live in compact indexed records kept for `30` days; historical runs without submission timestamps are not backfilled.
-- Only allowlisted fields are recorded: timing, status, model name, token counts, resource/team identifiers, and error codes. Prompts, message bodies, tool arguments/results, credentials, and tracebacks are never stored.
-- New agent records include model aggregates and a safe root run span; tool/retrieval child spans and their aggregates are not captured and are marked unavailable.
+- Run summaries only write allowlisted fields: timing, status, model name, token counts, resource/team identifiers, and error codes. Diagnostic payloads — tool inputs/results and model or node trajectories — are stored on demand with size bounds (one tool payload is capped at `256 KiB`; larger ones are marked as not recorded) and may contain user messages, retrieved documents, and tool output. Holding `admin:dashboard:access` therefore grants privileged access to potentially sensitive runtime content, not just aggregate metrics.
+- New agent records include model aggregates and a safe root run span; tool and retrieval child spans are captured, each run retains at most `128` dependency spans, a trace beyond the cap is marked incomplete, and historical runs are not backfilled.

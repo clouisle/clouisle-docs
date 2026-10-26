@@ -21,9 +21,18 @@ Two capacity settings live in the same category: `kb_document_max_upload_size_mb
 | `postgres_data` | `db` (`/var/lib/postgresql/data`) | Business, audit, configuration, and metadata |
 | `qdrant_data` | `qdrant` (`/qdrant/storage`) | Vector collections |
 | `redis_data` | `redis` (`/data`) | Redis persisted data and task/session state |
-| `uploads_data` | `api` (`/app/uploads`) | User uploads and sandbox artifacts |
+| `uploads_data` | `api` (`/app/uploads`) | User uploads and sandbox artifacts; mounted only by `api` |
+| `sandbox_data` | `sandbox-worker` (`/var/lib/clouisle/sandbox`) | Sandbox session workspaces and checkpoints; exactly one service instance may mount it |
 
-Kubernetes has the matching three PVCs: `postgres-data` (`10Gi`, `RWO`), `qdrant-data` (`10Gi`, `RWO`), and `uploads-data` (`10Gi`, `RWX`, mounted only by `api`). The single-file manifest gives Redis an `emptyDir` (no persistence); Helm defaults to a `5Gi` PVC for Redis.
+`worker` and `sandbox-worker` do **not** mount `uploads_data`: they set `UPLOAD_STORAGE_MODE=remote` and reach the API's authenticated file gateway through `API_INTERNAL_BASE_URL` and `INTERNAL_API_TOKEN`.
+
+`sandbox_data` is a node-local disk, not shared storage. The Compose service comment already states that one service owns this disk and it must not be scaled with a shared named volume; to get more sandbox concurrency, raise the slot count (`SANDBOX_WORKER_CONCURRENCY`) or deploy another independent worker instead of reusing the same volume.
+
+Kubernetes equivalents: the single-file manifest has `postgres-data` (`10Gi`, `RWO`), `qdrant-data` (`10Gi`, `RWO`), and `uploads-data` (`10Gi`, `RWX`, mounted only by `api`). Sandbox data is not a PVC: the DaemonSet mounts the node-local `hostPath` `/var/lib/clouisle/clouisle/sandbox`. Helm overrides it with `sandboxWorker.localDataPath`, defaulting to `/var/lib/clouisle/<namespace>/<release>/sandbox`; never share that path between releases or installations. Redis uses `emptyDir` in the single-file manifest (no persistence); Helm defaults to a `5Gi` PVC.
+
+<Callout type="error" title="Node-local data does not migrate">
+  Sandbox sessions and checkpoints are bound to the node disk that produced them. Once a node goes down, its disk fails, or the `hostPath` is cleaned, those sessions cannot be recovered on another node. To keep session output, upload or export it to object storage rather than backing up the `hostPath`.
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/storage-settings-and-volumes.svg" alt="Storage settings and deployment volumes" />
@@ -32,7 +41,7 @@ Kubernetes has the matching three PVCs: `postgres-data` (`10Gi`, `RWO`), `qdrant
 
 ## Scaling Rules
 
-Worker and Sandbox Worker can scale independently. `beat` must run exactly one replica. Multiple API replicas require shared upload storage or object storage; scale Qdrant and PostgreSQL according to their own high-availability schemes.
+Worker and Sandbox Worker can scale independently, but differently: `worker` is stateless, so add replicas; `sandbox-worker` is bound to node-local disk and can only grow by adding nodes, never by sharing a volume across replicas. `beat` must run exactly one replica. Multiple API replicas require shared upload storage or object storage; scale Qdrant and PostgreSQL according to their own high-availability schemes.
 
 The worker consumes the `default,agent,knowledge,workflow` queues by default. When one class of task backs up under load, start a dedicated worker for a single queue — for example `-Q agent` to grow AgentRun execution, or `-Q knowledge` for knowledge base processing.
 
@@ -40,4 +49,4 @@ Before scaling, confirm the database connection budget: PostgreSQL defaults to `
 
 ## Capacity Checks
 
-Monitor the PostgreSQL database, pg_search indexes, Qdrant collections, Redis memory, and the upload directory. Document count growth increases capacity for raw files, chunks, Token statistics, vectors, and full-text indexes simultaneously.
+Monitor the PostgreSQL database, pg_search indexes, Qdrant collections, Redis memory, the upload directory, and free disk on every `sandbox-worker` node. Document count growth increases capacity for raw files, chunks, Token statistics, vectors, and full-text indexes simultaneously; sandbox growth comes from session workspaces, checkpoint caches, and artifacts, bounded by `SANDBOX_MAX_DISK_MB` (default `8192`) and `SANDBOX_SESSION_TTL_HOURS` (default `24`).

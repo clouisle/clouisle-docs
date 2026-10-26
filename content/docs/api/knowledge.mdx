@@ -165,11 +165,19 @@ curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/documents/u
 POST /api/v1/knowledge-bases/{kb_id}/documents/url
 ```
 
-请求体：
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 文档名称（`1-255` 字符） |
+| `source_url` | string | 否 | 网页或 YouTube 地址（最多 1024 字符），导入后由服务端处理时抓取 |
+| `doc_type` | string | 否 | 文档类型，默认 `url` |
 
 ```json
 {"name": "页面标题", "source_url": "https://example.com/page", "doc_type": "url"}
 ```
+
+创建的文档状态为 `pending`，需要再调用处理端点才会抓取、切分并索引。
 
 ### 列出文档
 
@@ -253,13 +261,23 @@ POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process
 POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process-with-chunks
 ```
 
-请求体包含自定义分块数组：
+请求体包含自定义分块数组，以及可选的批次聚合字段：
 
 ```json
-{"chunks": [{"content": "分块文本", "chunk_index": 0}]}
+{
+  "chunks": [{"content": "分块文本", "chunk_index": 0}],
+  "batch_id": "0f7c2b1e-8a44-4c1f-9a0e-2d5c8f6b1a33",
+  "batch_total": 3
+}
 ```
 
-这会替换文档分块并开始嵌入。
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `chunks` | array | 是 | 分块数组，至少 1 项；每项含 `content`（非空）与从 `0` 开始的 `chunk_index` |
+| `batch_id` | UUID | 否 | 同一批文档共用的批次 ID，用于把完成通知聚合成一条 |
+| `batch_total` | integer | 否 | 该批次的文档总数，需与 `batch_id` 一起提供 |
+
+这会替换文档分块并开始嵌入。服务端用 Redis 计数（`kb_batch:{batch_id}:remain`、`:total`、`:success`、`:failed`，TTL 7200 秒）跟踪进度，在最后一篇完成时发送一条汇总通知（全部成功、全部失败或部分成功，部分成功时以失败通知优先；具体的通知开关与文案由站点通知配置决定）。不带 `batch_id` 时每篇文档各自通知。
 
 ### 预览分块
 
@@ -331,12 +349,57 @@ curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/search" \
   -d '{"query": "如何重置密码？", "search_mode": "hybrid", "top_k": 5}'
 ```
 
-查询长度限制为 1-1000 字符；混合检索时 `dense_weight` 与 `lexical_weight` 不能同时为 0。
+查询长度限制为 1-1000 字符；混合检索时 `dense_weight` 与 `lexical_weight` 不能同时为 0。该端点一次只检索路径中的这一个知识库；Agent/工作流跨多个知识库时的全局融合与统一重排只在服务内部执行。
 
-响应 `results` 数组中每个结果包含 `chunk_id`、`document_id`、`document_name`、`content`、`score`、`metadata`、`search_type`，以及各阶段分数：`dense_score`、`lexical_score`、`fusion_score`、`rerank_score`、`rerank_rank`。`timings` 数组记录 `recall`、`rerank`、`total` 各阶段延迟（毫秒）。
+响应结构：
+
+| 字段 | 说明 |
+| --- | --- |
+| `query` | 原查询 |
+| `results` | 结果数组，见下 |
+| `total` | 结果条数 |
+| `diagnostics` | 逐知识库诊断（`kb_id`、`code`、`detail`、`stage`） |
+| `timings` | 分阶段延迟（毫秒）：`recall`、`rerank`、`context`、`total` |
+
+每个结果包含 `chunk_id`、`document_id`、`document_name`、`content`、`score`、`metadata`、`search_type`，以及各阶段取值：`dense_score`/`dense_rank`、`lexical_score`/`lexical_rank`、`fusion_score`/`fusion_rank`、`rerank_score`/`rerank_rank`/`rerank_reason`、`final_score_stage`（`dense`/`lexical`/`fusion`/`rerank`），以及通道降级原因 `degradation_reasons`（例如全文召回失败但仍返回向量结果）。未命中某通道时，对应分数字段为 `null`。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "query": "如何重置密码？",
+    "total": 1,
+    "results": [
+      {
+        "chunk_id": "chunk-012",
+        "document_id": "doc-789",
+        "document_name": "账号手册",
+        "content": "在个人设置中点击重置密码……",
+        "score": 0.032,
+        "search_type": "hybrid",
+        "dense_score": 0.86,
+        "dense_rank": 1,
+        "lexical_score": 4.12,
+        "lexical_rank": 2,
+        "fusion_score": 0.032,
+        "fusion_rank": 1,
+        "final_score_stage": "fusion"
+      }
+    ],
+    "diagnostics": [],
+    "timings": [
+      {"stage": "recall", "latency_ms": 120.4},
+      {"stage": "rerank", "latency_ms": 0},
+      {"stage": "context", "latency_ms": 1.8},
+      {"stage": "total", "latency_ms": 127.9}
+    ]
+  },
+  "msg": "success"
+}
+```
 
 <Callout type="warn">
-  混合检索模式下，`dense_weight` 与 `lexical_weight` 不能同时为 `0`，否则请求会被拒绝。
+  混合检索模式下，`dense_weight` 与 `lexical_weight` 不能同时为 `0`，否则请求会被拒绝。混合模式还受站点灰度控制：团队未命中灰度时会静默降级为纯向量，响应不会带单独的降级标记。
 </Callout>
 
 ### 多配置对比检索
@@ -345,7 +408,21 @@ curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/search" \
 POST /api/v1/knowledge-bases/{kb_id}/search/batch
 ```
 
-请求体为检索配置数组，每种配置独立执行并返回结果，用于对比不同参数的效果。
+同一查询、多套配置独立执行，用于对比参数效果：
+
+```json
+{
+  "query": "如何重置密码？",
+  "configurations": [
+    {"id": "baseline", "search_mode": "hybrid", "top_k": 5},
+    {"id": "dense-only", "search_mode": "vector", "top_k": 5, "score_threshold": 0.6}
+  ]
+}
+```
+
+- `configurations` 最多 `10` 项，每项 `id` 必填（最多 64 字符）且必须唯一；配置字段与单次检索相同。
+- 响应为 `{ "query": "...", "outcomes": [...] }`，`outcomes` 与请求顺序一致，每项带 `id` 与 `status`：`fulfilled` 时附完整 `response`（结构同单次检索），`rejected` 时附 `error`（`code`、`retrieval_error_category`、`stage`）。
+- 某一套配置失败不会影响其他配置的结果。
 
 ## 跨团队共享知识库
 

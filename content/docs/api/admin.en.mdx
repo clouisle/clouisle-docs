@@ -4,7 +4,7 @@ description: Admin panel endpoint groups, permission codes, and usage boundaries
 icon: ShieldCheck
 ---
 
-Admin routes are mounted under `/api/v1/admin` and cover dashboards, observability, audit logs, conversations, users, roles, permissions, site settings, models, SSO, notifications, teams, memory, Agents, tools, Skills, workflows, workflow metrics, TOTP, packages, and knowledge bases. They are used by the admin panel and return the unified `code`/`data`/`msg` envelope. They are not public APIs for anonymous calls.
+Admin routes are mounted under `/api/v1/admin` and cover dashboards, observability, audit logs, conversations, users, roles, permissions, site settings, models, SSO, notifications, teams, memory, Agents, tools, Skills, workflows, workflow metrics, TOTP, packages, knowledge bases, and messaging deliveries. They are used by the admin panel and return the unified `code`/`data`/`msg` envelope. They are not public APIs for anonymous calls.
 
 ## Permission Model
 
@@ -34,6 +34,7 @@ Every endpoint declares the permission code it requires (`admin:*` or `audit:*`)
 | Models | `/api/v1/admin/models` | `admin:model:read`, `admin:model:create`, `admin:model:update`, `admin:model:delete` |
 | Integrations | `/api/v1/admin/integrations` | `admin:integrations:login:read/update` (login domain), `admin:integrations:settings:read/update` (builtin-config domain) |
 | Notifications | `/api/v1/admin/notifications` | `admin:notification:create` (create), `admin:notification:delete` (delete); listing narrows to global admin access or an authorized team |
+| Messaging deliveries | `/api/v1/admin/deliveries` | `admin:integrations:settings:read` (read-only) |
 | Teams | `/api/v1/admin/teams` | `admin:team:read`, `admin:team:create`, `admin:team:delete` |
 | Memories | `/api/v1/admin/memories` | `admin:memory:read`, `admin:memory:update`, `admin:memory:delete` |
 | Agents | `/api/v1/admin/agents` | `admin:app:read`, `admin:app:create`, `admin:app:update`, `admin:app:delete`, `admin:app:publish`, `admin:app:duplicate` |
@@ -74,6 +75,7 @@ Every endpoint declares the permission code it requires (`admin:*` or `audit:*`)
 | GET | `/api/v1/admin/workflows/filters` | Workflow filter options |
 | GET | `/api/v1/admin/totp/stats` | TOTP usage statistics |
 | GET | `/api/v1/admin/notifications` | Admin-view notification list |
+| GET | `/api/v1/admin/deliveries` | Feishu/WeChat Agent-chat outbound delivery records |
 | GET | `/api/v1/admin/knowledge-bases` | Cross-team knowledge-base list |
 
 ## Workflow Metrics
@@ -94,6 +96,108 @@ Workflow execution metrics are **not** under `/api/v1/workflows`; they live unde
 curl -X GET "https://your-domain.com/api/v1/admin/workflows/metrics/dashboard" \
   -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
 ```
+
+## Messaging Delivery Log [#delivery-log]
+
+`GET /api/v1/admin/deliveries` reads the durable outbound queue `integration_deliveries` shared by Feishu and WeChat Agent chat. It is **read-only** and requires `admin:integrations:settings:read`; superusers bypass the check. Message text, provider resource keys (`media_key`), credentials, and file contents are never returned. The admin panel's **Monitoring** > **Delivery log** (`/deliveries`) page uses the same endpoint.
+
+`sent` only means the provider accepted the reply request; it does not mean the recipient read the message, opened a card, or downloaded an artifact.
+
+### Query parameters
+
+| Parameter | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `provider_type` | repeated `feishu` / `wechat` | No | - | Filter by integration; repeating the parameter matches any listed value (OR) |
+| `status` | repeated `pending` / `sending` / `sent` / `error` / `unavailable` / `unknown` | No | - | Filter by delivery state; repeating the parameter matches any listed value (OR) |
+| `run_id` | string (UUID) | No | - | Exact filter on the originating AgentRun |
+| `filename` | string (1–500) | No | - | Case-insensitive substring filter on artifact file names |
+| `limit` | integer (1–100) | No | `25` | Page size |
+| `offset` | integer (≥ 0) | No | `0` | Page offset |
+
+Values inside `provider_type` and inside `status` are ORed; the two filters are combined with AND. The response is `{items, total, limit, offset}`, ordered by `created_at` and `id` descending.
+
+```bash
+curl -X GET "https://your-domain.com/api/v1/admin/deliveries?provider_type=feishu&provider_type=wechat&status=error&status=unknown&limit=25&offset=0" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "provider_type": "feishu",
+        "run_id": "1c2f1a2e-0f4e-4a8f-9d4a-2b0d7b3dcb6d",
+        "user_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+        "agent_id": "550e8400-e29b-41d4-a716-446655440000",
+        "chat_id": "oc_xxx",
+        "message_id": "om_xxx",
+        "event_key": "final-asset",
+        "sequence": 0,
+        "kind": "asset",
+        "filename": "report.pdf",
+        "content_type": "application/pdf",
+        "size": 12345,
+        "media_type": "file",
+        "status": "error",
+        "error": "feishu_agent_asset_upload_failed",
+        "error_detail": "FeishuAPIError: Feishu API error 234001: Invalid request param. | HTTP 400 | code 234001 | {...}",
+        "has_media_key": false,
+        "created_at": "2026-10-22T10:03:13Z",
+        "updated_at": "2026-10-22T10:03:13Z"
+      }
+    ],
+    "total": 1,
+    "limit": 25,
+    "offset": 0
+  },
+  "msg": "success"
+}
+```
+
+### States
+
+| State | Meaning |
+| --- | --- |
+| `pending` | Queued, not yet claimed by a sender; preserved across restarts and feature pauses |
+| `sending` | Claimed by one worker under a lease; an expired lease becomes `unknown` and is never resent automatically |
+| `sent` | The provider accepted the reply request |
+| `error` | A permanent failure, such as a provider rejection or unavailable artifact |
+| `unavailable` | The run finished but the reply must not be sent (channel disabled, access revoked, missing conversation context) |
+| `unknown` | A timeout after transmission; the result is uncertain and must not be resent blindly |
+
+### Fields and errors
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string (UUID) | Delivery row ID |
+| `provider_type` | string | `feishu` or `wechat` |
+| `run_id` / `user_id` / `agent_id` | string (UUID) \| null | Originating AgentRun, connected user, Agent |
+| `chat_id` / `message_id` | string \| null | Provider conversation ID / message ID |
+| `event_key` | string | Event key, such as `received`, `final`, `final-asset`, or `ask:<tool-call>` |
+| `sequence` | integer | Chunk order within the same event |
+| `kind` | string | `text`, `markdown`, `asset`, and so on |
+| `filename` / `content_type` / `size` | string / string / integer \| null | Artifact name, MIME type, and size in bytes |
+| `media_type` | string \| null | Provider media type |
+| `status` | string | One of the states above |
+| `error` | string \| null | Stable failure key used for behaviour and localization |
+| `error_detail` | string \| null | Provider's original error: message, HTTP status, code, and response excerpt |
+| `has_media_key` | boolean | Whether a provider resource key is stored; the key itself is never returned |
+| `created_at` / `updated_at` | string (ISO 8601) | Creation and last update timestamps |
+
+`error` is a stable machine-readable key (for example `feishu_agent_asset_upload_failed`); `error_detail` preserves the provider's original text, HTTP status, and code so operators can diagnose permissions, parameters, or size limits.
+
+<Callout type="warn" title="Not the notification delivery table">
+  `GET /api/v1/admin/deliveries` and `integration_deliveries` cover only Feishu/WeChat Agent chat. In-app notifications sent externally through email / webhook / feishu are recorded in `notification_deliveries` and read through `deliveries[]` on the notification admin APIs. WeChat is not a notification channel.
+</Callout>
+
+### Upgrade relationship
+
+The single table `integration_deliveries` replaces the former `feishu_agent_deliveries` and `wechat_agent_deliveries`. On first startup the API copies rows from the old tables and drops them, so **the API, every worker, and Beat must run matching versions**; an older process would write to a dropped table. Restoring the old image alone cannot recreate the queue table; rolling back requires the database backup taken before the upgrade.
+
+Page behaviour, filters, and troubleshooting are documented in the [Delivery log](../usage/guides/integrations/delivery-log.mdx).
 
 ## Request Example
 

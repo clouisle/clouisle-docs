@@ -33,6 +33,10 @@ icon: Wrench
 | GET | `/api/v1/tools/shared-with-me?team_id={team_id}` | 查询共享给指定团队的工具 |
 | POST | `/api/v1/tools/mcp/list-tools` | 动态发现 MCP Server 的工具定义 |
 | POST | `/api/v1/tools/database/test-connection` | 测试数据库连通性 |
+| GET | `/api/v1/tools/web-search/engines` | 列出站点已启用的搜索引擎（仅标识） |
+| GET | `/api/v1/admin/tools/web-search/config` | 读取站点网页搜索配置（密钥只返回是否已配置） |
+| PUT | `/api/v1/admin/tools/web-search/config` | 更新站点网页搜索配置 |
+| POST | `/api/v1/admin/tools/web-search/test` | 用已保存的站点配置执行一次检索验证 |
 
 ## 身份验证
 
@@ -94,11 +98,18 @@ curl -X GET "https://your-domain.com/api/v1/tools?category=search" \
             "required": true
           },
           {
-            "name": "max_results",
+            "name": "num_results",
             "type": "integer",
             "description": "Maximum number of results",
             "required": false,
             "default": 5
+          },
+          {
+            "name": "search_engine",
+            "type": "string",
+            "description": "auto or a site-enabled engine",
+            "required": false,
+            "default": "auto"
           }
         ],
         "is_enabled": true,
@@ -255,7 +266,8 @@ curl -X GET "https://your-domain.com/api/v1/tools/id/tool-123" \
   "name": "web_search",
   "arguments": {
     "query": "artificial intelligence",
-    "max_results": 5
+    "num_results": 5,
+    "search_engine": "auto"
   }
 }
 ```
@@ -267,6 +279,10 @@ curl -X GET "https://your-domain.com/api/v1/tools/id/tool-123" \
 | `name` | string | 是 | 工具名称 |
 | `arguments` | object | 否 | 工具参数 |
 
+<Callout type="info" title="web_search 的参数">
+  `web_search` 的参数是 `query`、`num_results`（默认 `5`，最大 `10`）和 `search_engine`（`auto` 或某个已启用的引擎）。测试页只列出站点已启用的引擎；引擎被禁用或缺少凭据时，响应的 `data.success` 为 `false` 并带错误信息，不会自动回退。
+</Callout>
+
 ### 请求示例
 
 ```bash
@@ -277,7 +293,8 @@ curl -X POST "https://your-domain.com/api/v1/tools/test" \
     "name": "web_search",
     "arguments": {
       "query": "artificial intelligence",
-      "max_results": 5
+      "num_results": 5,
+      "search_engine": "auto"
     }
   }'
 ```
@@ -293,11 +310,16 @@ curl -X POST "https://your-domain.com/api/v1/tools/test" \
     "name": "web_search",
     "success": true,
     "result": {
+      "query": "artificial intelligence",
+      "success": true,
+      "search_engine": "tavily",
       "results": [
         {
           "title": "Artificial Intelligence - Wikipedia",
           "url": "https://en.wikipedia.org/wiki/Artificial_intelligence",
-          "snippet": "Artificial intelligence (AI) is intelligence demonstrated by machines..."
+          "content": "Artificial intelligence (AI) is intelligence demonstrated by machines...",
+          "score": 0.93,
+          "citation_id": "web_..."
         }
       ]
     },
@@ -674,7 +696,7 @@ DELETE /api/v1/tools/{tool_id}/share/{team_id}
 
 ## 工具配置（凭证）
 
-工具配置用于为内置工具或数据库工具存储凭证（API Key、Token 等），可以全局（仅超级管理员）或按团队存储。
+工具配置用于为**内置工具**存储凭证（API Key、Token 等），可以全局（仅超级管理员）或按团队存储。自定义工具的凭据保存在工具自身记录里，不走这里；网页搜索已改为站点级配置。
 
 ```
 GET    /api/v1/tools/config?team_id={team_id}
@@ -687,15 +709,15 @@ DELETE /api/v1/tools/config/{tool_name}?team_id={team_id}
 | 参数 | 位置 | 必填 | 描述 |
 | --- | --- | --- | --- |
 | `team_id` | 查询参数 | 否 | 团队 UUID；省略时操作全局配置（仅超级管理员） |
-| `tool_name` | 路径参数 | 是（get/put/delete） | 工具名，例如 `web_search` |
+| `tool_name` | 路径参数 | 是（get/put/delete） | 工具名 |
 
 创建请求体：
 
 ```json
 {
-  "tool_name": "web_search",
+  "tool_name": "example_tool",
   "credentials": {
-    "TAVILY_API_KEY": "tvly-..."
+    "API_KEY": "..."
   }
 }
 ```
@@ -705,7 +727,7 @@ DELETE /api/v1/tools/config/{tool_name}?team_id={team_id}
 ```json
 {
   "credentials": {
-    "TAVILY_API_KEY": "tvly-updated"
+    "API_KEY": "..."
   }
 }
 ```
@@ -716,6 +738,100 @@ DELETE /api/v1/tools/config/{tool_name}?team_id={team_id}
 - 不带 `team_id` 时，读取与写入都仅限超级管理员。
 - 读取某个已知内置工具名但尚无记录的团队配置时，会自动创建一份空配置；未知工具名返回 `404`。
 - 删除成功时 `data` 为 `null`。
+
+<Callout type="warn">
+  通用工具配置接口**不接受 `web_search`**：`GET/PUT/DELETE /api/v1/tools/config/web_search` 返回 `400 web_search_site_managed`，列表接口也会过滤掉这条记录。搜索凭据只在站点级配置，见下一节。
+</Callout>
+
+## 站点网页搜索配置
+
+网页搜索由站点持有唯一一份配置，团队和 Agent 只能选择已启用的引擎。
+
+### 读取配置
+
+```
+GET /api/v1/admin/tools/web-search/config
+```
+
+权限：`admin:capability:read`。
+
+```json
+{
+  "code": 0,
+  "data": {
+    "default_engine": "tavily",
+    "tavily_enabled": true,
+    "bocha_enabled": false,
+    "searxng_enabled": false,
+    "deepseek_enabled": false,
+    "tavily_api_key_configured": true,
+    "bocha_api_key_configured": false,
+    "deepseek_api_key_configured": false,
+    "searxng_base_url": "",
+    "searxng_auth_token_configured": false,
+    "legacy_credentials_present": false
+  },
+  "msg": "success"
+}
+```
+
+密钥字段只以 `*_configured` 布尔值出现，接口永不返回明文。`legacy_credentials_present` 表示存在升级时归档的旧团队/Agent 凭据。站点从未保存过配置时，`default_engine` 读取结果为回退值 `tavily`，四个 `*_enabled` 与所有 `*_configured` 都是 `false`，`searxng_base_url` 为空字符串。
+
+### 更新配置
+
+```
+PUT /api/v1/admin/tools/web-search/config
+```
+
+权限：`admin:capability:update`。请求体字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `default_engine` | string | 是 | `tavily`、`bocha`、`searxng` 或 `deepseek`，必须是已启用的引擎 |
+| `tavily_enabled` | boolean | 是 | 启用 Tavily |
+| `bocha_enabled` | boolean | 是 | 启用博查 |
+| `searxng_enabled` | boolean | 是 | 启用自建 SearXNG |
+| `deepseek_enabled` | boolean | 是 | 启用 DeepSeek Search |
+| `tavily_api_key` | string/null | 否 | 只写，最长 `1024` 字符 |
+| `bocha_api_key` | string/null | 否 | 只写，最长 `1024` 字符 |
+| `deepseek_api_key` | string/null | 否 | 只写，最长 `1024` 字符 |
+| `searxng_base_url` | string/null | 否 | 实例根地址，最长 `2048` 字符；可含反向代理子路径，不能含 `/search`、查询串、片段或用户名密码 |
+| `searxng_auth_token` | string/null | 否 | 只写；可选 Bearer，要求 Base URL 为 HTTPS |
+
+密钥的部分更新语义：**省略或 `null` 保留**现有值，**空字符串 `""` 清除**，非空字符串替换。`searxng_base_url` 也支持用空字符串清除。请求体是严格模式（`extra="forbid"`），未知字段返回校验错误。
+
+保存时的校验：
+
+- 启用 `tavily` / `bocha` / `deepseek` 却没有对应密钥 → `web_search_engine_not_configured`。
+- 启用 `searxng` 却没有 Base URL → `web_search_searxng_base_url_required`；配了 Token 但 Base URL 不是 HTTPS → `web_search_searxng_https_required`。
+- `default_engine` 非法或指向未启用引擎 → `web_search_default_engine_invalid` / `web_search_default_engine_disabled`。
+- SearXNG Base URL 形状非法 → `web_search_searxng_base_url_invalid`；已存 Token 时改 Base URL 必须在同一请求替换或清除 Token，否则 `web_search_searxng_token_confirmation_required`。
+- 启用的 SearXNG 地址会在保存和每次请求时经过 SSRF 校验。
+
+### 测试已保存配置
+
+```
+POST /api/v1/admin/tools/web-search/test
+```
+
+权限：`admin:capability:execute`。
+
+```json
+{
+  "query": "上海天气 今天",
+  "engine": "auto"
+}
+```
+
+`query` 为 `1-1000` 字符且不能为空白；`engine` 默认 `auto`，也可以指定某个引擎。响应 `data` 与工具运行结果同构：`query`、`success`、`search_engine`、`results`（`title`、`url`、`content`、`score`、`citation_id`），失败时带 `error` 与 `success: false`。该端点使用**已保存**的站点配置，不会接收临时密钥。
+
+### 列出可用引擎
+
+```
+GET /api/v1/tools/web-search/engines
+```
+
+权限：`tool:read`。只返回站点已启用的引擎标识数组，例如 `["tavily", "deepseek"]`；`auto`、密钥配置状态和 SearXNG 地址都不会出现在这里。Agent 与工作流的引擎下拉即基于该接口。
 
 ## MCP 与数据库工具诊断
 
@@ -851,7 +967,7 @@ for tool in tools:
 result = test_tool(
     "YOUR_TOKEN",
     "web_search",
-    {"query": "artificial intelligence", "max_results": 5}
+    {"query": "artificial intelligence", "num_results": 5, "search_engine": "auto"}
 )
 print(f"Search results: {result['results']}")
 ```
@@ -913,7 +1029,7 @@ tools.forEach(tool => {
 const result = await testTool(
   'YOUR_TOKEN',
   'web_search',
-  { query: 'artificial intelligence', max_results: 5 }
+  { query: 'artificial intelligence', num_results: 5, search_engine: 'auto' }
 );
 console.log('Search results:', result.results);
 ```

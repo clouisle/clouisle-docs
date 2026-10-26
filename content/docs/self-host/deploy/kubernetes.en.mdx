@@ -12,7 +12,9 @@ External service requirements: PostgreSQL `17+` with `pg_search` (0.24.3) and `p
 
 The single-file manifest creates three PVCs by default: `postgres-data` (`10Gi`, `RWO`), `qdrant-data` (`10Gi`, `RWO`), and `uploads-data` (`10Gi`, `RWX`, mounted by the API at `/app/uploads` only). Redis persistence differs: the single-file manifest uses `emptyDir` (cache recoverable), while Helm defaults to a `5Gi` PVC.
 
-Default replicas: api `2`, worker `2`, sandbox-worker `1`, beat `1` (`Recreate` strategy), frontend `2`. The manifest has no HPA; replicas are static and adjusted with `kubectl scale`.
+Sandbox data is not on a PVC: `sandbox-worker` is a DaemonSet, and each node mounts the `hostPath` `/var/lib/clouisle/clouisle/sandbox` (`type: DirectoryOrCreate`) at `/var/lib/clouisle/sandbox`. Helm overrides it with `sandboxWorker.localDataPath`, defaulting to `/var/lib/clouisle/<namespace>/<release>/sandbox`; **never share that path between releases or installations**. Once a node is lost, its disk fails, or the directory is cleaned, the sandbox sessions and checkpoints on that node cannot be recovered elsewhere.
+
+Default replicas: api `2`, worker `2`, sandbox-worker `1` per node, beat `1` (`Recreate` strategy), frontend `2`. The manifest has no HPA; replicas are static and adjusted with `kubectl scale`.
 
 ## ConfigMap and Secret
 
@@ -27,6 +29,8 @@ Every key in `clouisle-config` must match the manifest (pods inject the whole Co
 | `PUBLIC_API_URL` | `""` | Set when you deploy behind a public domain |
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | `http://api:8000` | Sandbox artifact uploads |
 | `SANDBOX_WORKER_CONCURRENCY` | `"1"` | Sandbox worker concurrency (consumed by `${SANDBOX_WORKER_CONCURRENCY:-1}` in the command) |
+| `SANDBOX_WORKSPACE_ROOT` / `SANDBOX_CHECKPOINT_ROOT` | `/var/lib/clouisle/sandbox/jobs` / `/var/lib/clouisle/sandbox/checkpoints` | Shared virtual paths seen by the API and workers; only `sandbox-worker` mounts the physical disk |
+| `WECHAT_POLL_BATCH_SIZE` / `WECHAT_POLL_CONCURRENCY` / `WECHAT_POLL_MAX_BATCHES` | `"64"` / `"16"` / `"8"` | WeChat polling batch size, concurrency, and in-flight batch cap |
 | `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `"true"` | Turn on bwrap filesystem isolation |
 | `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `"/usr/bin/bwrap"` | Absolute bubblewrap path inside the image |
 | `FRONTEND_URL` | `http://frontend:3000` | SSO redirect base |
@@ -39,6 +43,10 @@ Every key in `clouisle-config` must match the manifest (pods inject the whole Co
 `clouisle-secret` holds 6 keys that **must be replaced**: `SECRET_KEY`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `QDRANT_API_KEY`, `INTERNAL_API_TOKEN`, `SANDBOX_ARTIFACT_UPLOAD_API_KEY`. The template values are Base64 placeholders; when editing by hand, generate them with `echo -n 'value' | base64`.
 
 `API`, `Worker`, `Sandbox Worker`, and `Beat` all carry a `wait-for-postgres` initContainer that blocks on `pg_isready`. The API readiness/liveness probes are `GET /api/v1/health:8000` (`initialDelaySeconds` 10/20) and the frontend probes are `GET /:3000`. Worker and sandbox-worker read the internal token through `INTERNAL_API_TOKEN_FILE=/var/run/secrets/clouisle/internal-api-token` (mounted from the Secret) and set `UPLOAD_STORAGE_MODE=remote`.
+
+`sandbox-worker` runs as a DaemonSet with `terminationGracePeriodSeconds: 35` and a `securityContext` of `runAsUser: 0`, `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]` plus `add: [SYS_ADMIN, SETFCAP, NET_ADMIN]`, and `seccompProfile: Unconfined`; resources default to `requests` 250m/512Mi and `limits` 2 CPU/2Gi (override with `sandboxWorker.securityContext` and `sandboxWorker.resources` in Helm). Dropping those capabilities or switching back to non-root breaks bwrap namespace creation. `SANDBOX_NODE_ID` is injected from `spec.nodeName` and `SANDBOX_WORKER_ID` stays empty so the first start generates one on the local disk.
+
+Kubernetes has no `wechat-receiver` workload either: WeChat polling tasks route to the `default` queue consumed by `worker`, and the Feishu long connection is supervised by the `agent`-queue consumer in `worker`. Only the `clouisle-backend` image installs `ffmpeg`/`ffprobe`, and WeChat audio/video collection and transcoding run inside `api`/`worker`; do not omit them in custom images.
 
 <Callout type="warn">
   The `frontend` Deployment in the single-file manifest (and the Helm defaults) sets **no environment variables at all**. Browser traffic still works because the Ingress routes the `/api` prefix, but Next.js server-side fetching falls back to the code default `BACKEND_INTERNAL_URL=http://localhost:8000`, which is unreachable inside the pod. Add `BACKEND_INTERNAL_URL=http://api:8000` to the `frontend` workload if you rely on SSR fetching.
@@ -76,7 +84,7 @@ kubectl -n clouisle scale deployment worker --replicas=4
 kubectl -n clouisle scale deployment api --replicas=3
 ```
 
-sandbox-worker is a DaemonSet (one Pod per node) and cannot change replicas with `scale` — add nodes to grow it.
+sandbox-worker is a DaemonSet (one Pod per node) and cannot change replicas with `scale` — add nodes to grow it. Each Pod uses its own node's `hostPath` and must not share that directory; sessions and checkpoints disappear with the node and cannot move to another one.
 
 `beat` always stays at one replica. With `ReadWriteOnce` local upload volumes, keep the API at a single replica; production with multiple replicas should configure a shared volume or object storage.
 

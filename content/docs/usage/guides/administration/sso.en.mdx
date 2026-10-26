@@ -4,59 +4,67 @@ description: Configure OIDC, SAML 2.0, or CAS login connections and manage the S
 icon: KeyRound
 ---
 
-Login providers are managed centrally under **Site settings** → **Integrations** (`/site-settings/integrations`): login providers, email, webhooks, and Feishu directory sync share one Integration model, but their capabilities and permissions stay separate. Configure the global SSO policy under **Site settings** → **Security** first, then add login integrations one by one. Each login integration's protocol configuration is a JSON document whose fields depend on the provider type; prepare the identity provider's callback address, client credentials, and certificate before saving.
+Login identity sources are managed in one place under **Site Settings** → **Integrations** (`/site-settings/integrations`): login identity sources, email, webhooks, and the Feishu directory share one integration list, but their capabilities and permissions stay separate. Turn on the global SSO policy under **Site Settings** → **Security** first, then add login integrations one by one.
+
+Each login integration's protocol configuration is a JSON document whose fields depend on the type. Before saving, have the identity provider's callback address, client credentials, and certificate ready.
 
 <Callout type="info">
   Prerequisites:
-  1. The global SSO switch (`sso_enabled`, off by default) is on — otherwise the login page never fetches the integration list.
-  2. The operator holds `admin:integrations:login:read` (view) or `admin:integrations:login:update` (create, edit, delete, test, unlink).
-  3. The identity provider can reach Clouisle's **public backend address**, or the callback never arrives (see the next section).
+  1. The global SSO switch is on; otherwise the sign-in page shows no SSO buttons.
+  2. The operator has permission to view or modify login integrations (Super Admins always do).
+  3. The identity provider can reach Clouisle's **public backend address**; otherwise callbacks never arrive (see the next section).
 </Callout>
 
-## Supported Capabilities
+## Supported Scope
 
-| Provider type | Static capability | Management domain |
+| Type | Purpose | Where it is managed |
 | --- | --- | --- |
-| `oauth2`, `oidc`, `saml2`, `cas` | `user_login` | Login |
-| `email`, `webhook` | `notification` | Settings |
-| `feishu` | `directory_sync`, `user_login` | Settings (app ID, app secret, department scope, directory sync) and Login (sign-in opt-in, button text, sign-in enable/disable) |
+| OAuth2, OIDC, SAML 2.0, CAS | Web sign-in | The login integration dialog under **Site Settings** → **Integrations** |
+| Email, Webhook | Notification delivery | Their own dedicated forms |
+| Feishu | Sign-in and directory sync | The Feishu integration card (one set of app credentials, capabilities toggled separately) |
 
-Capabilities are statically declared by the backend registry and cannot be extended through configuration. Email, webhook, and Feishu are singleton integrations configured through their specialized forms; this page covers only the login side. Feishu is a single integration built from one Feishu app (app ID and app secret) that declares both `directory_sync` and `user_login`: enabling the Feishu integration never grants sign-in by itself — web login is an explicit opt-in on the same integration. Turning the integration off stops both directory sync and sign-in while preserving the opt-in.
+Feishu is one integration that offers both directory sync and web sign-in: enabling the Feishu integration does not by itself grant sign-in, which must be explicitly switched on in the same card; disabling the integration turns off both directory sync and sign-in but keeps that choice. Email, webhook, and Feishu are single-instance integrations; this page covers the sign-in part only.
 
 ## Callback Address
 
-The callback address you register with the identity provider is:
+The callback (redirect) address to register with the identity provider is:
 
 ```
-{BACKEND_ORIGIN}/api/v1/sso/callback/{integration_name}
+https://your-domain.com/api/v1/sso/callback/<integration-name>
 ```
 
-`BACKEND_ORIGIN` is the **public origin of the request itself** — the domain the browser actually reached the backend through (with a reverse proxy, the forwarded external address; when the frontend proxies `/api/*`, the frontend's public origin). A `:3000` port here is automatically rewritten to `:8000`. It is **not** `API_BASE_URL` (an internal service address) and is unaffected by `FRONTEND_URL`; getting it wrong causes a 404 callback or a redirect to the wrong domain.
-
-`{integration_name}` must **exactly** match the integration name registered in Clouisle (case-sensitive) and stay stable after creation (it is the registered URL slug). A mismatched callback address is the most common cause of SSO login failure.
+- `your-domain.com` is the **public address the browser actually uses to reach the backend**: behind a reverse proxy, use the proxy's forwarded public address; if the frontend proxies the API paths, use the public frontend domain. It is **not** an internal service address and not a frontend page address — using the wrong one makes the callback fail or redirect to the wrong domain.
+- Build the address from the pattern above (domain + integration name); the Feishu integration card displays a copyable redirect address directly.
+- `<integration-name>` must **exactly** match the integration name registered in Clouisle, is case-sensitive, and stays stable after creation. A mismatched callback address is the most common cause of SSO sign-in failures.
 
 ## Adding a Login Integration
 
-In **Site settings** → **Integrations**, create a login integration with these fields:
+Under **Site Settings** → **Integrations**, add a login integration. The dialog has three tabs: **Basic Info**, **Configuration**, and **Attribute Mapping**. Basic info:
 
 | Field | Required | Constraint |
 | --- | --- | --- |
-| **Integration name** | Yes | `^[a-z][a-z0-9_-]*$`: starts with a lowercase letter, then lowercase letters, digits, `-`, `_` only; max `100`; globally unique (a duplicate returns `6305`) |
-| **Provider type** (`provider_type`) | Yes | `oauth2` / `oidc` (OAuth2/OIDC) / `saml2` (SAML 2.0) / `cas` (CAS) |
-| **Display name** | Yes | Shown in lists and on the connected-accounts card; max `100` |
-| **Button text** | No | Login button label, max `50`, e.g. "Continue with GitHub" |
-| **Icon URL** | No | Must start with `http://` or `https://`; max `512` |
-| **Enabled** (`is_enabled`) | — | When off, the integration disappears from the login page |
-| **Capabilities** (`enabled_capabilities`) | Yes | A login integration must include `user_login`, or no button is shown |
-| **Login config** (`login_config`) | — | This integration's own signup, approval, and default role (see [User Lifecycle](#user-lifecycle)) |
+| **Integration Name** | Yes | Starts with a lowercase letter; only lowercase letters, digits, `-`, `_`; up to `100` characters; globally unique (a duplicate reports that the name already exists) |
+| **Protocol** | Yes | OAuth2 / OIDC / SAML 2.0 / CAS |
+| **Display Name** | Yes | Shown in the list and on connected-account cards, up to `100` characters |
+| **Button Text** | No | Sign-in button label, up to `50` characters, e.g. "Continue with GitHub" |
+| **Icon URL** | No | Must start with `http://` or `https://`, up to `512` characters |
+| **Enabled** | — | When off, the integration does not appear on the sign-in page |
+| **Allow Signup** | — | Lets this integration create accounts on first sign-in |
+| **Require Approval** | — | New accounts need administrator approval before they can sign in |
+| **Default Role** | No | Initial global role for new accounts; empty falls back to the site default role |
 
 <Callout type="warn">
-  **Integration name and provider type cannot be changed after creation**. Name it to match the identity provider configuration — renaming means recreating the integration; existing identity connections and external identity IDs stay on the old integration.
+  **The integration name and protocol cannot be changed after creation.** Name it to match your identity provider's configuration; renaming means recreating the integration, and existing user identity connections stay on the original integration.
 </Callout>
 
 ## Protocol Configuration
 
-The protocol configuration is a free-form JSON document. Field names must match the tables below; a typo is not rejected on save and only surfaces as a configuration error during login. **Never put the client secret in `config` — use the credential field** (`credentials.client_secret` in the API) instead. Credentials are Fernet-encrypted at rest; admin responses only return `credentials_configured` field names, never plaintext or ciphertext, and an empty value preserves the saved secret.
+On the **Configuration** tab, fill in two JSON documents:
+
+- **Configuration JSON**: protocol parameters. Field names must match the tables below; a typo is not caught on save and instead surfaces as a configuration error at sign-in.
+- **Credentials JSON**: sensitive values such as the client secret, e.g. `{"client_secret": "..."}`. **Never put secrets in Configuration.**
+
+Credentials are stored encrypted and **never echoed back**: when editing, you see which keys are configured, and leaving the JSON empty preserves the saved secret.
 
 ### OAuth2 / OIDC
 
@@ -65,13 +73,13 @@ The protocol configuration is a free-form JSON document. Field names must match 
 | `client_id` | Yes | Client ID issued by the provider |
 | `authorization_url` | Yes | Authorization endpoint |
 | `token_url` | Yes | Token exchange endpoint |
-| `userinfo_url` | Yes | User info endpoint (its response is what login reads) |
+| `userinfo_url` | Yes | Userinfo endpoint (its response is what sign-in reads) |
 | `scopes` | No | Space-separated scopes, default `openid email profile` |
 
-Login uses the authorization-code flow with PKCE (`S256`) and generates a `nonce`.
+Sign-in uses the authorization code + PKCE (`S256`) flow and generates a `nonce`.
 
 <Callout type="note">
-  The current implementation has **no `issuer_url` field and performs no ID-Token signature/JWKS validation**: user information always comes from the `userinfo_url` response. As a result, a wrong secret only shows up when tokens are actually exchanged — see [Testing the Connection](#testing-the-connection).
+  The current implementation has **no Issuer URL field and performs no ID Token signature/JWKS validation**: user information always comes from the `userinfo_url` response. A wrong client secret or an expired certificate therefore only surfaces during the actual token exchange — see [Test Connection](#test-connection).
 </Callout>
 
 ### SAML 2.0
@@ -80,11 +88,11 @@ Login uses the authorization-code flow with PKCE (`S256`) and generates a `nonce
 | --- | --- | --- |
 | `sp_entity_id` | Yes | Service Provider Entity ID (this instance's identifier) |
 | `idp_entity_id` | Yes | IdP Entity ID |
-| `sso_url` | Yes | IdP Single Sign-On URL (HTTP-Redirect binding) |
-| `x509_cert` | Yes | IdP X.509 certificate, PEM content but **without** the `-----BEGIN/END CERTIFICATE-----` lines |
-| `acs_url` | Yes | ACS address; the runtime callback URL overrides it, so this is a placeholder/reference |
-| `slo_url` | No | SP Single Logout URL |
-| `idp_slo_url` | No | IdP Single Logout URL |
+| `sso_url` | Yes | IdP single sign-on URL (HTTP-Redirect binding) |
+| `x509_cert` | Yes | IdP X.509 certificate: PEM content **without** the `-----BEGIN/END CERTIFICATE-----` lines |
+| `acs_url` | Yes | ACS address; a placeholder/reference only — the actual callback address always overrides it at runtime |
+| `slo_url` | No | SP single logout address |
+| `idp_slo_url` | No | IdP single logout address |
 | `name_id_format` | No | NameID format, default `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified` |
 
 ```json
@@ -92,15 +100,15 @@ Login uses the authorization-code flow with PKCE (`S256`) and generates a `nonce
   "sp_entity_id": "clouisle",
   "idp_entity_id": "https://idp.example.com/metadata",
   "sso_url": "https://idp.example.com/sso",
-  "x509_cert": "MIIC...truncated...",
+  "x509_cert": "MIIC...omitted...",
   "acs_url": "https://your-domain.com/api/v1/sso/callback/azure-ad"
 }
 ```
 
-`strict` mode is enabled, so SAML responses must pass signature validation; a large clock skew between the IdP and Clouisle fails immediately.
+Strict mode is on: SAML responses must pass signature validation, and a large clock skew between the IdP and Clouisle fails them outright.
 
 <Callout type="warn">
-  `slo_url` / `idp_slo_url` are only written into the SAML configuration — **no SP-initiated single logout flow is implemented**, so logging out at the IdP does not terminate the Clouisle session.
+  `slo_url` / `idp_slo_url` are stored only — **SP-initiated single logout is not implemented**: signing out at the IdP does not sign the user out of Clouisle.
 </Callout>
 
 ### CAS
@@ -108,27 +116,27 @@ Login uses the authorization-code flow with PKCE (`S256`) and generates a `nonce
 | Field | Required | Description |
 | --- | --- | --- |
 | `server_url` | Yes | CAS server base URL |
-| `version` | No | Protocol version `1` / `2` / `3`, default `3`, selecting the validation endpoint (`/validate`, `/serviceValidate`, `/p3/serviceValidate`) |
+| `version` | No | Protocol version `1` / `2` / `3`, default `3`, which decides the validation endpoint (`/validate`, `/serviceValidate`, `/p3/serviceValidate`) |
 | `service_url` | No | **Has no effect**: the `service` parameter always uses the runtime callback address |
 
 The CAS user identifier comes from `<cas:user>` in the validation response; version `3` also reads attributes from `<cas:attributes>` for [attribute mapping](#attribute-mapping).
 
 ## Attribute Mapping
 
-Attribute mapping is the integration's separate `attribute_mapping` field (a JSON document) that maps provider response data onto the fields Clouisle needs:
+The **Attribute Mapping** tab holds a JSON document that maps provider response data to the fields Clouisle needs:
 
 | Clouisle field | Purpose |
 | --- | --- |
-| `email` | Account email (**required**; missing it fails the login, see below) |
+| `email` | Account email (**required**; missing means sign-in fails) |
 | `username` | Username; duplicates get a numeric suffix |
-| `avatar_url` | Avatar URL |
+| `avatar_url` | Avatar address |
 
 Two path styles:
 
-- **Dot path** (default): `{"email": "email", "username": "profile.name"}` reads nested objects.
-- **JSONPath**: starting with `$`, suited to arrays or filtering, e.g. `{"email": "$.emails[0].value"}`; the first match wins.
+- **Dot notation** (default): `{"email": "email", "username": "profile.name"}` reads nested objects.
+- **JSONPath**: starts with `$`, suits arrays or filtering, e.g. `{"email": "$.emails[0].value"}`; the first match wins.
 
-The default mapping for a new integration:
+Default values for a new integration:
 
 ```json
 {
@@ -138,76 +146,57 @@ The default mapping for a new integration:
 }
 ```
 
-GitHub's payload differs from the OIDC standard claims, so change it to `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`.
+GitHub returns different fields from the OIDC standard, so change it to `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`.
 
 <Callout type="warn">
-  Mapped values are merged with the provider's **raw response, and a same-named raw field wins**. In other words the mapping only helps for fields that do not already exist in the raw payload; if the provider already returns `email`, the mapped `email` is overwritten. Log the raw response first when chasing mismapped fields.
+  Mapped results are merged with the provider's **raw response, and same-named raw fields win**. In other words, the mapping only takes effect for keys absent from the raw response; if the provider already returns `email`, the mapped `email` is overwritten. When debugging mismatched fields, inspect the raw response first.
 </Callout>
 
 <Callout type="error">
-  The final data must contain a non-empty `email`, or new-user creation fails with a validation error (`email_required`). The external identity identifier comes from OIDC's `sub`/`id`, SAML's NameID, or CAS's `<cas:user>`; an empty identifier also fails the login.
+  The final data must contain a non-empty `email`; otherwise new-user creation fails with a missing-email error. The OIDC `sub`/`id`, the SAML NameID, and the CAS `<cas:user>` become the external identity identifier; an empty identifier also fails sign-in.
 </Callout>
 
-## Configure GitHub Login
+## Configuring GitHub Sign-In
 
-1. Deploy Clouisle with an externally reachable backend/proxy URL and a correct `FRONTEND_URL`. Keep a working administrator login available.
-2. In **Site settings** → **Security**, configure the global SSO settings: enable SSO, allow password login, automatic account creation, approval, and email matching as appropriate. Their existing `sso_*` setting keys and authentication behavior are unchanged.
-3. Register a GitHub OAuth App under **GitHub Settings → Developer settings → OAuth Apps**. Use `https://your-domain.com/api/v1/sso/callback/github` as its authorization callback URL.
-4. Add a login integration named `github` with provider type `oauth2`, display name `GitHub`, the `user_login` capability, and the desired button text/icon. Set its enabled state and its own `login_config` (signup, approval, default role).
-5. Enter the non-secret configuration: client ID, authorization URL, token URL, userinfo URL, and `read:user user:email` scopes; set `attribute_mapping` to `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`.
-6. Supply the client secret through the credential field (`credentials.client_secret` in the API), not `config`. Save, test, and complete a real login in a separate browser session; the configuration test is not a full login.
+1. Make Clouisle externally reachable, and keep a working administrator sign-in method.
+2. Configure the global SSO policy under **Site Settings** → **Security**: the SSO switch, password sign-in, automatic user creation, approval, and email matching.
+3. In GitHub's **Settings → Developer settings → OAuth Apps**, create an OAuth app and set the callback to `https://your-domain.com/api/v1/sso/callback/github`.
+4. Create an OAuth2 login integration named `github` with a display name, button text, and icon; enable **Allow Signup** / **Require Approval** as needed and choose a default role.
+5. In **Configuration**, enter the Client ID, authorization URL, token URL, userinfo URL, and scope (`read:user user:email`); set **Attribute Mapping** to `{"email": "email", "username": "login", "avatar_url": "avatar_url"}`.
+6. In **Credentials**, enter `{"client_secret": "..."}` — not in Configuration. After saving and testing, complete a real sign-in in a private browser session; a passing configuration test does not mean a full sign-in works.
 
-## Configure Feishu Sign-In
+## Configuring Feishu Sign-In
 
-Feishu web sign-in is an opt-in capability of the Feishu integration. It uses the same app ID and app secret as directory sync; you do not create a second provider.
+Feishu web sign-in is an optional capability of the Feishu integration and shares the same App ID / App Secret as directory sync, so no additional identity source is needed.
 
-1. In the Feishu developer console, add the card's **Redirect URL** — `https://<backend-host>/api/v1/sso/callback/<integration-name>`, for example `…/api/v1/sso/callback/feishu` — to the app's redirect-URI allowlist. The Feishu card shows this exact value with a copy button; `<backend-host>` is the externally reachable backend/proxy origin, the same origin used for every provider's SSO callback.
-2. Grant the app the login scopes `contact:user.base:readonly contact:user.email:readonly`. Identity comes from the signed-in user's profile and needs no scope, but the email field requires `contact:user.email:readonly`.
-3. In **Site Settings → Integrations → Feishu**, open the card's capability section and turn on **Feishu sign-in**, optionally setting the button text. Changing the sign-in opt-in requires `admin:integrations:login:update`, so a role enabling it holds both domains (a superuser always can).
-4. Save the app credentials on the same card if they are not configured yet. They are shared with directory sync, and a blank secret field preserves the saved secret. Leave the integration enabled.
+1. In the Feishu developer console, add the Feishu card's **redirect address** (`https://<backend-host>/api/v1/sso/callback/<integration-name>`, e.g. `…/api/v1/sso/callback/feishu`) to the app's redirect URL allowlist; the address can be copied from the card in one click.
+2. Grant the app the scopes needed for sign-in: `contact:user.base:readonly contact:user.email:readonly`.
+3. Under **Site Settings** → **Integrations** → the **Feishu** card, turn on the **Feishu sign-in** switch in the capabilities area and optionally set the login button text. The sign-in switch belongs to login-integration permissions while the rest of the Feishu card belongs to integration-settings permissions, so the operator usually needs both.
+4. If app credentials are not configured yet, fill them in on the same card; they are shared with directory sync, and leaving the secret blank preserves the current value. Keep the integration enabled.
 
-Sign-in is advertised on the login page only when global SSO is enabled, the integration is enabled, and `user_login` is one of its enabled capabilities. Without the opt-in, the integration keeps serving directory sync only and no Feishu login button appears. Turning the integration off stops both capabilities while preserving the opt-in.
+Members can link a Feishu identity to an existing account from the Connected Accounts area under Personal Settings → Account by clicking **Link Feishu**; this entry also appears only after an administrator enables Feishu user login.
 
-The Feishu subject stored as the external identity is the profile `union_id`, falling back to `open_id` when `union_id` is absent, so replacing the app within the same developer account does not break existing connections.
+The sign-in page shows the Feishu button only when global SSO is enabled, the integration is enabled, and the Feishu sign-in switch is on. Without that option, Feishu only provides directory sync. Disabling the integration turns off both capabilities but keeps the option.
 
-A Feishu account whose directory record carries no email receives the same deterministic placeholder address the directory sync uses, `feishu-<sha256(user_id)>@accounts.clouisle.example`, so sign-in and sync converge on one local account instead of creating two. Deriving that address needs the Feishu `user_id`, which requires `contact:user.employee_id:readonly`; without that scope there is no `user_id` for such an account and its first sign-in is rejected rather than creating a placeholder identity.
+The sign-in identity is stored using `union_id` from the Feishu profile as the external identity identifier, falling back to `open_id` when it is missing, so changing the app within the same developer account does not break already-linked accounts.
 
-## Testing the Connection
+Feishu accounts with no email in the directory receive a deterministic placeholder email (the same one directory sync uses), so sign-in and sync converge on one local account instead of creating separate ones. Deriving that address requires the Feishu `user_id`, hence the `contact:user.employee_id:readonly` scope; without it such accounts have no `user_id` and their first sign-in is rejected rather than creating a placeholder identity.
 
-**Test Connection** in the list calls `POST /api/v1/admin/integrations/{id}/test`:
+## Test Connection
 
-- Server-side it **only builds an authorization URL locally** (with a placeholder callback) to check that the required keys are present, then returns the first 100 characters of that URL.
-- It **never contacts the identity provider**, so a wrong client secret, a mismatched callback address, or an expired certificate are all **invisible** to it — verify with a real login.
-- A `status: error` response only means a key is missing or a value cannot be used to build an authorization URL.
+The **Test Connection** button on an integration card builds an authorization address **locally on the server** once (with a placeholder callback) and checks whether the required configuration keys are present:
 
-## Admin Permissions and API
-
-Management uses the `/api/v1/admin/integrations` base path, and public discovery is `GET /api/v1/sso/integrations` (the old `/sso/providers` endpoint is removed with no compatibility alias):
-
-| Action | Endpoint | Permission |
-| --- | --- | --- |
-| View type and capability catalog | `GET /api/v1/admin/integrations/types` | Either domain's read |
-| List instances (filtered by domain) | `GET /api/v1/admin/integrations` | Either domain's read |
-| Create a login integration | `POST /api/v1/admin/integrations` | `admin:integrations:login:update` |
-| Update / delete (singleton deletion forbidden) | `PUT` / `DELETE /api/v1/admin/integrations/{id}` | Per-field domain (`enabled_capabilities` and `is_enabled` by capability involved; `config` and `credentials` on the settings domain; `button_text`, `display_name`, `icon_url`, `login_config`, `attribute_mapping` on the login domain) |
-| Test configuration | `POST /api/v1/admin/integrations/{id}/test` | `admin:integrations:login:update` |
-| Global login policy | `GET` / `PUT /api/v1/admin/integrations/login-settings` | `admin:integrations:login:read` / `:update` (UI: **Site Settings** → **Security**) |
-| Integrations for the login page | `GET /api/v1/sso/integrations` | Public |
-| Start login / callback | `GET /api/v1/sso/login/{name}`, `GET /api/v1/sso/callback/{name}` | Public |
-| Unlink your own connection | `DELETE /api/v1/sso/connections/{connection_id}` | Any signed-in user |
-
-<Callout type="note">
-  When global SSO is off, `GET /api/v1/sso/integrations` returns an **empty array even if integrations are enabled** — if the login page has no buttons, check the global switch, the integration's enabled state, and the `user_login` capability first.
-</Callout>
+- Success only means the configuration can produce an authorization address.
+- It **never contacts the identity provider**, so a wrong client secret, a mismatched callback address, or an expired certificate **cannot be detected** — verify with a real sign-in.
 
 ## General Flow
 
-1. Enable SSO under **Site Settings** → **Security** and adjust the global policies (allow password login, auto-create, require approval, match by email).
-2. In **Site Settings** → **Integrations**, add a login integration: fill in the basic info, pick the provider type, and enable the `user_login` capability.
-3. Enter the protocol JSON, putting the secret in the credential field rather than `config`.
-4. Map email, username, and avatar to provider fields in `attribute_mapping`.
-5. After saving, add the callback address Clouisle shows to the identity provider's allowlist/redirect URIs.
-6. Verify three cases in an incognito window: a new user, an existing user, and a failing callback.
+1. Under **Site Settings** → **Security**, enable SSO and adjust the global policy (allow password sign-in, auto-create, require approval, match by email).
+2. Under **Site Settings** → **Integrations**, add a login integration: fill in the basic info and choose the protocol.
+3. On the **Configuration** tab, enter the protocol's JSON configuration; put secrets in **Credentials**, not Configuration.
+4. On the **Attribute Mapping** tab, map email, username, and avatar to the provider's fields.
+5. After saving, put the callback address (`https://your-domain.com/api/v1/sso/callback/<integration-name>`) into the identity provider's allowlist/redirect settings.
+6. Verify three cases in a private window: a new user, an existing user, and a wrong callback.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/sso-connection-form.png" alt="SSO connection configuration" />
@@ -216,88 +205,70 @@ Management uses the `/api/v1/admin/integrations` base path, and public discovery
 
 ## User Lifecycle
 
-Global settings and integration switches combine with **OR** semantics:
+Global policy and per-integration settings combine with **OR** semantics:
 
 | Outcome | Rule |
 | --- | --- |
-| Link an existing account | `sso_match_by_email=true` (default) and the returned email matches an existing user; linking also ensures that user joins the default team |
-| Create an account | Either the global `sso_auto_create_users` **or** the integration's `login_config` signup is on |
-| Creation refused | Global auto-create off **and** the integration signup off → `6302` (`sso_registration_disabled`) |
-| Approval required | Either the global `sso_require_approval` **or** the integration's `login_config` approval is on → the account is `pending` and cannot log in |
-| SSO-only | Global `sso_allow_password_login=false` → password login returns `6306` |
+| Link an existing account | Global "match existing accounts by email" is on (the default) and the returned email matches an existing user; linking also ensures the user joins the default team |
+| Create a new account | Global "auto-create users" **or** the integration's own "allow signup" is on |
+| Creation refused | Global auto-create is off **and** the integration's allow-signup is also off |
+| Approval required | Global "new accounts require approval" **or** the integration's "require approval" is on → the account is pending and cannot sign in |
+| SSO only | Global "allow password sign-in" is off, so password sign-in is rejected |
 
-The `allow_signup`, `require_approval`, and `default_role_id` of a login integration live in `login_config`, no longer as top-level fields. Newly created SSO users behave as follows:
+New SSO users have these traits:
 
-- They have **no local password** (`hashed_password` is an empty string), so password login is impossible.
-- Their email is marked verified immediately (the provider's email is trusted).
-- The username comes from the mapped `username`; if missing, the local part of the email; if that is missing too, `user_<first 8 chars of the external identity id>`; duplicates get a numeric suffix.
-- The role comes from the `login_config`'s `default_role_id` (**API-only; there is no field for it in the UI**), falling back to the global default role; the user is then added to the default team via `default_team_id`.
+- **No local password**, so they cannot sign in with a password.
+- The email is marked verified (the provider's email is trusted).
+- The username comes from the mapped `username`; when missing, the part of the email before `@`; when that is missing too, the first 8 characters of the external identity identifier with a prefix. Duplicates get a numeric suffix.
+- The role comes from the integration's default role, falling back to the global default role; the user then joins the default team per the default-team setting.
 
 ## Upgrade Notes
 
-When upgrading from the old SSO provider model to the unified Integration model:
+When upgrading from the legacy SSO provider model to the unified integration model: the upgrade preserves integration identifiers, user identity connections, and external identity IDs — **accounts do not need re-linking and identity providers do not need callback changes**.
 
-- **Back up the database and retain the matching backend `SECRET_KEY`** before deploying (credentials are Fernet-encrypted; a changed key makes them undecryptable). Stop all old-version API processes and workers before migration, then start API processes and workers using the same new version; **mixed-version rolling deployment is not supported**.
-- The migration renames the `sso_providers` table to `integrations` and `protocol` to `provider_type`, moves signup policy into `login_config`, and separates/encrypts secret configuration. **Integration UUIDs, identity connections, external identity IDs, and foreign-key relationships are preserved** — users do not need to reconnect, and identity providers do not need new callback URLs.
-- Connection response fields change from `provider_*` to `integration_id`, `integration_name`, `integration_display_name`, and `integration_icon_url`; update API clients that read the old fields.
-- Role grants migrate from `admin:sso:read/update` to `admin:integrations:login:read/update` (holders of `admin:settings:read/update` additionally receive the settings-domain integration grant).
-- **Rollback requires restoring the pre-cutover database with the matching application version and encryption key** — do not downgrade binaries against the migrated schema or attempt to reconstruct credentials from redacted responses.
-
-## Common Errors
-
-| Code | Meaning |
-| --- | --- |
-| `6300` | Integration not found |
-| `6301` | SSO login session expired (sessions last **10 minutes**; abandoning authorization mid-way expires it) |
-| `6302` | Registration not allowed for this integration (both auto-create and signup are off) |
-| `6303` | The provider rejected authentication or callback validation failed |
-| `6304` | Missing configuration / unsupported provider type |
-| `6305` | Integration name already exists |
-| `6306` | The site is SSO-only and password login is disabled |
-
-On a failed callback the backend redirects to `/sso-callback?error=...`, where `error` may be `sso_provider_not_found`, `sso_session_expired`, or `sso_login_failed`; a deactivated or pending-approval account yields `inactive` or `pending_approval`.
+Back up the database before upgrading and update all components in the order the upgrade guide specifies; rolling deployment with mixed versions is not supported. A rollback must restore the pre-switch database, a matching application version, and the encryption key together. See [Upgrading Clouisle](../../../self-host/operations/upgrade.mdx) for the full upgrade and rollback steps.
 
 ## Troubleshooting
 
-### No SSO Buttons on the Login Page
+### No SSO Button on the Sign-In Page
 
-1. Check that the global SSO switch is `true`.
-2. Check that the integration itself is **enabled** and its `enabled_capabilities` include `user_login` (Feishu needs its explicit sign-in opt-in).
-3. Request `GET /api/v1/sso/integrations` directly — an empty response means the frontend renders no buttons.
+1. Check that the global SSO switch under **Site Settings** → **Security** is on.
+2. Check that the integration is **enabled** and, for Feishu, that the Feishu sign-in switch is on.
+3. Confirm the callback address configured at the identity provider matches the pattern above.
 
 ### Callback Errors / Stuck on the Same Page
 
-1. Verify the callback **domain and integration name** match the configuration exactly; do not register a new integrations callback route.
-2. Confirm the public address (from the request/reverse proxy) is reachable by the identity provider.
-3. Check whether the authorization code expired (a long pause gives `6301`).
-4. Look at `sso_login_failed` entries and messages in the audit log.
+1. Verify that the callback address's **public domain and integration name** exactly match the configuration.
+2. Confirm the public address is reachable by the identity provider.
+3. Check whether the user lingered on the consent page (the sign-in session is valid for **10 minutes**; retry after that).
+4. Look for failed SSO sign-in entries and error messages in the audit log.
 
-### Login Succeeds but Fields Are Mismapped
+### Sign-In Succeeds but Fields Are Wrong
 
-1. Check the path style per [Attribute Mapping](#attribute-mapping) (dot path vs `$` JSONPath).
-2. Remember that a same-named raw field overrides the mapped value.
-3. Non-standard providers such as GitHub need explicit mapping (`login`, `avatar_url`).
+1. Check the path style used in [attribute mapping](#attribute-mapping) (dot notation vs `$` JSONPath).
+2. Remember that same-named raw fields override mapped values.
+3. Non-OIDC-standard providers such as GitHub need explicit mapping (`login`, `avatar_url`).
 
 ### SAML Validation Fails
 
 1. The certificate must be PEM content **with the header/footer lines removed**.
-2. Confirm the IdP and server clocks are in sync (excessive skew invalidates the response).
+2. Confirm the IdP and the server are time-synchronized (large skew makes responses invalid).
 3. Confirm `idp_entity_id` exactly matches the Entity ID in the IdP metadata.
 
 ### Feishu Callback Rejected or No Account Created
 
-1. Confirm the app registered `https://<backend-host>/api/v1/sso/callback/<integration-name>`.
-2. Confirm the login scopes include `contact:user.email:readonly`; accounts without a directory email additionally need `contact:user.employee_id:readonly`, otherwise there is no `user_id` to derive the placeholder address and the first sign-in is rejected.
-3. When Feishu department browsing or sync reports the integration must be enabled: save the app ID and app secret first, then enable the Feishu integration and turn on the **Directory sync** switch.
+1. Confirm the app has registered the integration's callback address (as shown on the Feishu card).
+2. Confirm the sign-in scopes include `contact:user.email:readonly`; accounts with no email in the directory also need `contact:user.employee_id:readonly`, otherwise there is no `user_id` to derive the placeholder email and first sign-in is rejected.
+3. If browsing or syncing Feishu departments says the integration is disabled: save the App ID and App Secret first, then enable the Feishu integration and turn on **directory sync**.
 
-### Nobody Can Reach the Admin Console After Disabling Password Login
+### Nobody Can Reach the Admin Area After Disabling Password Sign-In
 
-This is the classic SSO-only accident: confirm at least one Super Admin has an identity connection bound before switching. If you are already locked out, set `sso_allow_password_login` back to `true` server-side and restart.
+This is the classic SSO-only accident: confirm that at least one Super Admin has a linked identity connection first. If you are already locked out, platform operations must restore the password sign-in switch on the server.
 
 ## Related Documentation
 
-- [SSO API](/en/api/sso) — endpoints, request bodies, and response fields
-- [Login & Account Security](./authentication.mdx) — login protection and first-time SSO login behavior
-- [Profile Settings](./profile.mdx) — disconnecting links and anti-lockout protection
-- [Site Settings reference](/en/reference/site-settings) — defaults for the `sso_*` keys
-- [Environment Variables](/en/self-host/configuration/environment-variables) — how `FRONTEND_URL`, `PUBLIC_API_URL`, and `API_V1_STR` differ
+- [SSO API](../../../api/sso.mdx) — sign-in flow, integration management endpoints, and error codes
+- [Sign-in and Account Security](./authentication.mdx) — sign-in protection and first SSO sign-in behavior
+- [Personal Account Settings](./profile.mdx) — disconnecting connections and the anti-lockout guard
+- [Site settings reference](../../../reference/site-settings.mdx) — defaults for SSO and security policy
+- [Upgrading Clouisle](../../../self-host/operations/upgrade.mdx) — migrating from the legacy SSO model and rolling back

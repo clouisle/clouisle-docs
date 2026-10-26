@@ -272,13 +272,61 @@ Clouisle 工作流引擎支持原生复杂对象、流式推理、分支路由�
 
 #### 暂停 (`pause`)
 - 配置容器：`node.data.pauseConfig`。
-- `mode`：`"approval"`（人工审批继续）或 `"variables"`（等待外部补充表单字段）。
-- 工作流运行至该节点时状态置为挂起，通过发布事件通知外部系统，待人工确认或填表后恢复调度。
+- `mode`：`"approval"`（人工审批继续）或 `"variables"`（等待外部补充表单字段），默认 `"variables"`。
+- `title`：请求标题；为空时回退到节点名称。
+- `description`：请求说明模板，支持 `{{变量}}` 插值。保存到暂停请求前会解析模板，解析不到的引用替换为空字符串而**不会**把原始 `{{...}}` 文本展示给审批人；说明同时用于待处理通知。
+- `inputVariables`：`variables` 模式需要收集的字段，每项含 `name`、`type`、`required`、`description`，可带 `label` 与 `default`。
+- `approverIds`：可选的审批人列表。非空时只允许这些（仍在团队内且已激活的）用户提交，超级管理员保留管理权限；留空则回退到工作流创建者加团队 Owner/Admin。
+- `requireAllApprovals`：仅 `approval` 模式生效，默认 `false`。`false` 时任一审批人提交即决定结果；`true` 时每位审批人都要各自提交一次，全部通过才恢复运行，任一人拒绝立即失败。同一审批人重复提交返回 `workflow_pause_already_submitted`。
+
+输出变量：
+
+- `variables` 模式：每个声明字段一个输出，值来自提交内容。
+- `approval` 模式：`decision`（`approved` / `rejected`）、`approved`（boolean）、`comment`、`submitted_by`。`decision` 不是 `approved` 时运行以 `workflow_approval_rejected` 失败。
 
 #### 输出节点 (`answer`)
 - 配置容器：`node.data.answerConfig`。
 - `outputs`：定义工作流最终呈现给调用方的结构化键值对（支持 `string`、`number`、`boolean`、`array`、`object` 等）。
 - `streaming`：支持绑定某个流式 LLM 节点的 `response` 变量，向客户端实时透传文字生成。
+
+---
+
+## 工具节点 (`tool`)
+
+执行已配置的内置工具、自定义 HTTP/代码/数据库工具、MCP 工具或 Skill。配置容器：`node.data.toolConfig`（兼容 `node.data.config`）。
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `toolId` / `tool_id` | UUID string | 与 `toolName` 二选一 | 自定义 / MCP / Skill 工具的 ID |
+| `toolType` | string | `"builtin"` | `builtin`、`custom`、`mcp`、`skill` |
+| `toolName` | string | `null` | 内置工具名（`toolType: builtin` 时必填） |
+| `mcpToolName` | string | `null` | MCP 服务器内要调用的具体工具名（`toolType: mcp` 时使用） |
+| `parameterMappings` / `inputs` | array | `[]` | 每个参数一条映射：`name`、`source`（`variable` / `constant`）、`variableRef`、`constantValue`、`type` |
+| `arguments` | object | `null` | 旧写法：`{参数名: 变量引用}`，加载时转成映射列表 |
+| `outputVariable` | string | `"result"` | 工具结果的输出变量名 |
+
+### 参数类型转换
+
+每个映射可声明参数 `type`，执行器在调用工具前按声明做一次转换（对文本映射尤其重要，因为界面里填的常量都是字符串）：
+
+| 声明类型 | 文本值转换 | 合法示例 |
+| --- | --- | --- |
+| `string` | 保持字符串 | `"abc"` |
+| `integer` | `int(value)` | `"42"` → `42` |
+| `number` | `float(value)` | `"3.5"` → `3.5` |
+| `boolean` | `json.loads(value)` | `"true"` → `true` |
+| `array` | `json.loads(value)` | `"[1,2,3]"` → `[1,2,3]` |
+| `object` | `json.loads(value)` | `"{\"a\":1}"` → `{"a":1}` |
+
+已是对应原生类型的值直接透传，不重新解析；但类型必须严格匹配——例如把浮点数映射到 `integer`、把整数映射到 `boolean` 都会判定失败（`number` 同时接受整数和浮点）。未声明类型的参数不做转换。转换失败（非数字、非法 JSON、`NaN`/`Infinity`、类型不匹配）会让节点以 `invalid_tool_arguments` 失败，而不会把错误类型传给工具。因此 `"10"` 这类常量要能变成数字，映射里必须声明 `type`。
+
+### web_search 的引擎参数
+
+选中内置 `web_search` 时，工具节点会自动补一条 `search_engine` 参数映射并显示引擎下拉：`auto` 继承站点默认，其余只列出站点已启用的引擎。执行时仍会重新校验站点配置，引擎被禁用会直接失败。详见[内置工具](/usage/guides/tools/built-in)。
+
+### 输出与失败
+
+输出变量：`result`（工具返回值）、`status`（`success` / `error`）、`executionTime`（毫秒），以及 `outputVariable` 指定的别名；失败时另含 `error`。工具不存在、私有工具不属于当前触发者、跨团队工具未共享，都会以 `tool_not_found` 失败；HTTP 工具仍受 SSRF 白名单约束，数据库工具仍执行只读校验。
 
 ---
 

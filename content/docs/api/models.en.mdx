@@ -700,6 +700,11 @@ Unsupported providers return `model_discovery_not_supported`; an invalid `base_u
 | `6103` | Model quota exceeded | Team model quota exceeded |
 | `3000` | Permission denied | Insufficient permissions |
 | `1001` | Validation failed | Invalid request data |
+| `1001` | `model_endpoint_not_allowlisted` | The model endpoint Origin is not allowlisted; add it under **Site Settings > Security** and retry |
+
+<Callout type="info" title="Endpoint allowlist switch">
+  The allowlist is gated by `model_endpoint_allowlist_enabled` (default `true`); see the [site settings reference](/en/reference/site-settings) for the field and defaults. Model discovery does not raise — it returns `success: false` with a localized `message` — while create, update, and test return the `1001` validation error above.
+</Callout>
 
 <Callout type="info">
   No per-endpoint rate limits are implemented. There is no rate-limit middleware on these endpoints.

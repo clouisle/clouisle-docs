@@ -37,10 +37,7 @@ The SSO API covers three things: **login integration discovery** for the login p
 | GET / PUT | `/api/v1/admin/integrations/login-settings` | Global login settings (UI entry: **Site Settings** > **Security**) | Login-domain read / write |
 | GET / PUT | `/api/v1/admin/integrations/email`, `/webhook` | Builtin notification configuration | Settings-domain read / write |
 | POST | `/api/v1/admin/integrations/email/test`, `/webhook/test` | Test notification delivery | Settings-domain `update` |
-| GET / PUT | `/api/v1/admin/integrations/feishu/config` | Feishu configuration | Settings-domain read / write |
-| GET | `/api/v1/admin/integrations/feishu/departments` | Browse departments | Settings-domain read |
-| PUT | `/api/v1/admin/integrations/feishu/department-scope` | Save sync scope | Settings-domain `update` |
-| POST | `/api/v1/admin/integrations/feishu/sync` | Manual directory synchronization | Settings-domain `update` |
+| — | Feishu and WeChat iLink specific endpoints | Configuration, directory/knowledge sync, callbacks, personal preferences | See [Messaging integration API](./integrations.mdx) |
 
 ---
 

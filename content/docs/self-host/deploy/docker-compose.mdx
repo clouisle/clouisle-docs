@@ -64,7 +64,13 @@ curl http://localhost:8000/api/v1/health
 
 Compose 不含 Nginx 服务。`api` 的健康检查是容器内 `GET http://localhost:8000/api/v1/health`；`worker` 与 `sandbox-worker` 依赖 `api` **健康**后才启动，`beat` 与 `frontend` 只依赖 `api` 已启动（`service_started`）。`db`、`redis`、`qdrant` 通过各自健康检查（`pg_isready`、`redis-cli ping`、`/healthz`），应用服务都等它们健康后才启动。
 
-`api` 独占 `uploads_data` 卷（挂载 `/app/uploads`）；`worker` 与 `sandbox-worker` 不挂该卷，改用 `UPLOAD_STORAGE_MODE=remote` + `API_INTERNAL_BASE_URL=http://api:8000` 经内部网关读写文件。`sandbox-worker` 额外以 `user: "0"`、`cap_add: [SYS_ADMIN]`、`seccomp=unconfined` 运行，bwrap 才能创建用户/挂载命名空间。
+`api` 独占 `uploads_data` 卷（挂载 `/app/uploads`）；`worker` 与 `sandbox-worker` 不挂该卷，改用 `UPLOAD_STORAGE_MODE=remote` + `API_INTERNAL_BASE_URL=http://api:8000` 经内部网关读写文件。`sandbox-worker` 额外挂载命名卷 `sandbox_data` 到 `/var/lib/clouisle/sandbox`，保存会话工作区与检查点；该卷只能被一个 Sandbox Worker 使用，不要用 `--scale` 共享它。
+
+`sandbox-worker` 的安全与资源设置不是可选项：`user: "0"`、`cap_drop: [ALL]`、`cap_add: [SYS_ADMIN, SETFCAP, NET_ADMIN]`、`seccomp=unconfined`、`no-new-privileges:true`，以及 `pids_limit: 512`、`cpus: 2`、`mem_limit: 2g`。`SYS_ADMIN` 与 `SETFCAP` 用于创建命名空间，`NET_ADMIN` 只供可信代理为任务开启隔离回环；任务执行前会再丢弃任务能力。`stop_grace_period: 35s` 给在途任务留出写检查点的时间。
+
+Compose 中没有独立的 `wechat-receiver` 服务：微信轮询由 `worker` 消费的 `default` 队列周期任务完成，飞书长连接由 `worker` 中的 `agent` 队列消费者托管。
+
+`clouisle-backend` 镜像内置 `ffmpeg`/`ffprobe`，微信采集的音频、视频转码与时长探测直接在这些容器内执行，不需要另装。
 
 <Callout type="warn">
   生产环境必须为 `POSTGRES_PASSWORD` 与 `INTERNAL_API_TOKEN` 提供强随机值：Compose 使用 `${VAR:?required}` 语法，未设置时 `docker compose up` 直接失败。`INTERNAL_API_TOKEN` 必须被 `api`、`worker`、`sandbox-worker` 共享。
@@ -85,10 +91,9 @@ Tortoise ORM 在 API 启动时自动建表与迁移（无 Alembic）。首个注
 docker compose logs -f worker
 docker compose restart api
 docker compose up -d --scale worker=4
-docker compose up -d --scale sandbox-worker=2
 docker compose down
 ```
 
-`beat` 必须保持一个副本。`docker compose down -v` 会删除数据卷，执行前必须完成备份。
+`beat` 必须保持一个副本。`docker compose down -v` 会删除数据卷，执行前必须完成备份。不要 `--scale sandbox-worker=2`：两个容器会共享同一个 `sandbox_data` 卷，而该卷按单 Worker 设计；需要更多沙箱容量时提高 `SANDBOX_WORKER_CONCURRENCY`，或按节点部署独立的 Sandbox Worker 实例并使用各自的卷。
 
 `worker` 默认消费 `default,agent,knowledge,workflow` 4 个队列，`--scale worker=4` 会同时扩展这 4 类任务。只扩容某一类任务时，增加一个只订阅单队列的 Worker 服务（如 `-Q agent`），`sandbox` 队列由 `sandbox-worker` 独立消费。队列与任务的对应关系见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。

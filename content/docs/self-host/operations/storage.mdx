@@ -21,9 +21,18 @@ Clouisle 的持久化数据分布在 PostgreSQL、Qdrant、Redis 和上传存储
 | `postgres_data` | `db`（`/var/lib/postgresql/data`） | 业务、审计、配置和元数据 |
 | `qdrant_data` | `qdrant`（`/qdrant/storage`） | 向量集合 |
 | `redis_data` | `redis`（`/data`） | Redis 持久化数据和任务/会话状态 |
-| `uploads_data` | `api`（`/app/uploads`） | 用户上传和沙箱产物 |
+| `uploads_data` | `api`（`/app/uploads`） | 用户上传与沙箱产物；只有 `api` 挂载 |
+| `sandbox_data` | `sandbox-worker`（`/var/lib/clouisle/sandbox`） | 沙箱会话工作区与检查点；只允许一个服务实例挂载 |
 
-Kubernetes 对应三个 PVC：`postgres-data`（`10Gi`，`RWO`）、`qdrant-data`（`10Gi`，`RWO`）、`uploads-data`（`10Gi`，`RWX`，只被 `api` 挂载）。单文件 manifest 的 Redis 用 `emptyDir`，不持久化；Helm 默认给 Redis 一个 `5Gi` PVC。
+`worker` 与 `sandbox-worker` **不挂载** `uploads_data`：它们设 `UPLOAD_STORAGE_MODE=remote`，通过 `API_INTERNAL_BASE_URL` 和 `INTERNAL_API_TOKEN` 走 API 的认证文件网关。
+
+`sandbox_data` 是节点本地磁盘，不是共享存储。Compose 的 `sandbox-worker` 服务注释已声明「一个服务独占这块磁盘，不要用共享命名卷横向扩容」；需要更多沙箱并发时增加并发槽位（`SANDBOX_WORKER_CONCURRENCY`）或增加独立部署，而不是复制同一个卷。
+
+Kubernetes 对应：单文件 manifest 有 `postgres-data`（`10Gi`，`RWO`）、`qdrant-data`（`10Gi`，`RWO`）、`uploads-data`（`10Gi`，`RWX`，只被 `api` 挂载）；沙箱不在 PVC 上，而是 DaemonSet 每个节点上的 `hostPath` `/var/lib/clouisle/clouisle/sandbox`。Helm 用 `sandboxWorker.localDataPath` 覆盖，默认 `/var/lib/clouisle/<namespace>/<release>/sandbox`；同一路径不得被多个 release 或不同安装共用。单文件 manifest 的 Redis 用 `emptyDir`，不持久化；Helm 默认给 Redis 一个 `5Gi` PVC。
+
+<Callout type="error" title="节点本地数据不可迁移">
+  沙箱会话与检查点绑定在产生它的节点磁盘上。节点下线、磁盘损坏或 `hostPath` 被清理后，这些会话无法在别的节点恢复；需要保住会话内容时，把产物上传或导出到对象存储，而不是备份 `hostPath`。
+</Callout>
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/storage-settings-and-volumes.svg" alt="存储设置与部署卷" />
@@ -32,7 +41,7 @@ Kubernetes 对应三个 PVC：`postgres-data`（`10Gi`，`RWO`）、`qdrant-data
 
 ## 扩展规则
 
-Worker 和 Sandbox Worker 可独立扩展。`beat` 必须一个副本。API 多副本需要共享上传存储或对象存储；Qdrant 和 PostgreSQL 应按其自身高可用方案扩展。
+Worker 和 Sandbox Worker 可独立扩展，但方式不同：`worker` 是无状态的，加副本即可；`sandbox-worker` 绑定了节点本地磁盘，只能按节点增加，不能靠共享卷加副本。`beat` 必须一个副本。API 多副本需要共享上传存储或对象存储；Qdrant 和 PostgreSQL 应按其自身高可用方案扩展。
 
 Worker 默认消费 `default,agent,knowledge,workflow` 4 个队列。高负载下若某类任务积压，可启动专用 Worker 独立扩容（如单独消费 `-Q agent` 加速 AgentRun 执行，或 `-Q knowledge` 处理知识库）。
 
@@ -40,4 +49,4 @@ Worker 默认消费 `default,agent,knowledge,workflow` 4 个队列。高负载�
 
 ## 容量检查
 
-监控 PostgreSQL 数据库、pg_search 索引、Qdrant 集合、Redis 内存和上传目录。文档数量增长会同时增加原始文件、分块、Token 统计、向量和全文索引容量。
+监控 PostgreSQL 数据库、pg_search 索引、Qdrant 集合、Redis 内存、上传目录，以及 `sandbox-worker` 节点的磁盘余量。文档数量增长会同时增加原始文件、分块、Token 统计、向量和全文索引容量；沙箱侧的增长来自会话工作区、检查点缓存和产物，受 `SANDBOX_MAX_DISK_MB`（默认 `8192`）与 `SANDBOX_SESSION_TTL_HOURS`（默认 `24`）约束。

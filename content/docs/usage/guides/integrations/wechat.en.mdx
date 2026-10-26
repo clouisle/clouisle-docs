@@ -1,0 +1,150 @@
+---
+title: WeChat iLink
+description: Connect personal WeChat by QR code for Agent chat, or collect WeChat content into a knowledge base
+icon: MessageCircle
+---
+
+WeChat iLink combines **personal authorization with platform switches**: administrators only decide which purposes the platform allows, while each user scans a QR code in personal settings, chooses a purpose, and configures a target. A WeChat connection does exactly one thing at a time — idle, knowledge collection, or chat with one published Agent. Agent execution runs on Clouisle's Agent runtime; WeChat hosts no second Agent loop.
+
+## Platform switches
+
+Open **Site Settings** > **Integrations** > **WeChat iLink** (`/site-settings/integrations/wechat`) and enable what you need:
+
+| Platform feature | Effect |
+| --- | --- |
+| **Agent chat** | Lets users send personal WeChat messages to published Agents they can access |
+| **Knowledge collection** | Lets users collect personal WeChat messages into knowledge bases they can write to |
+
+There is **no integration master switch**, and this page **stores no personal WeChat credentials** or chooses a connection purpose for anyone. When both features are off, personal settings cannot start QR authorization; existing connections remain visible and history is retained. Fresh installations start with both features off.
+
+Disabling a platform feature pauses its intake, execution, and replies while preserving personal credentials, history, and pending records; operations already started may finish. Re-enabling resumes eligible work. Whether messages sent during a pause remain available depends on WeChat's retention.
+
+<Callout type="info">
+  When upgrading from an older version, existing active personal purposes are kept as the corresponding platform features; later startups never overwrite the administrator's choices.
+</Callout>
+
+## Personal authorization
+
+1. Open **Personal settings** > **WeChat iLink** and choose **Authorize with WeChat**.
+2. Scan the QR code with WeChat and confirm. Enter the verification code shown in WeChat if requested.
+3. The connection appears with its authorization state once authorization completes.
+
+Each verified WeChat identity has at most one platform connection; different people can each connect and collect into the same knowledge base. **A QR code alone is not a connection** — before authorization completes, the platform can neither receive nor reply to messages. A connection may stay idle without choosing a purpose.
+
+**Disconnect** stops receiving new messages and prevents pending submissions from proceeding; already collected documents remain. Reconnecting requires another WeChat authorization. Losing target write access, deleting the target, or deactivating the account stops collection; an expired WeChat authorization is shown in the UI. The platform does not send an unbound-user reminder through WeChat.
+
+## Three mutually exclusive purposes
+
+| Purpose | Behavior |
+| --- | --- |
+| **Do nothing** | Saved configuration is retained, but no collection or chat occurs |
+| **Knowledge collection** | New messages go to the target knowledge base; Agent chat is inactive |
+| **Agent chat** | New messages enter the selected Agent's conversation; knowledge collection is inactive |
+
+Saving one purpose activates it and deactivates the other two. Saved configuration survives while inactive, but it **never** enables a second purpose. Changing the purpose while accepted work is still pending is rejected; wait for completion or stop the work first. Changing a knowledge-base target does not migrate existing documents.
+
+## Knowledge collection
+
+Choose **Knowledge collection**, then configure:
+
+- An **active, writable** target knowledge base. A read-only shared knowledge base is not a valid target.
+- Optional vision and speech-recognition models that are authorized for the target team.
+
+Saving starts collection immediately. Choosing **Do nothing** stops collecting without disconnecting or deleting the saved target and recognition models; later messages are ignored and **not queued for later processing**. Every accepted submission retains its contributor and the target at that time; changing the target does not migrate earlier documents.
+
+| WeChat content | Processing |
+| --- | --- |
+| Plain text | Saved as a Markdown document and indexed automatically |
+| Text containing HTTP/HTTPS links | Each distinct link is fetched; accompanying text is retained as a note |
+| PDF, DOC/DOCX, XLS/XLSX, PPTX, TXT, Markdown, HTML, CSV, JSON | Downloaded and decrypted, then processed by the existing document pipeline; text formats require UTF-8 |
+| Image | Extracted with the selected team-authorized vision model |
+| Voice | Uses WeChat's transcript when available; otherwise the downloaded audio is transcribed with the selected speech model |
+| Audio file | Converted and transcribed with the selected speech model |
+| Video | Transcribes an audio stream when present and extracts up to 12 time-labelled frame samples; frames need a vision model and audio needs a speech model |
+
+Collection limits:
+
+- Each attachment is processed independently; text sent with an attachment becomes its caption rather than another standalone document.
+- Attachment size is the smaller of the knowledge-base upload limit and **100 MiB**.
+- Audio and video must have a readable duration of **at most 30 minutes**.
+- A scanned PDF may be accepted by the parser without yielding extractable text.
+- ZIP archives, unknown cards, and unsupported formats produce an explicit failure reply instead of being silently dropped.
+- Native public-account article cards do not guarantee an article URL; send the URL as text to use the supported link path.
+- Video handling is audio transcription plus sampled frames, not frame-by-frame understanding.
+
+**Results and originals:** only completed indexing is reported as success. WeChat accepting a reply **does not prove the phone displayed it**; an ambiguous send is not blindly repeated, and the platform's submission records are the authoritative result. Replayed messages do not create another document; identical extracted content is deduplicated within the target knowledge base while separate submission records remain. Personal settings show neither submission history nor original-download controls. Submission records and supported originals are retained and visible only to the contributor and users authorized on the target knowledge base.
+
+## Agent chat
+
+Choose **Agent chat**, then:
+
+1. Select a **published Agent** you can use.
+2. Fill its required input variables.
+3. Optionally select a speech-recognition model.
+4. Save to activate it; knowledge collection becomes inactive.
+
+Each connection has its own conversation. Repeated messages continue that conversation; selecting a different Agent isolates its history; changing the starting variables creates a new conversation. Conversations remain available in web chat under normal authorization. Personal settings show only the current run status and a stop control, not an Agent activity list.
+
+When the Agent asks a question, the next normal answer resumes that waiting run instead of starting another task. Normal messages are processed in order and do not start competing runs. `/new` only resets once the current task has finished; otherwise wait or stop it first. The connection purpose cannot change while work is active.
+
+### Commands
+
+| Command | Chinese alias | Behavior |
+| --- | --- | --- |
+| `/new` | `/新对话` | Start a new conversation after the active task finishes |
+| `/stop` | `/停止` | Stop the current run |
+| `/status` | `/状态` | Report current run status |
+| `/help` | `/帮助` | List available commands |
+| `/agents` | `/智能体` | List accessible published Agents |
+| `/use <number or UUID>` | `/使用 <编号或 UUID>` | Switch the Agent for this connection |
+| `/skip` | `/跳过` | Skip a pending structured question |
+
+`/agents` numbering follows the current name/ID order and can change when Agents are added or renamed. `/use` updates the same connection configuration as personal settings. It cannot switch while a run, other accepted messages, collection work, or replies are pending; finish or stop the work, wait for delivery, and only then send the next message — already accepted messages are never rerouted. Selecting the current Agent changes nothing; switching to another Agent uses its default variables and clears the speech-model selection.
+
+`/skip` only applies to a pending structured question. It submits a skip, not an answer; when it cannot skip, the command is not consumed as an answer and does not incorrectly resume the run.
+
+### Input and output mapping
+
+| WeChat input | Agent input |
+| --- | --- |
+| Text | Message text; the commands above are intercepted |
+| Image | Image content, using the Agent's vision-capable chat model |
+| File | A conversation-private file plus the ordinary file input used by web chat |
+| Voice | WeChat's own transcript when present; otherwise the downloaded audio is transcribed with the selected speech model |
+| Video | Audio transcript plus sampled frames when the Agent's models support it |
+
+Text sent with an attachment becomes its caption. Content beyond the Agent's configured limits, extensions it disallows, or content its models cannot read receives an explicit rejection instead of being silently dropped. An audio file sent as a generic file is passed as that file and is not auto-transcribed; only WeChat voice messages use the transcription path.
+
+Generated images, videos, and files — including generated audio, which is sent as a file rather than a voice message — are uploaded as native WeChat media. Only text and existing files in the conversation are sent; **no public storage URL is forwarded**. Run and delivery outcomes for each message are recorded, but personal settings do not list them; a timeout after transmission is recorded as unconfirmed and is not resent blindly.
+
+Before preparing a normal task's attachments or submitting its run, the platform attempts to send a deduplicated "🤔Thinking..." notice ("🤔思考中..." in Chinese). It confirms receipt and preparation, not completion. Messages waiting behind an active run receive the busy notice instead. Commands and answers to Agent questions have their own responses. WeChat receives status notices, final answers, and required interaction prompts — not internal reasoning or tool traces.
+
+The Agent uses the connected user's identity and the platform's existing model, tool, knowledge-base, and quota permissions. Revoked access or a disconnected connection stops further execution and delivery.
+
+## Backend processing and deployment
+
+WeChat **needs no separately deployed receiving service**: once either platform feature is on, message intake, queuing, and reply delivery all run in the platform backend with no extra components, commands, or settings. Under load, messages may arrive less frequently.
+
+Agent chat depends on the platform's code sandbox; when the sandbox is not ready, tasks report that they did not finish, and retrying after recovery is enough. Full deployment, upgrade, and capacity requirements are covered in [Self-hosted architecture](../../../self-host/architecture.mdx) and the [Upgrade guide](../../../self-host/operations/upgrade.mdx).
+
+## Common issues
+
+| Symptom | Cause and fix |
+| --- | --- |
+| No QR code can be generated in personal settings | Both platform features are off; enable at least one in site settings |
+| Nothing is received after scanning | Authorization did not complete, or the purpose is still **Do nothing**; finish authorization and save a purpose |
+| The purpose cannot be changed | Accepted collection or Agent work is still queued or running; wait or stop it first |
+| Messages are sent but no reply arrives | Check that the platform feature is on. If nothing arrives after a long wait, inspect the result by Run ID in the [Delivery log](./delivery-log.mdx) |
+| WeChat reports success but the phone shows nothing | Provider acceptance does not prove terminal display; an ambiguous send becomes **Unknown** and is not resent |
+| An attachment is rejected | Over 100 MiB or the knowledge-base upload limit, audio/video over 30 minutes, a ZIP/unsupported format, or a model that cannot read it |
+| Collection stops unexpectedly | The target knowledge base was deleted, write access was lost, the account was deactivated, or WeChat authorization expired; reauthorize or repair the target |
+| The Agent task reports it did not finish | The code sandbox is not ready or the task was interrupted; retry later, and contact the platform administrator if it persists |
+
+## Related
+
+- [Messaging integrations overview](./index.mdx) — administration vs. personal boundaries and the capability matrix
+- [Delivery log](./delivery-log.mdx) — the outbound delivery record shared by Feishu and WeChat
+- [Notifications and external channels](../administration/notifications.mdx) — WeChat is not a notification channel
+- [Messaging integration API](../../../api/integrations.mdx) — WeChat personal connection, purpose, receipt, and original-download endpoints
+- [Admin API](../../../api/admin.mdx) — delivery-record query parameters and fields
+- [Self-hosted architecture](../../../self-host/architecture.mdx) — deployment and capacity

@@ -165,11 +165,19 @@ After upload, the document status is `pending`; you must call a process endpoint
 POST /api/v1/knowledge-bases/{kb_id}/documents/url
 ```
 
-Request body:
+Request fields:
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `name` | string | Yes | Document name (`1-255` characters) |
+| `source_url` | string | No | Web page or YouTube address (up to 1024 characters); fetched server-side when the document is processed |
+| `doc_type` | string | No | Document type, defaults to `url` |
 
 ```json
 {"name": "Page Title", "source_url": "https://example.com/page", "doc_type": "url"}
 ```
+
+The document is created with status `pending`; call a process endpoint before the page is fetched, chunked, and indexed.
 
 ### List Documents
 
@@ -253,13 +261,23 @@ Returns `200 OK` with the document object, normally transitioning to `processing
 POST /api/v1/knowledge-bases/{kb_id}/documents/{document_id}/process-with-chunks
 ```
 
-Request body contains custom chunks:
+The body carries the custom chunks plus optional batch aggregation fields:
 
 ```json
-{"chunks": [{"content": "A chunk of text", "chunk_index": 0}]}
+{
+  "chunks": [{"content": "A chunk of text", "chunk_index": 0}],
+  "batch_id": "0f7c2b1e-8a44-4c1f-9a0e-2d5c8f6b1a33",
+  "batch_total": 3
+}
 ```
 
-This replaces the document chunks and starts embedding.
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `chunks` | array | Yes | At least one chunk; each needs `content` (non-empty) and a zero-based `chunk_index` |
+| `batch_id` | UUID | No | Batch ID shared by every document in the batch, used to aggregate completion notifications |
+| `batch_total` | integer | No | Number of documents in the batch; provide it together with `batch_id` |
+
+This replaces the document chunks and starts embedding. The server tracks progress with Redis counters (`kb_batch:{batch_id}:remain`, `:total`, `:success`, `:failed`; TTL 7200 seconds) and sends one aggregated notification when the last document finishes (all succeeded, all failed, or partial success — partial success prefers the failure notification; the switches and wording come from the site notification settings). Without `batch_id` each document notifies on its own.
 
 ### Preview Chunks
 
@@ -331,12 +349,57 @@ curl -X POST "https://your-domain.com/api/v1/knowledge-bases/{kb_id}/search" \
   -d '{"query": "How to reset password", "search_mode": "hybrid", "top_k": 5}'
 ```
 
-Query length is limited to 1-1000 characters; in hybrid mode, `dense_weight` and `lexical_weight` cannot both be 0.
+Query length is limited to 1-1000 characters; in hybrid mode, `dense_weight` and `lexical_weight` cannot both be 0. This endpoint searches only the knowledge base in the path; global fusion and single-rerank across several knowledge bases run inside agent/workflow retrieval.
 
-Each result in the response `results` array contains `chunk_id`, `document_id`, `document_name`, `content`, `score`, `metadata`, `search_type`, and per-stage scores: `dense_score`, `lexical_score`, `fusion_score`, `rerank_score`, `rerank_rank`. The `timings` array records `recall`, `rerank`, `total` stage latencies in milliseconds.
+Response shape:
+
+| Field | Description |
+| --- | --- |
+| `query` | The original query |
+| `results` | Result array, described below |
+| `total` | Number of results |
+| `diagnostics` | Per-knowledge-base diagnostics (`kb_id`, `code`, `detail`, `stage`) |
+| `timings` | Stage latencies in milliseconds: `recall`, `rerank`, `context`, `total` |
+
+Each result contains `chunk_id`, `document_id`, `document_name`, `content`, `score`, `metadata`, `search_type`, and per-stage values: `dense_score`/`dense_rank`, `lexical_score`/`lexical_rank`, `fusion_score`/`fusion_rank`, `rerank_score`/`rerank_rank`/`rerank_reason`, `final_score_stage` (`dense`/`lexical`/`fusion`/`rerank`), plus channel degradation reasons in `degradation_reasons` (for example full-text recall failed but vector results were returned). Score fields for a channel that did not recall the chunk are `null`.
+
+```json
+{
+  "code": 0,
+  "data": {
+    "query": "How to reset password",
+    "total": 1,
+    "results": [
+      {
+        "chunk_id": "chunk-012",
+        "document_id": "doc-789",
+        "document_name": "Account handbook",
+        "content": "Click reset password in personal settings…",
+        "score": 0.032,
+        "search_type": "hybrid",
+        "dense_score": 0.86,
+        "dense_rank": 1,
+        "lexical_score": 4.12,
+        "lexical_rank": 2,
+        "fusion_score": 0.032,
+        "fusion_rank": 1,
+        "final_score_stage": "fusion"
+      }
+    ],
+    "diagnostics": [],
+    "timings": [
+      {"stage": "recall", "latency_ms": 120.4},
+      {"stage": "rerank", "latency_ms": 0},
+      {"stage": "context", "latency_ms": 1.8},
+      {"stage": "total", "latency_ms": 127.9}
+    ]
+  },
+  "msg": "success"
+}
+```
 
 <Callout type="warn">
-  In hybrid retrieval mode, `dense_weight` and `lexical_weight` cannot both be `0`; the request will be rejected.
+  In hybrid retrieval mode, `dense_weight` and `lexical_weight` cannot both be `0`; the request is rejected. Hybrid mode also sits behind the site rollout: a team outside it degrades silently to pure vector with no separate degradation flag in the response.
 </Callout>
 
 ### Multi-Config Comparison Retrieval
@@ -345,7 +408,21 @@ Each result in the response `results` array contains `chunk_id`, `document_id`, 
 POST /api/v1/knowledge-bases/{kb_id}/search/batch
 ```
 
-Request body is an array of retrieval configs, each executed independently and returned for parameter comparison.
+One query, several independently executed configurations, for comparing parameters:
+
+```json
+{
+  "query": "How to reset password",
+  "configurations": [
+    {"id": "baseline", "search_mode": "hybrid", "top_k": 5},
+    {"id": "dense-only", "search_mode": "vector", "top_k": 5, "score_threshold": 0.6}
+  ]
+}
+```
+
+- `configurations` accepts at most `10` items; each `id` is required (max 64 characters) and must be unique; configuration fields match single retrieval.
+- The response is `{ "query": "...", "outcomes": [...] }`. `outcomes` follows request order and each item carries `id` and `status`: `fulfilled` includes the full `response` (same shape as single retrieval), `rejected` includes `error` (`code`, `retrieval_error_category`, `stage`).
+- A failure in one configuration never hides the results of the others.
 
 ## Cross-Team Sharing
 

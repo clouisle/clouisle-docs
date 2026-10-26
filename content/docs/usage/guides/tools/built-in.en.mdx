@@ -4,51 +4,120 @@ description: Enable and configure the tool capabilities that ship with Clouisle
 icon: Wrench
 ---
 
-Built-in tools are registered by the platform and never created or deleted. Select one under **Capabilities** > **Tools** to test it; tools that need credentials show "Configuration needed", and **Configure** stores the team credentials. Tool details list the parameter name, type, required flag, enum, and default value.
+Built-in tools are registered by the platform and never created or deleted. Select one under **Capabilities** > **Tools** to test it; tool details list the parameter name, type, required flag, enum, and default value. Credentials for built-in tools are configured server-side by the site administrator; regular members and Agents can never write or override them.
+
+<Callout type="info">
+  Web search is the one configuration entry that is not per team or per Agent: an administrator enables and configures it once at the site level. See “Web search (site-managed)” below.
+</Callout>
 
 ## Selectable Built-in Tools
 
 These tools appear in the tool catalog and can be bound to an Agent directly:
 
-| Tool ID | Purpose | Extra configuration |
+| Tool | Purpose | Requirement |
 | --- | --- | --- |
-| `get_current_time` | Current date, time, weekday, and timestamp for a time zone (`timezone_name`, default `UTC`) | None |
-| `format_datetime` | Format a timestamp with `strftime` (`timestamp` defaults to now; `format_string` defaults to `%Y-%m-%d %H:%M:%S`) | None |
-| `calculate` | Math calculation (`expression`) | None |
-| `unit_convert` | Unit conversion (`value`, `from_unit`, `to_unit`) | None |
-| `web_search` | Web search (`query` required; `num_results` default `5`, max `10`) | `TAVILY_API_KEY` / `BOCHA_API_KEY` (optional) |
-| `fetch_webpage` | Fetch a page and extract its text (`url` required; `max_length` default `5000` characters) | None |
-| `rss_feed_reader` | Parse an RSS / Atom feed (`url` required; `limit` default `10`, max `30`) | None |
-| `markitdown` | Convert uploaded PDF / Word / Excel / PPT / text files to text (`files_url` required, an array of URLs) | None |
-| `artifact` / `bash` / `edit` / `read` / `write` | Artifact management and file I/O inside the code sandbox | Sandbox runtime |
+| Current time | Current date, time, weekday, and timestamp for a time zone; the time zone defaults to `UTC` | None |
+| Format datetime | Format a timestamp, defaulting to now and to `%Y-%m-%d %H:%M:%S` | None |
+| Calculate | Evaluate a math expression | None |
+| Unit convert | Convert between length, weight, temperature, and similar units | None |
+| Web search | Search the web, returning `5` results by default and at most `10`; choose the site default or an enabled engine | An administrator has enabled and configured search engines |
+| Web page fetching | Fetch a page, extract its body, and save it as a protected document | None |
+| RSS feed reader | Parse an RSS / Atom feed, returning `10` items by default and at most `30` | None |
+| Document conversion | Convert uploaded PDF / Word / Excel / PPT / text files to text | None |
+| Sandbox file tools | Manage artifacts and read/write files inside the code sandbox | Sandbox runtime |
 
-<Callout type="info" title="Search backends for web_search">
-  `web_search` defaults to the `auto` engine: it prefers a configured commercial backend — Tavily when `TAVILY_API_KEY` is set, otherwise Bocha when `BOCHA_API_KEY` is set — and falls back to **key-free** DuckDuckGo when neither is configured. You can also force `tavily` / `bocha` / `duckduckgo`; in `auto` mode a failing commercial backend automatically falls back to DuckDuckGo. Credentials live in server-side team configuration — never write them into an Agent prompt.
+## Web search (site-managed)
+
+The engine selection and every credential for web search belong to the site. There is exactly one configuration, never one per team or per Agent. Administrators open it from the **Configure search** button on the platform **Capabilities** page, or from **Capabilities** > **Tools** > **Web Search** > **Configure** in the dashboard — no team selection is required.
+
+### Available engines
+
+| Engine | Notes | Requirement |
+| --- | --- | --- |
+| Tavily | Tavily search service | The administrator provides a Tavily API key |
+| Bocha | Bocha search service | The administrator provides a Bocha API key |
+| SearXNG | A SearXNG instance the administrator runs | The instance can enable JSON output |
+| DeepSeek Search | DeepSeek's own search service | The administrator provides a DeepSeek API key |
+
+The administrator enables engines one by one and names a **default engine**. The default must be an enabled engine, otherwise the save is rejected. `auto` in Agents and workflows means “use the site default” — it is **never** inferred from which keys happen to exist.
+
+Turning every engine off is allowed as an explicit shutoff; web search then fails with a localized error instead of switching to another source.
+
+<Callout type="warn" title="No key-free engine and no automatic fallback">
+  Clouisle does not ship DuckDuckGo, Bing, or any other key-free search, and there is no “if provider A fails, try provider B” chain. A disabled engine, a missing credential, or an upstream failure returns the error to the Agent or workflow, which surfaces it to the caller — never a silent switch to another engine or a plausible-looking empty result.
 </Callout>
 
-### Tools injected by capability switches
+### Writing and rotating credentials
 
-The following tools are **not** in the catalog and cannot be attached through `tools_config`; each is injected by its own Agent capability switch:
+Search credentials are entered by the administrator in the site configuration. After saving, the UI only shows “configured” and never echoes the value. When updating:
 
-| Tool ID | Switch | Description |
-| --- | --- | --- |
-| `ask_user` | **User input** (`enable_user_input_request`) | Asks the user an interactive question form and waits for the answer |
-| `generate_image` | **Image generation** (`enable_image_generation`) | Generates images with an authorized image model |
-| `generate_video` | **Video generation** (`enable_video_generation`) | Generates videos with an authorized video model |
+| What you submit | Effect |
+| --- | --- |
+| Leave it blank | Keep the stored credential |
+| Clear it explicitly | Remove that engine's credential |
+| Enter a new value | Replace it (rotate) |
+
+Enabling an engine that needs a credential without providing one, or pointing the default engine at a disabled engine, fails the save. Search credentials previously stored per team or per Agent are no longer active and are not automatically promoted to site configuration.
+
+### How Agents and workflows select an engine
+
+Agent orchestration and workflow search nodes share one enabled-only engine selector: the default option inherits the site default, and every other option lists only currently enabled engines. A previously saved selection is retained even if its engine is later disabled — it is never silently rewritten — but **execution rechecks the site configuration**, so disabling an engine also blocks selections saved earlier.
+
+### SearXNG instance
+
+In the same site dialog, enter the instance root, for example `https://search.example.com` or `https://example.com/searxng/`. The server keeps that prefix and appends `/search`, so:
+
+- A subpath is allowed; a trailing `/` is stripped.
+- `/search` itself, query parameters, fragments, and embedded username/password are rejected.
+- The absolute URL is limited to `2048` characters.
+
+If the instance sits behind gateway authentication, enter a bearer token; the address must then be HTTPS. Unauthenticated instances need no token. If a token already exists and you change the instance address, you must explicitly replace or clear that token in the same request — otherwise the save is rejected so a stale token is never replayed against a new address.
+
+The instance must enable JSON output in its own `settings.yml`:
+
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+Runtime behavior: each search submits the query to the instance's `/search` and requests JSON. The timeout is `30` seconds; redirects are **not** followed; requests are not retried and never fall back to another engine. SearXNG's engine coverage and operator support depend on the instance's own configuration — Clouisle does not promise that every query or `site:` operator is supported. Private addresses are blocked by default until an administrator adds the target to the site allowlist; cloud metadata addresses stay blocked.
+
+### DeepSeek Search
+
+After enabling DeepSeek Search and entering an API key, Clouisle calls DeepSeek's own search service rather than routing search through a chat model. It requests only a long, model-readable summary (roughly 600–800 characters, falling back to a shorter snippet) and never downloads full page bodies. Searches are billed per **successful request**, independent of the number of results, and share the account-level search request limit. That spend is separate from chat-model token quota.
+
+### Verifying the configuration
+
+After saving, select web search on the tool test page, choose an engine (or the site default), and run a real search. Cover at least one multiword Chinese query (e.g. `上海天气 今天`), one multiword technical query, and one `site:` query, and judge relevance rather than merely “it returned something”. A 403 from the instance usually means JSON output is off, or the gateway rejected access.
+
+## Web page fetching
+
+Web page fetching takes exactly one URL parameter: an HTTP(S) page, a `data:` address, or a protected attachment address within the current conversation or workflow run.
+
+- Local file paths and other schemes (`file://`, `ftp://`, …) are rejected; the tool never reads files from the server disk.
+- HTML pages are first reduced to readable Markdown: links and tables are kept, images are not embedded, and the page title is extracted; if extraction yields nothing, the document parser takes over.
+- The full body is saved as a protected document scoped to the current execution, and the UI and model first receive only a bounded preview plus citations. More content can be read to the end, or located by keyword — content is never silently truncated.
+- If a single page's extracted text is too large, the tool returns an error instead of truncating.
+
+## Feeds
+
+The feed reader parses RSS / Atom into a structured article list: `10` items by default with a maximum of `30`, a `20`-second request timeout, and redirects followed. Every article carries a title; link, published time, author, and summary appear only when the feed provides them — empty fields are omitted rather than emitted as empty strings. Summaries are stripped of HTML tags, entity-unescaped, and whitespace-collapsed first.
+
+## Tools injected by capability switches
+
+The following tools are **not** in the catalog and cannot be attached manually; each is injected by its own Agent capability switch:
+
+| Capability | Injected behavior |
+| --- | --- |
+| **User input** | Asks the user an interactive question form and waits for the answer |
+| **Image generation** | Generates images with an authorized image model |
+| **Video generation** | Generates videos with an authorized video model |
 
 ### Memory tools
 
-When Agent memory is enabled (`enable_memory`), these 5 memory tools are injected. `auto_extract` only gates writes — the read tools stay available when it is off:
-
-| Tool | Purpose | Limits |
-| --- | --- | --- |
-| `search_memory` | Find relevant memory entities | `query` required; `top_k` defaults to `5` and is clamped to `1-10`; supports `time_window_days` and `entity_type` filters |
-| `get_memory_subgraph` | Read related entities and relations | `entity_ids` at most `5` (entity names or IDs); `max_depth` `1-3`, default `1`; `direction` is `incoming` / `outgoing` / `both` (default `both`) |
-| `create_memory_entity` | Create a memory entity | Write tool; unavailable when `auto_extract` is off |
-| `create_memory_relation` | Create a relation between entities | Write tool; unavailable when `auto_extract` is off |
-| `update_memory_entity` | Update an entity's description or properties | Write tool; unavailable when `auto_extract` is off |
-
-Use `search_memory` to find candidate entities first; call `get_memory_subgraph` only when the answer depends on relationships. See [Memory and Context](/en/usage/guides/agent/memory).
+When Agent memory is enabled, the model automatically gains memory capabilities: searching relevant memories, reading related entities along relations, and — while automatic extraction is on — writing new entities and relations. With automatic extraction off, only read capabilities remain and no new memories are created. See [Memory and Context](/en/usage/guides/agent/memory) for behavior and configuration.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/builtin-tools-list.png" alt="Built-in tools list" />
@@ -56,7 +125,7 @@ Use `search_memory` to find candidate entities first; call `get_memory_subgraph`
 </figure>
 
 <Callout type="warn">
-  Execution results and artifacts of the sandbox tools (`bash` / `read` / `edit` / `write` / `artifact`) must be accessed per team permissions; never share internal download URLs.
+  Execution results and artifacts of the sandbox tools (script execution and file I/O) must be accessed per team permissions; never share internal download URLs.
 </Callout>
 
 <Callout type="info">

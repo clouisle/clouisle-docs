@@ -4,53 +4,65 @@ description: Understand multi-tenant resource boundaries, role permissions, auth
 icon: ShieldCheck
 ---
 
-Clouisle isolates Agents, Workflows, Knowledge Bases, model authorization, tools, and Skills by team. The current team determines the boundary for querying and creating resources in the platform workspace.
+Clouisle isolates Agents, workflows, Knowledge Bases, model authorization, tools, and Skills by team. The current team determines the boundary for querying and creating resources in the platform workspace.
 
-### Team roles
+### Team isolation
 
-Team roles are owner, administrator, member, and viewer. The owner handles ownership transfer and cannot be removed or leave directly; administrators can manage team resources; finer-grained operations are decided jointly by global role permissions and scoped roles.
+A team is the boundary for resources and data: team resources are visible to team members by default, and cross-team access is rejected rather than returning empty data. Private resources are narrower still — private Agents, workflows, and tools are usable only by their creator; legacy private resources whose creator no longer exists are handled by team administrators.
 
-### Permissions
+Cross-team sharing covers tools and Knowledge Bases: a custom tool can be shared read-only or with execution results, and a Knowledge Base is shared read-only. Sharing is one-way, initiated and revoked by the owning team. Agents and workflows have no per-team authorization layer.
 
-Backend permission codes use `resource:action` or `admin:resource:action`. Super administrators bypass permission checks. Non-admin resources can also be authorized through team- or resource-scoped roles.
+### Roles and permissions
 
-Authorization is enforced server-side and fail-closed: team resources go through `check_team_access`, and Agents go through `check_agent_access` (a private Agent is readable only by its creator, creator-less legacy private Agents fall back to the team-admin check, and an unauthorized request gets 403 or 404 rather than empty data). The frontend is a **convenience layer**: it hides menus and buttons by permission but is not a security boundary — calling the API directly is rejected all the same, and conversely a visible button does not prove the backend allows the operation.
+Authorization combines two layers:
+
+- **Global roles** decide *what* someone can do — enter the admin console, create Agents, change site settings.
+- **Team roles** (owner, administrator, member, viewer) decide *where and at what level*. Team roles carry no permissions by themselves; team-management and deletion actions additionally require owner or administrator in that team.
+
+Super administrators bypass every check. Five built-in roles exist (Super Admin, Admin, Team Admin, Member, Viewer), and custom roles can combine permissions. Authorization is enforced server-side; hiding menus and buttons in the frontend is only convenience: calling the service directly is rejected all the same, and a visible button does not guarantee success.
+
+See [Roles and permissions](../guides/administration/roles-permissions.mdx) for who can do what, and the [permissions reference](../../reference/permissions.mdx) for the permission catalog and role matrix.
 
 ### Session and data isolation
 
-Regular users can only see their own conversations and data; users with `admin:dashboard:access` (or Super Admin) can view all team conversations, and team-scoped queries additionally require the team owner/administrator role. API Keys are managed per user: users can only view and manage their own keys; only Super Admin can view all keys across teams.
+Regular users see only their own conversations and data. Administrators with admin console access can view all team conversations, and team-scoped queries additionally require the team owner or administrator role. API keys belong to users: users can view and manage only their own keys, and only super administrators can view all keys across teams.
 
 ### Authentication and account security
 
-The site can combine password sign-in, email verification, administrator approval, click captcha, password policy, password expiration, single session, TOTP, and SSO. SSO supports multiple connections; administrators can disable password sign-in. Active sessions default to `30` days (controlled by the `session_timeout_days` site setting); the JWT fallback token lasts `8` days.
+A site can combine password sign-in, email verification, administrator approval, click-based human verification, password policy, password expiration, single session, TOTP, and SSO. SSO supports multiple connections, and administrators can disable password sign-in. Active sessions last `30` days by default.
 
-Human verification is a **one-time click captcha**, not an image-text captcha: the sign-in page fetches a challenge (`GET /api/v1/login/captcha`), a successful click is exchanged by `POST /api/v1/login/captcha/click` for a private one-time proof, and the login request then carries `captcha_id` + `captcha_token`; a missing or expired proof returns `captcha_required` / `captcha_invalid`. The security page exposes exactly **one** switch, `enable_captcha` (default `false`), with **no** failure threshold, validity window, or difficulty setting — it is a supplementary anti-automation measure, not a substitute for login lockout.
+Human verification is a **one-time click challenge**, not an image-text CAPTCHA: users complete a click before submitting the sign-in form, and a missing or expired challenge rejects the sign-in. The Security page has exactly this one switch — no failure threshold, validity window, or difficulty setting. It is a supplementary anti-automation measure, not a substitute for lockout and TOTP.
 
 What actually stops brute force is the lockout logic:
 
-- **Account lockout**: after `max_login_attempts` (default `5`) consecutive failures, the account is locked for `lockout_duration_minutes` (default `15`) minutes. The lock is evaluated before password verification, so even a correct password returns `account_locked` (with remaining seconds) while locked; a successful sign-in resets the counter.
-- **TOTP lockout**: `5` failures inside a 300-second window lock verification for `900` seconds (15 minutes), counted per user; a successful verification resets the counter.
-- **Per-IP login counter**: Redis key `login:attempts:ip:<ip>` with a `3600`-second TTL, but only read/write helpers exist and nothing in the login flow calls them, so it does **not** throttle anything today.
+- After the configured number of consecutive failures, an account is locked for a period; while locked, even a correct password is refused and the remaining time is shown.
+- A successful sign-in resets the failure counter.
+- Consecutive TOTP verification failures also trigger a short lockout, counted per user; a successful verification resets the counter.
 
-All thresholds live in the Security group of site settings, see [Site Settings](../guides/administration/site-settings.mdx).
+All thresholds live under **Settings** > **Security**; see [Site settings](../guides/administration/site-settings.mdx).
 
-### API Keys
+### Outbound network protection
 
-API Keys start with `clou_` and are sent via `Authorization: Bearer`. A key can be bound to **specific Agents and Workflows** (empty lists = access to all, the backward-compatible default), and can carry an expiration time and an enabled flag; binding is enforced server-side, so a key reaching an unauthorized Agent or Workflow gets 403.
+Three independent protections govern outbound access. All can be switched under **Settings** > **Security** and are on by default. Turning one off never clears its saved list, and enforcement resumes as soon as it is turned back on.
 
-The `rate_limit` field (default `1000`/minute, `0` meaning unlimited) and the `scopes` field are **stored and displayed, but nothing reads them at runtime** — do not treat them as active throttling or permission narrowing. Keys are managed per user: users can only view and manage their own keys; only Super Admin can view all keys across teams.
+- **External fetching protection**: custom HTTP tools, HTTP request nodes, Knowledge Base URL imports, and database connections cannot reach internal, loopback, or cloud metadata addresses by default. To call internal services, an administrator adds the target to the outbound network allowlist, which accepts single addresses, ranges, exact hostnames, and wildcard domains, up to `200` entries. Cloud metadata addresses and global wildcards can never be added. With the switch off, targets are unrestricted, though URL and port format checks still run — format checks are not a security boundary.
+- **Model egress**: the request address entered when registering a model provider must match the model endpoint allowlist (scheme, hostname, and port exactly). The list is preloaded with common providers and local model addresses, up to `200` entries. Model traffic goes only through this list and is not subject to the blocked ranges of external fetching protection — so running a local model service only needs a model endpoint entry, not open internal access.
+- **Sandbox egress**: applies only to the code sandbox, accepts exact hostnames only, defaults to the official Python and npm package hosts, and an empty list blocks all outbound traffic. It never shares entries with the outbound network allowlist: allowlisting an internal host for tools does not open it to the sandbox, and vice versa. Turning the switch off affects new jobs only; filesystem isolation and resource limits remain.
 
-### Outbound network and SSRF protection
+Each protection judges differently: external fetching resolves the hostname before evaluating addresses, so aliases or DNS tricks cannot slip past; model egress compares the full address; sandbox egress permits only HTTPS to allowlisted hosts. If any switch cannot be read, it is treated as on, so blocking continues.
 
-Outbound access has two independent allowlists:
+For exact fields, defaults, and matching rules, see the [site settings reference](../../reference/site-settings.mdx).
 
-- **External fetching (SSRF exemptions)**: the `ssrf_allowed_targets` site setting (JSON array, max 200 entries). Private, loopback, link-local, and reserved addresses are denied by default; **permanently blocked regardless of the allowlist** are cloud metadata and special ranges: `metadata.google.internal`, `169.254.169.254`, `169.254.0.0/16`, `224.0.0.0/4`, `0.0.0.0/32`. `localhost` / `local` are denied by default but **can** be allowlisted (a locally deployed model or internal service is the common case). These forms are rejected on save: `*`, `0.0.0.0/0`, `::/0`, bare `0.0.0.0` or `::`, any CIDR overlapping the metadata range, and entries containing `/ ? # @` or whitespace. Allow only the exact hosts or ranges you need — an over-broad exemption effectively disables SSRF protection.
-- **Model egress**: the base URL you enter when registering a model provider in the admin console must be in the `model_endpoint_allowlist` site setting (about 20 entries by default, including OpenAI, Anthropic, DashScope, SiliconFlow, and local `http://localhost:11434`; cap 200). Model traffic only goes through this allowlist and is not subject to the SSRF blocked-range checks above — so running Ollama locally only needs the model allowlist entry, not a change to `ssrf_allowed_targets`. Add the entry before onboarding a self-hosted or private model service, otherwise saving the model fails outright.
+### API keys
 
-The two checks work differently: external fetching resolves the hostname first and then validates the resolved IPs (so equivalent spellings or DNS tricks cannot slip past), while model egress canonicalizes the base URL to `scheme://host:port` (rejecting credentials, query, or fragment) and requires an exact match in the allowlist, returning the administrator-approved canonical value on success (see [Site Settings](../guides/administration/site-settings.mdx) and [Model](./model.mdx)).
+API keys start with `clou_` and are sent as the access credential. A key can be bound to specific Agents and workflows (both lists empty means access to everything), and can carry an expiration time and an enabled state. Binding is enforced server-side, so a key reaching an unauthorized Agent or workflow is rejected.
+
+The interface lets you enter a per-minute request limit and scopes, but the current version neither throttles nor narrows permissions accordingly — do not treat them as effective security controls. Keys belong to users: users can view and manage only their own keys, and only super administrators can view all keys across teams.
 
 ### Audit and notifications
 
-The admin panel records resource operations, actors, and change snapshots, and offers filtering by event, user, team, and time. Notifications can be shown in-app and sent out via email, DingTalk, WeCom, Feishu, Slack, or Webhook.
+The admin console records resource operations, actors, and change snapshots, with filtering by event, user, team, and time. Sensitive fields are masked when recorded and displayed, so raw secrets never appear in logs.
 
-Related content: [Team management](../guides/administration/teams.mdx), [Roles and permissions](../guides/administration/roles-permissions.mdx), [Sign-in and accounts](../guides/administration/authentication.mdx).
+Notifications can stay in-app or be sent via email, Webhook, or Feishu; DingTalk, WeCom, and Slack channels were removed.
+
+Related content: [Team management](../guides/administration/teams.mdx), [Roles and permissions](../guides/administration/roles-permissions.mdx), [Sign-in and accounts](../guides/administration/authentication.mdx), [Audit logs](../guides/administration/audit-logs.mdx).

@@ -27,6 +27,24 @@ Beat is the scheduler. Multiple replicas would deliver scheduled tasks repeatedl
 
 The `worker` must consume all four queues `default,agent,knowledge,workflow`. Durable AgentRuns are routed to the `agent` queue, so if `-Q` omits `agent` nothing consumes them: the conversation keeps showing as running and no error is raised. Restore the four-queue `-Q`, or start a separate worker with `-Q agent`. The `sandbox` queue is consumed only by `sandbox-worker` and is not part of this list.
 
+## Messaging integrations
+
+### The Feishu long connection shows connected — why does nothing happen when I send a message?
+
+"Connected" only means the WebSocket is up. You also need the `im.message.receive_v1` event subscription, permissions such as `im:message.p2p_msg:readonly`, a published app version, and at least one backend `worker` consuming the `agent` queue to supervise the receiver. Miss any one and no message arrives; see [Troubleshooting → Feishu Long Connection Shows Connected but No Messages Arrive](./operations/troubleshooting.mdx#feishu-connected-no-messages).
+
+### WeChat replies are delayed or never come back — why?
+
+WeChat is polled: Beat dispatches a batch every 3 seconds, a batch stops at 30 seconds, and a claim can be taken over after 90 seconds. Check that the platform capability is enabled, Beat has been restarted, `worker` consumes the `default` queue, and the binding is `connected`. Causes and steps: [Troubleshooting → WeChat Polling Pauses](./operations/troubleshooting.mdx#wechat-polling-paused).
+
+### Where do I find why a message or artifact was not delivered?
+
+The admin **Delivery Log** (`/deliveries`) lists each delivery by status, and `error`/`error_detail` carry the provider's failure reason. No record means nothing was produced upstream rather than a send failure. Field reference: [Delivery Log](../usage/guides/integrations/delivery-log.mdx).
+
+### Why is the `wechat-receiver` service no longer needed?
+
+With unified integrations, WeChat polling runs as ordinary tasks on the `default` queue and the Feishu long connection is supervised by the `agent`-queue worker, so no standalone receiver service exists. Removing it during an upgrade does not remove the Sandbox Worker dependency: Agent code tools still need it.
+
 ## Storage and scaling
 
 ### Why do scaled-up APIs need a shared volume?
@@ -35,7 +53,7 @@ Local upload storage is mounted on the API. Multiple API replicas must see the s
 
 ### Why are files or retrieval results still missing after restoring the database?
 
-The database only contains metadata. Original files live in upload storage and vectors live in Qdrant; all three must be restored from a consistent backup.
+The database only contains metadata. Original files live in upload storage and vectors live in Qdrant; all three must be restored from a consistent backup. Sandbox workspaces and checkpoints are node-local data outside the backup scope, so they cannot be recovered after a node disk loss.
 
 ## Retrieval and tasks
 
@@ -60,6 +78,10 @@ No. Compose, Helm, and the single-file manifest all run `sandbox-worker` as root
 ### Is `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` on or off?
 
 The code default is `true` (`config.py`), and the official image, Compose, Helm, and K8s manifests set it to `true` as well. If you build your own image or manifest, do not drop this variable, or sandbox code will execute without filesystem isolation.
+
+### Can a sandbox session continue after the worker restarts?
+
+Yes, but only on the same disk: each round writes a checkpoint and a restarted process or reset session resumes from it, with one recovery allowed by default (`SANDBOX_SESSION_MAX_RESETS=1`). Compose uses the `sandbox_data` named volume and Kubernetes a node `hostPath`; moving to another node, changing the mount path, or losing the node disk makes recovery impossible. See [Troubleshooting → Sandbox Session Cannot Be Recovered or Checkpointing Fails](./operations/troubleshooting.mdx#sandbox-session-recovery).
 
 ## Security
 

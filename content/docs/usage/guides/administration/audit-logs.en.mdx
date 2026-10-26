@@ -4,289 +4,147 @@ description: View, filter, export, and archive system operation audit logs
 icon: ScrollText
 ---
 
-Audit logs record resource operations across the system: the actor, action, resource, before/after change snapshots, and source IP. Sensitive fields are redacted at write and display time, so raw secrets never appear in logs. Viewing audit logs requires `audit:read`; exporting requires `audit:export`.
+Audit logs record resource operations in the system: the actor, action, resource, before/after snapshots, and source IP. Sensitive fields are masked when recorded and displayed, so raw secrets never appear in logs.
 
-## Audit Log Events
+Viewing audit logs requires audit-log view permission, and exporting requires export permission; administrators assign these through roles, see [Roles and permissions](./roles-permissions.mdx).
 
-Audit logs cover the following event types. Each event records the actor, timestamp, resource, operation type, status, and change details.
+## What Audit Logs Record
 
-### Authentication Events
+Every event records the actor, time, resource, operation type, status, and change details. Events fall into these categories:
 
-User login, logout, and registration actions:
+### Authentication events
 
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `login_success` | Successful login | User, time, IP, User Agent, auth method, 2FA used |
-| `login_failed` | Failed login | User, time, IP, failure reason, attempt count |
-| `logout` | Logout | User, time, IP, session duration |
-| `register` | Registration | User, time, IP, registration method, email verified |
+Successful sign-ins, failed sign-ins, sign-outs, and registrations. Records the account, time, source IP, browser identifier, authentication method, whether two-factor authentication was used, plus failure reason and attempt count.
 
-### User Management Events
+### User management events
 
-Administrator actions on user accounts:
+Administrators creating, updating, deleting, activating, or deactivating users. Update events keep before/after field snapshots.
 
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `create_user` | Create user | Actor, time, new user email, full name, role, status |
-| `update_user` | Update user | Actor, time, changed fields before/after (e.g., role, status) |
-| `delete_user` | Delete user | Actor, time, deleted user identifier |
+### Team management events
 
-### Team Management Events
+Creating teams, changing team information, adding or removing members, and transferring ownership.
 
-Team creation and member changes:
+### Agent and workflow events
 
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `create_team` | Create team | Actor, time, team name, description, owner |
-| `add_team_member` | Add team member | Actor, time, team, member ID, member email, role |
-| `remove_team_member` | Remove team member | Actor, time, team, member ID, removal reason |
+Creating, updating, publishing, and deleting Agents and workflows. Update events keep before/after fields such as the prompt or iteration limit.
 
-### Agent Events
+### Sandbox task events
 
-Agent creation, update, publish, and deletion:
+The lifecycle of code sandbox jobs: start, completion, failure, cancellation, and recovery. Only the job identifier, source, and result are recorded — **never** the code, parameters, output, or raw error text. Failures carry a stable error category rather than a stack trace.
 
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `create_agent` | Create Agent | Actor, time, Agent name, team, model |
-| `update_agent` | Update Agent | Actor, time, changed fields before/after (e.g., `max_iterations`, `system_prompt`) |
-| `publish_agent` | Publish Agent | Actor, time, visibility, marketplace listing |
-| `delete_agent` | Delete Agent | Actor, time, Agent identifier |
+### API key events
 
-### Sandbox Task Events
+Creating, activating, and deactivating API keys. Records the name, scope, number of bound Agents/workflows, and expiration time.
 
-Sandbox task lifecycle (resource type `sandbox_task`), tracking code execution and recovery:
+### Site settings events
 
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `sandbox_task_started` | Sandbox task started | Task ID, submitter, time |
-| `sandbox_task_completed` | Sandbox task completed | Task ID, duration, exit status |
-| `sandbox_task_failed` | Sandbox task failed | Task ID, error message |
-| `sandbox_task_cancelled` | Sandbox task cancelled | Task ID, canceller |
-| `sandbox_task_recovered` | Sandbox task recovered | Task ID, recovery method |
+Single updates, bulk updates, and resets of site settings. Records the settings and their before/after values.
 
-### API Key Events
+### Security events
 
-API Key creation and state changes:
-
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `create_api_key` | Create API Key | Actor, time, Key name, scopes, agent/workflow count, expiration |
-| `activate_api_key` | Activate API Key | Actor, time, Key identifier |
-| `deactivate_api_key` | Deactivate API Key | Actor, time, Key identifier, deactivation reason |
-
-### System Settings Events
-
-Site configuration changes:
-
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `update_site_setting` | Update single setting | Actor, time, setting key, before/after values |
-| `bulk_update_site_settings` | Bulk update settings | Actor, time, count of updated settings, setting keys list |
-| `reset_site_settings` | Reset settings | Actor, time, reset category, count of reset settings |
-
-### Security Events
-
-Account security-related operations:
-
-| Event | Description | Recorded Content |
-| --- | --- | --- |
-| `change_password` | Change password | User, time, IP |
-| `reset_password` | Reset password | User, time, reset method, initiated by |
-| `activate_user` | Activate account | Actor, time, target user |
-| `deactivate_user` | Deactivate account | Actor, time, target user, deactivation reason |
+Changing a password, resetting a password, activating or deactivating an account. Records the actor, target user, and source IP.
 
 ## Viewing and Filtering
 
-Open **Admin** > **Audit Logs**. Each entry shows: timestamp, user, action, resource type, resource name, operation (create/read/update/delete), status, IP address, and details.
+Go to **Admin** > **Audit Logs**. Each record shows: time, user, action, resource type, resource name, operation (create/read/update/delete), status, IP address, and details.
 
-### Search and Filtering
+Filters:
 
-The list endpoint `GET /api/v1/admin/audit-logs` supports the following query parameters:
-
-| Parameter | Description |
+| Filter | Description |
 | --- | --- |
-| `user_id` | Filter by user UUID |
-| `team_id` | Filter by team UUID |
-| `action` | Filter by exact action values; supports repeated values for `action__in` match (wildcards not supported) |
-| `resource_type` | Filter by resource type (user, team, agent, workflow, etc.) |
-| `resource_id` | Filter by resource UUID |
-| `status` | Filter by status (`success`, `failed`, etc.) |
-| `start_date` / `end_date` | Filter by time period |
-| `search` | Case-insensitive substring (`icontains`) search over resource name, resource ID, and IP address |
+| User | By actor |
+| Team | By team |
+| Action | Exact match on one or more actions; no wildcards |
+| Resource type | User, team, Agent, workflow, and so on |
+| Resource ID | By specific resource |
+| Status | Success, failure, and so on |
+| Date range | Start and end dates |
+| Keyword | Case-insensitive substring match on resource name, resource ID, and IP address |
 
 <Callout type="info">
-  There is no dedicated IP address filter parameter, but the `search` field supports substring matching on IPs (e.g., `192.168.1.`). `search` does not interpret `*` or other glob patterns.
+  There is no IP-only filter, but the keyword matches IP fragments (such as `192.168.1.`). The keyword does not interpret `*` or other wildcards.
 </Callout>
 
 <Callout type="warn">
-  **Roadmap:** Cannot filter by changed field, before value, or after value. Field-level `changes` are visible only in log details and exports.
+  **Roadmap:** you cannot filter by changed field or value; field-level snapshots appear only in details and exports, and filter conditions cannot be saved.
 </Callout>
+
+### Viewing log details
+
+Click an entry to see the full details:
+
+- **Basic information**: record ID, time, actor, action, status
+- **Resource information**: resource type, resource ID, resource name, operation type
+- **Request information**: source IP, browser identifier, authentication method
+- **Change details**: field-level before/after snapshots (sensitive values masked)
+- **Metadata**: team, model, execution duration, and so on
 
 <Callout type="warn">
-  **Roadmap:** No saved-search feature yet. Re-run the filters you need manually.
+  **Roadmap:** there is no related-logs view. To find related entries, filter by the same user, resource ID, or date range.
 </Callout>
 
-### Viewing Log Details
+## Sensitive Data Masking
 
-Click a log entry to view full details, including:
+Snapshots are sanitized before they are stored, so raw secrets never appear anywhere in audit logs:
 
-- **Basic Information:** ID, timestamp, user, user ID, action, status
-- **Resource Information:** Resource type, resource ID, resource name, operation type
-- **Request Information:** IP address, User Agent, auth method
-- **Changes:** `before` / `after` field-level change snapshots (sensitive values redacted)
-- **Metadata:** Team ID/name, model, duration, etc.
-
-<Callout type="warn">
-  **Roadmap:** No "Related Logs" view. To find related entries, filter by the same `user_id`, `resource_id`, or time range.
-</Callout>
-
-## Sensitive Data Redaction
-
-Field-level `before` / `after` change data is processed by `AuditLogService.sanitize_changes` before storage:
-
-- **Sensitive fields are masked:** Keys containing `password`, `hashed_password`, `api_key`, `secret_key`, `access_token`, `refresh_token`, `private_key`, `secret`, or `token` are masked. String values longer than 8 characters show only the first 8 characters followed by `***`; other values are replaced with `***`.
-- **Email addresses are partially masked:** with a local part longer than 2 characters the first and last characters are kept (`a***e@example.com`); with 2 or fewer, only the first is kept (`a***@example.com`).
-- **Nested dictionaries are processed recursively.**
-- **Values are truncated** to a maximum field length (500 characters); oversized structures are replaced with a preview string.
-
-Because redaction happens at write time, raw secrets never appear in audit logs.
+- Password, key, access-token, refresh-token, and private-key fields are fully masked, keeping only a short identifiable prefix.
+- Emails show only the first and last characters, for example `a***e@example.com`.
+- Sensitive fields inside nested structures are masked too.
+- Long text becomes a preview: a single value over `500` characters, or a whole snapshot whose serialized form exceeds `500` characters, is stored as the first `500` characters plus an ellipsis. Details and exports therefore show a **preview**, not the full original.
 
 ## Exporting Audit Logs
 
-### Export Formats
+CSV and JSON are supported. Exports use the same filters as the list (except resource ID), return at most `10,000` rows, and are ordered newest first. CSV contains ID, time, user, action, resource type, resource name, operation, status, IP, and error message; JSON keeps the full entries and change snapshots.
 
-Supports CSV and JSON. The export endpoint `GET /api/v1/admin/audit-logs/export?format=csv|json` accepts every list filter **except `resource_id`** (`user_id`, `team_id`, `action`, `resource_type`, `status`, `start_date`, `end_date`, `search`) and returns up to 10,000 logs, newest first.
-
-<Callout type="warn" title="Export search differs from list search">
-  The list endpoint's `search` matches resource name, resource ID, and IP address; the **export endpoint's `search` matches resource name and IP address only** (no resource ID), and there is no `resource_id` parameter at all. Searching by resource ID and then exporting therefore yields more rows than the list view — for troubleshooting, export using resource name or IP as the criterion.
+<Callout type="warn" title="Export keyword scope is slightly narrower">
+  The list keyword matches resource name, resource ID, and IP address; the **export keyword matches only resource name and IP address**, and exporting by resource ID is not supported. Searching by resource ID and then exporting returns more rows than the list — use the resource name or IP as the export condition when troubleshooting.
 </Callout>
 
+Export is manual: there is no scheduled export or email delivery. Users without export permission do not see the export button.
 
-**CSV columns:** ID, Time, User, Action, Resource Type, Resource Name, Operation, Status, IP Address, Error Message
+## Retention and Archiving
 
-**JSON:** Exports full serialized entries (including `changes`).
+### Retention policy
 
-```bash
-curl -X GET "https://your-domain.com/api/v1/admin/audit-logs/export?format=csv" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
+Audit logs are kept for `365` days by default, configurable to `30-3650` days.
 
-<Callout type="warn">
-  **Roadmap:** No scheduled exports (daily/weekly/monthly) or delivery to email/S3. Exports are manual only.
-</Callout>
+**To configure:** go to **Admin** > **Site Settings** > **Storage** and change the **audit log retention** and **archive file path**.
 
-## Retention and Archival
+### Manual archiving
 
-### Retention Policy
+1. Go to **Admin** > **Site Settings** > **Storage**.
+2. In the **Audit logs** section, click **Archive** and confirm.
+3. Archiving runs in the background and the page shows progress; if it takes longer than `5` minutes the page reports a timeout, and you can refresh later for the result.
 
-Retention is controlled by the `audit_log_retention_days` site setting, default `365` days with a range of `30-3650`.
+> **Note:** the manual archive entry lives on the **Storage** settings page, not the audit log page — the audit log page only views, filters, and exports.
 
-**Configuration:** Navigate to **Admin** > **Site Settings** > **Storage**, set **Audit log retention (days)** and **Archive file storage path** (default `/var/log/clouisle/audit_archives`).
-
-### Manual Archive
-
-1. Navigate to **Admin** > **Site Settings** > **Storage**.
-2. In the **Audit Logs** section, click **Archive** and confirm.
-3. The task runs asynchronously (requires `audit:export`); the UI polls task status every 2 seconds and times out after 5 minutes.
-
-> **Note:** The manual archive control lives on the **Storage** settings page, not on the audit log page — the audit log page only views, filters, and exports.
-
-**Endpoints used:**
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | Trigger the archive; returns `{ "task_id", "status": "pending" }` |
-| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | Poll status: `PENDING` / `STARTED` / `SUCCESS` (with `result.archived_count`) / `FAILURE` (with `error`) |
-| `POST` | `/api/v1/admin/audit-logs/archive` | Equivalent trigger under the audit-log router: submits the same `tasks.archive_old_audit_logs` but returns only `task_id` — there is **no** companion status endpoint |
-
-All three require `audit:export`; both success and failure of the trigger are themselves written to the audit log (`trigger_audit_log_archive`).
-
-**How Archiving Works:**
-
-- The archive task `tasks.archive_old_audit_logs` selects logs older than the retention cutoff (`now - audit_log_retention_days`)
-- Logs are exported to local JSON files grouped by month, e.g. `/var/log/clouisle/audit_archives/audit_logs_202602.json` (existing monthly files are appended to)
-- Once archived, those rows are deleted from the database
+Archiving selects logs past the retention cutoff and writes them to monthly JSON files under the archive path; an existing file for the same month is appended to. Once archiving completes, the archived logs are **deleted from the database**.
 
 <Callout type="warn">
-  Archiving **deletes** the archived rows from the database, leaving only the local JSON files. The archive path must live on a persistent volume, otherwise a container rebuild destroys the only copy — and confirm `audit_log_retention_days` against your compliance requirement before triggering.
+  Archiving deletes the original records, leaving only the archive files. The archive path must be on persistent storage, otherwise a container rebuild loses the only copy; confirm the retention period meets compliance requirements before triggering.
 </Callout>
 
 <Callout type="warn">
-  **Roadmap:** There is no scheduled automatic archive — archiving is always manual — and no S3/Azure/Blob archive destinations. Archive output is written only to the local path configured in `audit_log_archive_path`.
+  **Roadmap:** there is no scheduled automatic archiving — it is always manual; the archive target can only be a local path, not object storage directly; and there is no restore workflow.
 </Callout>
 
-<Callout type="warn">
-  **Roadmap:** No restore workflow for archived logs. Monthly JSON archive files under the archive path remain available for manual inspection.
-</Callout>
+## Statistics and Limitations
 
-### Archive Status Query
+The audit log page shows four statistic cards at the top: total logs (all time), today's count, failure count, and active users over the last 7 days, for a quick read on system activity.
 
-`GET /api/v1/admin/audit-logs/stats/retention` returns: configured `retention_days`, `cutoff_date`, `logs_to_archive`, `oldest_log_date`, and `next_archive_date`.
-
-<Callout type="warn">
-  `next_archive_date` is a value the endpoint **computes as "tomorrow at 03:00"** — no Celery Beat schedule backs it. Archiving is always manual; do not read it as a promise that the system will archive automatically at that time (`app/core/celery.py`'s `beat_schedule` has no archive task).
-</Callout>
-
-## Statistics Endpoints
-
-`GET /api/v1/admin/audit-logs/stats` returns aggregate statistics: total logs, today's logs, failed logs, active users (last 7 days), top 5 actions, top 5 users.
-
-<Callout type="warn">
-  **Roadmap:** No audit report generator (user activity, admin actions, security events, resource changes, failed operations, or custom reports). The statistics endpoints above provide the currently available aggregates.
-</Callout>
-
-<Callout type="warn">
-  **Roadmap:** No real-time monitoring dashboard for audit logs. Site settings such as `audit_alert_enabled`, `audit_alert_webhook`, and failed-login thresholds exist as dormant configuration but are not consumed by any monitoring or notification code (see the "Audit Alerts" subsection of [Site Settings](./site-settings.mdx)).
-</Callout>
-
-## API Endpoint Reference
-
-| Method | Path | Description | Permission |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/admin/audit-logs` | Query audit log list (with filtering) | `audit:read` |
-| `GET` | `/api/v1/admin/audit-logs/{id}` | Get single audit log details | `audit:read` |
-| `GET` | `/api/v1/admin/audit-logs/export?format=csv\|json` | Export audit logs (up to 10,000) | `audit:export` |
-| `GET` | `/api/v1/admin/audit-logs/stats` | Get audit statistics aggregates | `audit:read` |
-| `GET` | `/api/v1/admin/audit-logs/stats/retention` | Get retention and archival status | `audit:read` |
-| `POST` | `/api/v1/admin/audit-logs/archive` | Trigger manual archive task (returns `task_id` only) | `audit:export` |
-| `POST` | `/api/v1/admin/site-settings/archive-audit-logs` | Trigger manual archive task (used by the Storage settings page; returns `task_id` + `status`) | `audit:export` |
-| `GET` | `/api/v1/admin/site-settings/archive-audit-logs/{task_id}` | Poll archive task status and result | `audit:export` |
+**Not implemented (Roadmap):** an audit report generator, a real-time monitoring dashboard, and automatic alerts for failed sign-ins or bulk deletions. For security alerts, use the security events and external channels in [Automatic notifications](./notifications.mdx).
 
 ## Best Practices
 
-### Audit Logging
-
-- Enable audit logging for all actions
-- Log both successes and failures
-- Include sufficient context
-- Protect log integrity
-- Review logs regularly
-- Archive logs appropriately
-- Monitor for anomalies
-- Set up alerts for critical events
-
-### Log Analysis
-
-- Review logs regularly
-- Look for patterns and trends
-- Investigate anomalies
-- Generate regular reports
-- Share findings with team
-- Document incidents and remediation
-- Use logs for compliance
-
-### Security
-
-- Restrict log access
-- Encrypt archived logs
-- Use secure storage
-- Monitor log access behavior
-- Audit the auditors
-- Maintain log integrity
-- Comply with regulations
+- Review failed sign-ins, permission-related events, and bulk deletions regularly.
+- After a key change, filter by resource ID and confirm the change matches expectations.
+- Grant audit view and export permissions to designated people only, not everyday business accounts.
+- Before archiving, confirm the archive path is on persistent storage with backups, and keep access records for archive files.
+- When using audit logs for compliance, confirm the retention period covers the regulatory window.
 
 ---
 
 See also:
-- [Roles & Permissions](./roles-permissions.mdx) — `audit:read` / `audit:export` permissions
-- [Notifications](./notifications.mdx) — security event notification channels
+- [Roles and permissions](./roles-permissions.mdx) — audit log view and export permissions
+- [Notifications](./notifications.mdx) — security event channels
+- [Site Settings](./site-settings.mdx) — audit log retention and archive configuration

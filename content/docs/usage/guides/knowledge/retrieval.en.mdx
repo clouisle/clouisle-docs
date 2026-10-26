@@ -1,147 +1,133 @@
 ---
 title: Retrieval and Quality Tuning
-description: Compare vector, full-text, hybrid, and rerank results in the retrieval lab, and diagnose failures per stage
+description: Compare vector, full-text, hybrid, and reranked results in the retrieval lab and diagnose failures by stage
 icon: SearchCheck
 ---
 
-**Hit Testing** (the retrieval lab) runs real retrieval without touching the production configuration and shows the intermediate values of each stage: recall, fusion, rerank, and final ranking. Use it to prove that a chunking change, a mode switch, or a weight change actually improved recall. Open it from the knowledge base detail page → **Hit Testing** (requires the `kb:test` permission).
+**Hit testing** (the retrieval lab) runs real retrieval without touching production configuration and shows intermediate results for recall, fusion, reranking, and final ranking. Use it to verify whether chunking changes, mode switches, or parameter changes actually improve recall. Entry: knowledge base detail → **Hit testing** (requires permission to view the knowledge base and run retrieval tests).
 
-## Retrieval modes
+## Retrieval Modes
 
-| Mode | Channel | Request-level default | KB setting default | Best for |
+| Mode | Channel | Default on a request | Default in knowledge base settings | Use for |
 | --- | --- | --- | --- | --- |
-| `vector` | Vector (semantic) | — | `null` | Questions phrased differently from the source; requires an embedding model |
-| `fulltext` | Full-text (keyword, BM25-style) | — | `null` | Proper nouns, identifiers, error codes — exact strings |
-| `hybrid` | Both channels in parallel + RRF fusion | `hybrid` | `null` | Recommended general default |
+| **Vector** | Semantic similarity (needs an embedding model) | — | Empty | Questions phrased differently from the source |
+| **Full-text** | Keyword matching | — | Empty | Proper nouns, IDs, error codes, exact strings |
+| **Hybrid** | Both channels, then merged ranking | **Hybrid** | Empty | General recommendation |
 
-There are two layers of defaults: a **search request** without `search_mode` runs as `hybrid`, while the **knowledge base setting** `search_mode` defaults to empty (`null`) and only becomes the default for that KB's Agent/workflow retrieval once you set it explicitly. Field definitions are in the [Knowledge Base settings reference](/en/reference/knowledge-settings).
+There are two layers of defaults: a **retrieval request** with no mode runs hybrid; the **knowledge base setting** is empty by default and only becomes the default mode for Agent/workflow retrieval once set explicitly. Field definitions are in the [Knowledge base settings reference](/en/reference/knowledge-settings).
 
-<Callout type="warn" title="Hybrid may silently fall back to pure vector">
-  `hybrid` is behind a rollout gate: if the site disables hybrid mode (`retrieval_hybrid_mode = disabled`, `RETRIEVAL_HYBRID_KILL_SWITCH`, or the team falls outside the rollout percentage), retrieval **degrades silently to pure vector search** with no separate degradation flag in the response. If hybrid is selected but keyword results are missing, first confirm with your administrator that hybrid is enabled for that team.
-</Callout>
+## Where Hybrid Retrieval Is Available
 
-## Parameter reference
+Site administrators control hybrid availability: it may be on for all teams, off entirely, or rolled out per team (some teams on). The default is per-team rollout at full coverage.
 
-The hit-testing panel lets you override the following (all optional):
+- A team outside the rollout gets **pure vector results** even when it requests hybrid, and the UI does not label this as a downgrade; a degradation reason appears only when one channel fails.
+- If “hybrid is selected but no keyword hits come back”, first ask an administrator whether the team is in the rollout, then check whether the degradation reason points at the vector channel failing.
+- If the site retrieval settings cannot be read, hybrid is treated as on, so a configuration fault never takes retrieval down.
 
-| Parameter | UI default | Range | Notes |
+## Parameter Reference
+
+The hit-testing panel can override the following (all optional):
+
+| Parameter | UI default | Range | Description |
 | --- | --- | --- | --- |
-| Query `query` | — | `1-1000` characters | Matched literally; no boolean operators, wildcards, or field syntax |
-| Search mode `search_mode` | `hybrid` | `vector` / `fulltext` / `hybrid` | See the table above |
-| Max results `top_k` | `5` | `1-20` | Number of results (the KB setting allows `1-100`) |
-| Dense score threshold `score_threshold` | `0` | `0-1` | Drops vector recalls below that similarity |
-| Dense weight `dense_weight` | `1.0` | `>=0` | RRF weight of the vector channel in hybrid mode |
-| Lexical weight `lexical_weight` | `1.0` | `>=0` | RRF weight of the full-text channel in hybrid mode |
-| `rrf_k` | `60` | `1-1000` | RRF rank constant; larger flattens rank differences |
-| Rerank `rerank_enabled` | `true` | boolean | Overrides the KB setting |
-| Rerank candidate pool `rerank_candidate_k` | `10` | `1-100` | Candidates sent to the reranker; the UI uses `max(top_k, candidate pool)` |
-| Rerank score threshold `rerank_score_threshold` | empty (disabled) | `0-1` | Drops results below that rerank score |
-| Document filter `filter_doc_ids` | empty | list of document IDs | Currently the only retrieval filter |
+| Query | — | `1-1000` characters | Matched as-is; no boolean operators, wildcards, or field syntax |
+| Retrieval mode | Hybrid | Vector / Full-text / Hybrid | See the table above |
+| Result count | `5` | `1-20` | Number of results (knowledge base settings allow `1-100`) |
+| Similarity threshold | `0` | `0-1` | Filters vector hits below this similarity |
+| Reranking | On | On/off | Overrides knowledge base settings |
+| Rerank candidates | `10` | `1-100` | Candidates sent to the reranker; the UI uses the larger of result count and this value |
+| Rerank score threshold | Empty (disabled) | `0-1` | Filters results below this rerank score |
+| Document scope | Empty | Document list | Search only within selected documents; currently the only retrieval filter |
 
-<Callout type="info" title="Reranking needs a bound model">
-  When the knowledge base has no `rerank` model bound, the UI does not send rerank parameters at all and `rerank_enabled` has no effect. Once a model is bound, `rerank_enabled` (default `true`) and `rerank_candidate_k` (default `10`) from the KB settings apply automatically, and request parameters only override them when you fill them in.
+<Callout type="info" title="Reranking requires a bound model">
+  If the knowledge base has no rerank model bound, the UI does not send rerank parameters and the **Reranking** switch has no effect. Once bound, the knowledge base's rerank switch (on by default) and candidate count (default `10`) apply automatically, and request parameters override them only when you fill them in.
 </Callout>
 
-## How hybrid retrieval fuses channels
+## How the Two Channels Merge
 
-After both channels recall, results are merged by weighted reciprocal rank fusion (RRF):
+- **Hybrid mode**: vector and full-text results merge into one ranking by their respective ranks, with higher-ranked candidates first. Merging only happens when both channels succeed; if one fails, a degradation reason is returned.
+- **Across knowledge bases**: when an Agent/workflow attaches several knowledge bases, each recalls concurrently with its own settings, all candidates go into one pool, and the pool is ranked globally rather than concatenating per-base rankings. The pool is then truncated to the candidate pool size (the larger of result count and rerank candidates).
+- **One global rerank**: cross-base reranking is performed once by **the first active knowledge base in order that has a rerank model bound**, whose candidate count and score threshold define the pool and filtering. If reranking fails, the whole retrieval fails rather than returning unreranked fusion results.
 
-```text
-score = Σ weight × 1 / (rrf_k + rank)
-```
+## Follow-Up Query Rewriting
 
-- Each weight affects only its own channel: `dense_weight` for the vector channel, `lexical_weight` for the full-text channel; setting one to `0` disables that channel.
-- In hybrid mode the two weights **cannot both be `0`**, or the request is rejected (the UI also disables the search button).
-- A smaller `rrf_k` favours the top-ranked results more strongly; a larger one flattens the ranking differences.
+Agents in **Auto** mode rewrite follow-up questions that contain references into standalone queries before recall:
 
-## A/B comparison
+- Only Auto mode does this; Agentic mode and direct hit testing never rewrite.
+- It triggers only for short follow-ups that contain a referring expression (“it”, “this”, “the above”); ordinary questions do not cost an extra model call.
+- If rewriting fails (timeout, invalid output, missing model), the original query is used and retrieval still succeeds.
 
-Turn on **A/B Comparison** to run two configurations for the same query side by side:
+## A/B Comparison
 
-1. Configure side A and side B independently (each with its own mode, `top_k`, threshold, weights, and rerank parameters).
-2. The batch returns **an independent result per configuration**: a failure on one side never hides the other side's success, and the failing side reports its own reason.
-3. The result panel shows each side's ranks, the number of overlapping results (`Overlap: N/total`), and per-stage scores.
+**A/B comparison** runs the same query with two configurations side by side:
 
-The batch endpoint `POST /api/v1/knowledge-bases/{kb_id}/search/batch` accepts up to `10` configurations, and each configuration `id` must be unique.
+1. Configure sides A and B independently (mode, result count, thresholds, rerank parameters).
+2. Results come back **independently per configuration**: a failure on one side never hides the other side's success, and the failing side reports its own reason.
+3. The result panel shows both rankings, the number of overlapping results (`Overlap: N/total`), and per-stage scores.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/retrieval-lab-results.png" alt="Retrieval lab results" />
-  <figcaption>Retrieval lab results: A/B ranks, overlap, and per-stage scores</figcaption>
+  <figcaption>Retrieval lab results: A/B rankings, overlap, and per-stage scores</figcaption>
 </figure>
 
-## Reading results and diagnostics
+## Reading Results and Diagnostics
 
-Every result carries the per-stage values, and `final_score_stage` tells you which stage decided the final order:
+Each result annotates its per-stage values so you can tell what decided the final order:
 
-| Field | Meaning |
+| Metric | Meaning |
 | --- | --- |
-| `dense_score` / `dense_rank` | Vector-channel similarity and rank (`null` means the chunk was not recalled by the vector channel) |
-| `lexical_score` / `lexical_rank` | Full-text BM25-style score and rank (no fixed upper bound) |
-| `fusion_score` / `fusion_rank` | RRF fusion score and rank |
-| `rerank_score` / `rerank_rank` / `rerank_reason` | Pairwise reranker score (`0-1`) and explanation |
-| `final_score_stage` | Basis of the final order: `dense` / `lexical` / `fusion` / `rerank` |
-| `degradation_reasons` | Channel degradation reasons (for example full-text recall failed but vector results were still returned) |
+| Vector score / rank | Similarity and rank from the vector channel (empty means the chunk was not vector-recalled) |
+| Full-text score / rank | Keyword score and rank from the full-text channel (no fixed upper bound) |
+| Fusion score / rank | Score and rank after merging both channels |
+| Rerank score / rank / reason | Pairwise score from the rerank model (`0-1`) and its reason |
+| Final ordering basis | Vector, full-text, fusion, or rerank |
+| Degradation reason | Explanation when one channel failed but the other still returned results |
 
-**Stage timings** `timings` are split into `recall`, `rerank`, `context`, and `total`, so you can tell whether recall or rerank is the slow part.
+**Stage timings** break down into recall, rerank, context assembly, and total, so you can see whether recall or reranking is slow.
 
-**Diagnostics** `diagnostics` may return:
+**Diagnostics** explain actionable causes:
 
-| Code | Meaning | Where to look |
+| Diagnostic | Meaning | What to do |
 | --- | --- | --- |
-| `inactive` | The knowledge base is not `active` | Enable the knowledge base |
-| `missing_embedding_model` | No embedding model (pure vector mode) | Bind an authorized `embedding` model to the KB |
-| `timeout` | The recall stage timed out | Lower `top_k`, narrow the scope, or check vector store load |
-| `failed` | Recall or fusion failed | Use `stage` and the error category below |
+| Knowledge base not active | The knowledge base is not active | Activate it |
+| Missing embedding model | Vector mode without an embedding model | Bind an authorized embedding model |
+| Recall timeout | The recall stage timed out | Lower the result count, narrow the scope, or ask an administrator to check retrieval load |
+| Recall failed | Recall, fusion, or rerank failed | Use the reported stage and category |
 
-Failed requests carry `retrieval_error_category` and `stage` so you can pick a direction:
+On failure, the UI reports the failure category and stage:
 
-| Category | Typical cause | Direction |
+| Category | Typical cause | What to do |
 | --- | --- | --- |
-| `configuration_mismatch` | Embedding dimension does not match the index | Verify the model and dimension; rebuild the index after a model change |
-| `provider_authentication` | Invalid model credentials | Check the provider key and access rights |
-| `quota_or_rate_limit` | Quota or rate limit | Check quota and retry later |
-| `model_configuration` | Model missing, disabled, or incompatible | Select or enable a compatible model |
-| `lexical_unavailable` | Full-text retrieval unavailable | Check PostgreSQL and `pg_search`, and that documents finished processing |
-| `provider_unavailable` | Provider unreachable | Retry; if it persists, check the provider status |
-| `unknown` | Anything else | Retry or inspect server logs |
+| Configuration mismatch | Embedding dimension differs from the index | Check the model and dimension; rebuild the index after switching models |
+| Invalid model credentials | Provider credentials are wrong | Check the provider key and access |
+| Quota or rate limit | Quota exhausted or throttled | Check the quota and retry later |
+| Model configuration error | Model missing, disabled, or incompatible | Choose or enable a compatible model |
+| Full-text unavailable | The full-text index is broken | Ask an administrator to check retrieval and confirm documents finished processing |
+| Provider unavailable | Upstream service problem | Retry; if it persists, check the provider status |
+| Unknown error | Anything else | Retry or ask an administrator to check logs |
 
-## Applying to production
+## Apply to Production
 
-A hit-testing configuration can be saved as a **local preset** (stored in the browser only, not synced across devices); then **Apply to Production** writes side A's configuration back into the knowledge base settings:
+You can save the hit-testing panel configuration as a **local preset** (stored in the browser, not synced across devices), then select **Apply to production** to write side A back to knowledge base settings: retrieval mode, result count, similarity threshold, rerank switch, rerank candidates, and rerank score threshold.
 
-```json
-{
-  "search_mode": "hybrid",
-  "top_k": 5,
-  "score_threshold": 0.0,
-  "dense_weight": 1.0,
-  "lexical_weight": 1.0,
-  "rrf_k": 60,
-  "rerank_enabled": true,
-  "rerank_candidate_k": 10,
-  "rerank_score_threshold": null
-}
-```
+Before applying:
 
-Before applying, confirm:
+- The embedding model and index dimension must be unchanged (rebuild the index first otherwise).
+- The knowledge base should actually be used by Agents/workflows — you are writing **knowledge-base-level** defaults, and a per-attachment result count, threshold, or mode still overrides them.
 
-- The embedding model and index dimension have not changed (otherwise rebuild the index first).
-- In hybrid mode at least one weight is greater than `0`.
-- The knowledge base is actually referenced — what you write back is the **knowledge base level** default, and an Agent's `retrieval_top_k`, `score_threshold`, and `search_mode` still override it.
-
-<Callout type="info" title="Not implemented / Roadmap">
-  Adjacent-chunk expansion exists in the retrieval service but is **not exposed by the public search API**: the request body does not accept the parameter and a passed value is ignored. Query analytics, search history, and result export are likewise unavailable.
+<Callout type="info" title="Not implemented / roadmap">
+  Adjacent-chunk expansion exists in the retrieval service but is **not exposed in the retrieval UI or public API**: the request rejects the parameter and ignores it. Query analysis, retrieval history, and result export are unavailable too.
 </Callout>
 
 ## Troubleshooting
 
 | Symptom | Check first |
 | --- | --- |
-| Hybrid returns only keyword results | Whether hybrid rollout is enabled for the team; whether `degradation_reasons` names a failing vector channel |
-| Hit testing returns 0 results | Whether documents are `completed`; whether `score_threshold` is too high; switch to `fulltext` to confirm the keyword exists |
-| A "dimension mismatch" error | Whether the embedding model changed; whether `embedding_dimension` matches the vector collection |
-| A full-text-unavailable error | PostgreSQL and `pg_search`; whether documents finished lexical indexing |
-| Reranking has no effect | Whether a `rerank` model is bound; whether `rerank_enabled` is `true`; whether the candidate pool is smaller than `top_k` |
-| Results differ from production | Hit testing runs with request parameters, while production retrieval also applies the Agent's `retrieval_top_k`/`search_mode` and the rollout gate |
+| Hybrid returns only keyword results | Whether the team is in the hybrid rollout; whether the degradation reason points at the vector channel |
+| Hit testing returns 0 results | Whether documents are Completed; whether the similarity threshold is too high; switch to full-text to verify the keywords exist |
+| “Dimension mismatch” | Whether the embedding model was changed; whether the vector dimension matches the index |
+| “Full-text unavailable” | Retrieval service status; whether documents finished full-text indexing |
+| Reranking has no effect | Whether a rerank model is bound; whether reranking is on; whether candidates are fewer than the result count |
+| Results differ from production | Hit testing runs with request parameters, while production also applies the Agent's result count and mode plus the hybrid rollout |
 
-Common failures and recovery steps are also covered in the [Knowledge Base settings reference](/en/reference/knowledge-settings); for tuning trade-offs see [Knowledge Base Optimization](/en/usage/best-practices/kb-optimization).
+See the [Knowledge base settings reference](/en/reference/knowledge-settings) for common failures and recovery steps, and [Knowledge base optimization](/en/usage/best-practices/kb-optimization) for tuning trade-offs.

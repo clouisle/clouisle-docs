@@ -1,288 +1,233 @@
 ---
 title: User Management
-description: Manage user accounts, active status, password policies, and TOTP
+description: Manage user accounts, activation state, password policy, and TOTP
 icon: Users
 ---
 
-User management lives on the dashboard **Users** page (`/users`), and permission depends on the action: read `admin:user:read`, create `admin:user:create`, update/activate/deactivate/password policy `admin:user:update`, delete `admin:user:delete`. The built-in Admin role holds all four.
+User management lives on the **Users** (`/users`) page of the Admin area, with permissions split by action: viewing the list, adding users, editing/activating/deactivating/password policy, and deleting users. The built-in **Admin** role holds all of these.
 
-This page lists the real endpoint for every action, its validation rules, and what failure looks like. How user **roles** affect permissions is covered in [Roles & Permissions](./roles-permissions.mdx).
+This page covers interface actions, visible results, and what to do when a step fails. For account fields, endpoints, and error codes see the [Users API](../../../api/users.mdx). How **roles** affect permissions is covered in [Roles & Permissions](./roles-permissions.mdx).
 
-## Listing and Filtering
+## List and Filters
 
-`GET /api/v1/admin/users` (`admin:user:read`) returns a paginated user list with these parameters:
+The user list is paged with `10` rows per page by default, switchable to `20` / `50` / `100`, and offers:
 
-| Parameter | Description |
+- **Search box**: fuzzy match by username or email, case-insensitive.
+- **Status filter**: **Active** / **Inactive** / **Pending**, multi-select.
+- **Role filter**: filter by global role name.
+- A **Reset** button appears once any filter is active, clearing search and filters at once.
+
+There are no summary cards at the top, but whenever pending users exist a banner reads "N users are waiting for review"; **View pending** switches straight to that filter.
+
+Each row shows: username (with a Super Admin badge), email, SSO icons, status badge, primary role, password status badge, creation time, and the row action menu.
+
+The three states mean:
+
+| Status | Meaning |
 | --- | --- |
-| `page` / `page_size` | Pagination, defaults `page=1`, `page_size=20` |
-| `search` | Fuzzy match on username or email (case-insensitive) |
-| `status` | Multi-select: `active`, `inactive`, `pending` |
-| `role` | Filter by global role name |
-| `exclude_user_id` | Exclude specific user IDs (used by pickers) |
+| **Active** | The account is usable and can sign in. |
+| **Inactive** | An administrator closed the account; sign-in is blocked but data is kept. |
+| **Pending** | Registered and awaiting administrator approval; cannot sign in until approved. |
 
-Status semantics: `active` = `is_active=true`; `inactive` = `is_active=false` with `approval_status=approved`; `pending` = awaiting approval (`approval_status=pending`, `is_active=false`).
+## Adding a User
 
-The header stats come from `GET /api/v1/admin/users/stats` (`admin:user:read`), returning `total` / `active` / `inactive` / `pending`. The list deliberately does not expose login count, failed-login count, or last password change — the API omits those fields.
-
-## Creating Users
-
-`POST /api/v1/admin/users` (`admin:user:create`):
-
-1. Click **Create User**.
-2. Fill in **Username** (globally unique), **Email** (globally unique, must be a valid address), **Password**, and the **Active** switch (`is_active`).
+1. Click **Add User**.
+2. Fill in **Username** (globally unique), **Email** (globally unique, must be valid), **Password**, and **Confirm Password**, and set the **Active** switch.
 3. Save.
 
-Backend behaviour and validation:
+Validation and defaults:
 
 | Case | Result |
 | --- | --- |
-| Username taken | `user_with_username_exists` |
-| Email taken | `user_with_email_exists` |
-| No `locale` provided | Falls back to the site setting `default_language` (default `en`) |
-| — | The new user's `approval_status` is forced to `approved` |
+| Username already exists | Reports that the username is taken |
+| Email already exists | Reports that the email is taken |
+| No interface language chosen | Uses the default language from site settings (English by default) |
+| — | The new user is created **active**; no approval needed |
 
 <Callout type="warn">
-  The create form does **not** accept `roles`: a new user has no global role at all and must be assigned one afterwards, otherwise they can only see public resources and cannot operate inside a team.
+  The creation form does **not** accept roles: a new user has no global role and must be assigned one by **editing** the user afterwards, otherwise they only see public resources and cannot operate inside a team.
 </Callout>
 
 ### Bulk Import / SSO Provisioning
 
-> **Not implemented / Roadmap.** There is no CSV/JSON/Excel user import; users are created one at a time (`POST /api/v1/admin/users`) or auto-provisioned on first SSO login.
+> **Not implemented / Roadmap.** There is no CSV/JSON/Excel user import. Add users one by one, or let SSO create them on first sign-in.
 
-SSO provisioning is driven by site settings (**Site Settings** → **SSO/Security**):
+SSO provisioning is controlled by an administrator under **Site Settings** → **Security**:
 
 | Setting | Description |
 | --- | --- |
-| `sso_auto_create_users` | Create the account automatically on first SSO login |
-| `default_role_id` | Default global role for new users; first initialization points it at **Viewer** |
-| `default_team_id` + `default_team_role` | Default team and membership role; `default_team_role` accepts only `viewer`/`member`/`admin` and defaults to `member`; `owner` is never auto-assigned |
-| `sso_match_by_email` | Match an existing account by email |
-| `sso_require_approval` | New accounts require approval (`approval_status=pending`) |
+| Auto-create users | When on, the first SSO sign-in creates an account automatically |
+| Default global role | The initial role for new users; the first-run default is **Viewer** |
+| Default team and default member role | The team new users join and their role; accepts only Viewer/Member/Admin, defaults to Member; Owner is never assigned automatically |
+| Match existing accounts by email | Link to an existing account with the same email instead of creating a new one |
+| New accounts require approval | When on, new accounts are **pending** and cannot sign in until approved |
 
 > **Not implemented / Roadmap**: SSO provisioning has no email-domain allowlist.
 
-## Viewing User Details
+## Editing a User
 
-Click a user to open the detail/edit panel (`GET /api/v1/admin/users/{user_id}`, `admin:user:read`). Available fields:
-
-- Identity: `username`, `email`, `is_active`, `approval_status`, `is_superuser`, `auth_source` (`local` / `sso`), `email_verified`
-- Preferences: `locale`, `avatar_url`
-- Timestamps: `created_at`, `last_login`
-- Password state: `force_password_change`, `password_expiration_exempt` (rendered as a password-status badge in the list)
-- Authorization: `roles` (array of global roles)
-- SSO: `sso_connections` (integration, external account, first/last login); disconnect is available with `admin:integrations:login:update`
-
-> **Not implemented / Roadmap**: there is no per-user activity view, login history, active-session list, or session revocation inside user management. Account lockout is enforced by the global login policy `max_login_attempts` / `lockout_duration_minutes`; review user actions in **Audit Logs** filtered by user.
-
-## Editing Users
-
-`PUT /api/v1/admin/users/{user_id}` (`admin:user:update`). Submittable fields:
+Choose **Edit** from the row menu:
 
 | Field | Description |
 | --- | --- |
-| `email` | Change to a new address |
-| `is_active` | Activate/deactivate switch |
-| `roles` | Array of global role names, **replaced wholesale** |
-| `password` | Optional. Submitting sets a new password (must pass strength validation; failure returns `password_validation_failed` with `data.errors.password`) |
-| `avatar_url` / `locale` | Avatar and language preference |
+| **Username** | Read-only; cannot be changed after creation |
+| **Email** | Change to a new email |
+| **Password** | Optional. Entering one changes the password (validated against the password policy, with reasons listed when it fails); leaving it blank keeps the current password |
+| **Global roles** | Multi-select, **replaced as a whole** |
+| **Active** | Activate/deactivate switch |
 
 <Callout type="error">
-  **`username` cannot be changed**: the `UserUpdate` schema has no such field and the edit form has no username input. A wrong username can only be fixed by deleting and recreating the account.
+  **Usernames cannot be changed**: the username input is read-only while editing. A mistyped username can only be fixed by deleting and recreating the user.
 </Callout>
 
-### Role Change Protection Rule
+### Role Change Safeguards
 
-`roles` replaces the set (clear first, then write — omitted roles are lost; unmatched names are ignored). If the target is still `owner`/`admin` of some team and the new role set no longer contains `team:manage` (or `*`), the request fails with 403 `operation_not_permitted` (`permission: team:manage`). **Downgrade their team role first, then strip the global role** — the reverse order is blocked.
+Roles are replaced as a whole: saving clears the existing set first and writes the new one, so any role not selected is lost; unmatched role names are ignored.
 
-Submitting a password sends the user a `user.password_reset` notification.
+If the target is still an **Owner/Admin** of some team and the new role set no longer includes team management permission, saving is rejected. **Downgrade the team role first, then remove the global role** — the reverse order is blocked.
 
-## Account Status
+Submitting a password sends a notification to that user.
 
-| Action | Endpoint | Permission | Notes |
-| --- | --- | --- | --- |
-| Activate | `POST /api/v1/admin/users/{user_id}/activate` | `admin:user:update` | Sets `is_active=true` and `approval_status=approved`; an already-active user returns `user_already_active` |
-| Deactivate | `POST /api/v1/admin/users/{user_id}/deactivate` | `admin:user:update` | Sets `is_active=false`, `approval_status=approved`; superusers are rejected (`cannot_deactivate_superuser`); an already-inactive user returns `user_already_inactive` |
+## Account State
+
+From the row menu:
+
+| Operation | Behavior |
+| --- | --- |
+| **Activate** | Restores the account; if it is already active, the interface says so |
+| **Deactivate** | Sign-in is blocked immediately; Super Admins cannot be deactivated; if already inactive, the interface says so |
 
 What deactivation actually does:
 
-- No sign-in: both JWT and API-key authentication reject an `is_active=false` user (401 `inactive_user`; a pending user gets `pending_approval_user`).
-- Integrations using that user's API keys **fail immediately** — the key record is untouched, but authentication rejects it because the user is inactive.
-- Resources, team memberships, and conversations are all preserved; reactivating restores access.
+- Sign-in is blocked: both password login and API keys are rejected with "account inactive" or "pending approval".
+- Integrations using that person's API keys **fail immediately** — the keys themselves are not modified, but authentication is rejected because the owner is inactive.
+- Resources, team memberships, and sessions are all kept; reactivating restores access.
 
-Both actions send the user a `user.activated` / `user.deactivated` notification and write an audit entry (`activate_user` / `deactivate_user`).
+Activation and deactivation both notify the user and write an audit log entry.
 
-## Deleting Users
+## Deleting a User
 
-`DELETE /api/v1/admin/users/{user_id}` (`admin:user:delete`). The only hard block: an `is_superuser=true` account returns `cannot_delete_superuser`. The frontend delete dialog requires typing the username to confirm and lists the impact.
+Choose **Delete** from the row menu; the confirmation dialog shows the target username and states that the action cannot be undone.
 
-Deletion impact (per model FK rules, verified in `models/*.py`):
+The one hard block: **Super Admin accounts cannot be deleted**.
 
-| Deleted (CASCADE) | Nulled/preserved (SET_NULL) |
+Deletion impact:
+
+| Deleted | Cleared / kept |
 | --- | --- |
-| The account itself, password history, notifications and read records | Agents / knowledge bases / documents / tools / skills they created (`created_by` nulled, records kept) |
-| Personal conversations and their messages, agent runs | Teams they owned (`Team.owner` nulled; the team itself is kept) |
-| Their API keys and personal memories | Audit logs (kept for compliance, not deleted with the account) |
-| All team memberships and scoped role records | Shared resources and other members inside those teams |
+| The account itself, password history, notifications and read records | Agents / knowledge bases / documents / tools / Skills they created (resources kept, creator cleared) |
+| Personal conversations and messages, Agent run records | Teams they own (team kept, owner cleared) |
+| Their API keys and personal memories | Audit logs (compliance; not deleted with the account) |
+| All team memberships and scoped role records | Shared resources and other members in those teams |
 
-<Callout type="error" title="Deleting a team owner leaves the team ownerless">
-  `TeamMember` rows cascade with the user, so **deleting a team's owner also deletes their owner membership**, `Team.owner` is nulled, and the team has no owner afterwards — only a superuser can change member roles or restore ownership. To remove a team owner, transfer ownership inside the team first, then delete the account.
+<Callout type="error" title="Deleting a team Owner leaves the team without an owner">
+  Deleting a team's Owner also deletes their membership, leaving the team with no Owner — only a Super Admin can change member roles or grant ownership afterwards. To remove a team Owner, transfer ownership in the team first, then delete the account.
 </Callout>
 
 ## Passwords and Password Expiration
 
-There is **no** "reset to a temporary password" or "send a reset email from the admin panel" flow. Administrators combine these per-user operations with the global password policy:
+There is **no** "reset to a temporary password" or "send a reset email from the Admin area" flow. Administrators combine these row actions with the global password policy:
 
-| Operation | Endpoint | Permission | Behaviour |
-| --- | --- | --- | --- |
-| Force change on next sign-in | `POST /api/v1/admin/users/{user_id}/force-password-change` | `admin:user:update` | Sets `force_password_change=true` and sends a high-priority notification |
-| Reset expiration timer | `POST /api/v1/admin/users/{user_id}/reset-password-expiration` | `admin:user:update` | Sets `password_changed_at=now`, recomputes `password_expires_at` from policy, clears the expiry-notified timestamp |
-| Grant/revoke exemption | `POST /api/v1/admin/users/{user_id}/exempt-password-expiration` with body `{"exempt": true/false}` | `admin:user:update` | Writes `password_expiration_exempt`; `exempt=true` also clears `force_password_change` |
-| Bulk force change | `POST /api/v1/admin/users/bulk-force-password-change` with body `{"user_ids": [...]}` | `admin:user:update` | Flags each user and notifies them; returns `{"count": n}`; an empty array is `no_users_selected`, all-missing is `no_users_found` |
-| Expiration overview | `GET /api/v1/admin/users/password-expiration-stats` | `admin:user:read` | Returns `total_users`/`expired_count`/`expiring_soon_count`/`force_change_count`/`exempt_count`; if the site setting `password_expiration_enabled=false`, all counts are 0 |
-| Expired/expiring list | `GET /api/v1/admin/users/expiring-passwords` | `admin:user:read` | Paginated (`page`, `page_size` max 100), `filter` is `all`/`expired`/`expiring`/`force_change`; the "expiring soon" window comes from `password_expiration_warning_days` (default 7 days) |
+| Operation | Behavior |
+| --- | --- |
+| **Force Password Change** | Flags the user to change their password at next sign-in and sends a high-priority notification |
+| **Reset Password Expiration** | Recomputes the password expiry from now and clears the expiry reminder |
+| **Grant Password Exemption** / **Remove Password Exemption** | Exempts the user from the expiration policy; granting also clears the force-change flag |
+| Bulk **Force Password Change** / grant or remove exemption | Applies to each selected user and notifies them |
 
-The frontend exposes these in the detail panel and the row menu, and only when `auth_source=local` (SSO users have no local password); the global policy is configured in **Site Settings** → **Security**.
+These actions appear only for **local accounts** (SSO users have no local password). When the expiration policy is enabled, the Admin **Dashboard** overview shows a **Password Security** card with counts of expired, expiring-soon, and force-change users; with the policy disabled, all counts are 0.
 
-## TOTP (2FA)
+The global policy is configured under **Site Settings** → **Security**.
 
-| Capability | Endpoint | Permission | UI |
-| --- | --- | --- | --- |
-| TOTP adoption stats | `GET /api/v1/admin/totp/stats` | `admin:dashboard:access` | The TOTP card on the dashboard (`totp_enabled` / `total_users` / `adoption_rate`) |
-| Check a user's TOTP status | `GET /api/v1/admin/totp/users/{user_id}/status` | **superuser** | API only, no UI |
-| Disable a user's TOTP | `POST /api/v1/admin/totp/users/{user_id}/disable` | **superuser** | API only, no UI |
+## TOTP (Two-Factor Authentication)
 
-Users enable, disable, and regenerate backup codes themselves in personal settings (see [Sign-in & Accounts](./authentication.mdx)).
+- **Adoption statistics**: the TOTP card on the Admin **Dashboard** shows enabled users, total users, and the adoption rate.
+- **Per-user status or disabling**: there is **no interface entry**; a Super Admin handles it through the management interface (for example when a user loses both authenticator and backup codes). See the [Admin API](../../../api/admin.mdx).
 
-```bash
-# Requires a superuser token
-curl "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/status" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-
-curl -X POST "https://your-domain.com/api/v1/admin/totp/users/$USER_ID/disable" \
-  -H "Authorization: Bearer $ADMIN_TOKEN"
-```
+Users configure, enable, and disable TOTP themselves in personal settings (see [Sign-In and Account Security](./authentication.mdx)).
 
 <Callout type="warn">
-  The user-management UI has **no** per-user TOTP toggle and no "force 2FA" switch; the available capability is aggregate statistics plus a superuser API fallback to disable TOTP (for example when a user loses their authenticator).
+  User management has **no** per-user TOTP switch and **no** "require 2FA for this person" toggle; the available capabilities are adoption statistics plus administrator fallback disabling. Requiring 2FA for everyone is a global switch in site settings.
 </Callout>
 
 ## Bulk Operations
 
-Selecting several users opens a floating toolbar at the bottom. Note that several of these are **frontend loops over the single-user endpoint** — there is no matching bulk endpoint:
+Selecting several users opens a floating toolbar at the bottom:
 
-| Action | Implementation | Requires |
-| --- | --- | --- |
-| Send notification | `POST /api/v1/admin/notifications` (one per user) | `admin:notification:create` |
-| Activate | Loop `POST .../{user_id}/activate` | `admin:user:update` |
-| Deactivate | Loop `POST .../{user_id}/deactivate` | `admin:user:update` |
-| Delete | Loop `DELETE .../{user_id}` | `admin:user:delete` |
-| Force password change | `POST /api/v1/admin/users/bulk-force-password-change` (a real bulk endpoint) | `admin:user:update` |
-| Grant / revoke password exemption | Loop `POST .../{user_id}/exempt-password-expiration` | `admin:user:update` |
+| Operation | Description |
+| --- | --- |
+| Send Notification | Opens the notification dialog and sends an in-app notification to each selected user |
+| Activate | Activates each user |
+| Deactivate | Deactivates each user |
+| Delete | Deletes each user; cannot be recovered after confirmation |
+| Force Password Change | Flags all selected users and notifies them |
+| Grant / Remove Password Exemption | Sets each user individually |
 
-Because most loops have no server-side batch, one failure does not roll back the others; the toast count may not match the actual number of successes, so re-check users whose permissions/state conflicted before retrying.
+Bulk operations have no transaction rollback: a single failure does not roll back the rest, and the final count may not match the actual number of successes. Recheck users with permission or state conflicts before retrying.
 
-> **Not implemented / Roadmap**: no bulk add/remove from teams, no bulk export, no CSV import/export.
-
-## Sending Email
-
-`POST /api/v1/admin/users/send-email` with body `{"user_ids": [...], "subject": "...", "content": "..."}`, requires `admin:user:update`. The response is `{"sent_count": n, "skipped_count": n, "total": n}`.
-
-Limits (exceeding them fails the request; there is no partial send):
-
-| Limit | Value | Error |
-| --- | --- | --- |
-| SMTP disabled (`smtp_enabled=false`) | — | `smtp_not_configured` |
-| Per-admin hourly send volume | 100 | `email_rate_limit_exceeded` (`data.limit=100`, `data.period=hour`) |
-| Per-recipient daily volume | 5 | that recipient is skipped and counted in `skipped_count` |
-| Request size above the admin's remaining quota | — | `email_quota_insufficient` (`data.requested` / `data.remaining`) |
+> **Not implemented / Roadmap**: no bulk add/remove from teams, no bulk export, no CSV import/export, and no bulk email entry in the interface (that capability is currently available only through the management interface — see the [Users API](../../../api/users.mdx)).
 
 ## User Roles
 
-Global roles (multi-select, `roles`) determine system-level and dashboard capability, while team roles determine in-team level. The 5 built-in roles and their permission sets are in [Roles & Permissions](./roles-permissions.mdx):
+Global roles (multi-select) determine system-level and Admin-area capabilities; team roles determine the level inside a team. The five built-in roles and their permission sets are covered in [Roles & Permissions](./roles-permissions.mdx):
 
 | Role | Rough capability |
 | --- | --- |
-| **Super Admin** | `*`, bypasses all checks |
-| **Admin** | Dashboard read/write plus all team resource permissions |
+| **Super Admin** | Every permission; bypasses all checks |
+| **Admin** | Admin-area read/write plus all team resource permissions |
 | **Team Admin** | Member plus team settings and member management |
 | **Member** | Create/edit/run resources inside a team |
-| **Viewer** | Read plus use; the default role |
+| **Viewer** | Read and use only; the default role |
 
-Team roles (`owner`/`admin`/`member`/`viewer`) are maintained on the **teams** pages, not in the user detail: the user detail only displays team membership.
+Team roles (Owner/Admin/Member/Viewer) are maintained on the **team** page, not in the user edit dialog.
 
 ## Best Practices
 
 **✅ Do:**
 
-- Review the user list regularly and deactivate leavers promptly (deactivation blocks sign-in and API keys immediately)
-- Assign the minimal necessary global role right after creation
-- Require 2FA for privileged accounts and keep a normal rotation policy rather than relying on `password_expiration_exempt`
-- Work through the `expiring-passwords` list ahead of expiry instead of firefighting lockouts
-- Leave a trail around deactivate/delete/role changes (audit logging does this automatically)
+- Review the user list regularly and deactivate departing staff promptly (deactivation immediately blocks sign-in and API keys)
+- Assign the minimum necessary global role right after creation
+- Require 2FA for privileged accounts and give them a normal password rotation policy
+- Watch the Dashboard password security card and handle expiring accounts early instead of firefighting after lockout
+- Keep a trail around deactivate, delete, and role changes (the audit log does this)
 
 **❌ Don't:**
 
-- Share an administrator account (audit logs can no longer attribute actions)
-- Delete a team owner's account directly (the team becomes ownerless)
-- Replace a role set with `PUT /admin/users/{id}` and forget a role
-- Rely on hidden frontend buttons for access control — the endpoint validates independently
+- Share administrator accounts (the audit log cannot tell who did what)
+- Delete a team Owner's account (the team ends up without an owner)
+- Replace a role set wholesale and miss a role
+- Rely on "the frontend hides the button" for access control — the backend validates independently
 
 ## Troubleshooting
 
-### Cannot Create a User
+### Cannot Add a User
 
-1. Check whether the username or email is already taken (`user_with_username_exists` / `user_with_email_exists`).
-2. Check the email format is valid.
-3. Check that the caller holds `admin:user:create`.
+1. Check whether the username or email is already taken.
+2. Check that the email format is valid.
+3. Check that your role has user creation permission.
 
 ### A User Cannot Sign In
 
-1. Verify `is_active=true` (deactivated or pending users get 401).
-2. Verify the password; if needed, force a change or set a new password first.
-3. Verify the account is not locked by the login policy (`max_login_attempts` / `lockout_duration_minutes`).
-4. Check TOTP state; if the user lost their authenticator, a superuser disables TOTP through the API (no UI).
-5. Investigate suspicious sign-ins in Audit Logs filtered by user.
+1. Confirm the account is **Active** (inactive or pending accounts cannot sign in).
+2. Confirm the password is correct; if needed, **force a password change** or set a new one.
+3. Confirm the account is not locked by the sign-in policy (5 failures locks for 15 minutes by default).
+4. Check the TOTP state; if the user lost their authenticator, a Super Admin disables TOTP through the management interface.
+5. Review **Audit Logs** filtered by user for suspicious sign-ins.
 
 ### Cannot Delete a User
 
-- The target is a superuser → `cannot_delete_superuser` (remove the superuser flag first, or deactivate instead).
-- The target owns a team → the backend does **not** block the deletion, but the team loses its owner; transfer ownership inside the team first.
-- Everything else deletes successfully, so double-check the cascade list above (conversations, API keys, and memberships disappear with the account).
+- The target is a Super Admin → remove the Super Admin flag first, or deactivate instead.
+- The target is a team Owner → the backend does **not** block deletion, but the team loses its owner; transfer ownership in the team first.
+- Otherwise deletion succeeds — confirm the cascade list above (conversations, API keys, memberships all disappear).
 
-### Role Change Returns 403
+### Changing Roles Is Rejected
 
-The user is still `owner`/`admin` of some team while the new role set lacks `team:manage`. Downgrade their team membership role first, then change the global roles.
+The user is still an Owner/Admin of some team and the new role set lacks team management permission. Downgrade their team role first, then change the global role.
 
-## API Endpoint Reference
+## Related Documentation
 
-| Endpoint | Method | Permission | Description |
-| --- | --- | --- | --- |
-| `/api/v1/admin/users` | GET | `admin:user:read` | Paginated list (`page`/`page_size`/`status`/`search`/`role`) |
-| `/api/v1/admin/users/stats` | GET | `admin:user:read` | Total/active/inactive/pending counts |
-| `/api/v1/admin/users` | POST | `admin:user:create` | Create a user |
-| `/api/v1/admin/users/{user_id}` | GET | `admin:user:read` | User details |
-| `/api/v1/admin/users/{user_id}` | PUT | `admin:user:update` | Change email/active state/roles/password |
-| `/api/v1/admin/users/{user_id}` | DELETE | `admin:user:delete` | Delete a user |
-| `/api/v1/admin/users/{user_id}/activate` | POST | `admin:user:update` | Activate |
-| `/api/v1/admin/users/{user_id}/deactivate` | POST | `admin:user:update` | Deactivate |
-| `/api/v1/admin/users/{user_id}/force-password-change` | POST | `admin:user:update` | Force a change on next sign-in |
-| `/api/v1/admin/users/{user_id}/reset-password-expiration` | POST | `admin:user:update` | Reset the expiration timer |
-| `/api/v1/admin/users/{user_id}/exempt-password-expiration` | POST | `admin:user:update` | Grant/revoke exemption (`{"exempt": bool}`) |
-| `/api/v1/admin/users/bulk-force-password-change` | POST | `admin:user:update` | Bulk force password change |
-| `/api/v1/admin/users/password-expiration-stats` | GET | `admin:user:read` | Password expiration overview |
-| `/api/v1/admin/users/expiring-passwords` | GET | `admin:user:read` | Expired/expiring list |
-| `/api/v1/admin/users/send-email` | POST | `admin:user:update` | Send email in bulk |
-| `/api/v1/admin/totp/stats` | GET | `admin:dashboard:access` | TOTP adoption stats |
-| `/api/v1/admin/totp/users/{user_id}/status` | GET | superuser | Check a user's TOTP status |
-| `/api/v1/admin/totp/users/{user_id}/disable` | POST | superuser | Disable a user's TOTP |
-
-<Callout type="info">
-  Per-user permission endpoints such as `/users/{user_id}/permissions` and `/users/{user_id}/permissions/check` **do not exist**; permissions come only from global roles and team memberships.
-</Callout>
-
----
-
-See also:
-- [Sign-in & Accounts](./authentication.mdx) — password policies, TOTP, and account recovery
-- [Roles & Permissions](./roles-permissions.mdx) — global roles, permission codes, and 403 troubleshooting
-- [Teams & Members](./teams.mdx) — in-team member roles and ownership transfer
+- [Users API](../../../api/users.mdx) — self-service endpoints plus administrator user management endpoints, fields, and error codes
+- [Admin API](../../../api/admin.mdx) — Admin-area-only endpoints (including TOTP management)
+- [Sign-In and Account Security](./authentication.mdx) — password policy, TOTP, and account recovery
+- [Roles & Permissions](./roles-permissions.mdx) — global roles, permissions, and failure troubleshooting
+- [Teams and Members](./teams.mdx) — team member roles and ownership transfer

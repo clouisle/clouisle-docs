@@ -24,7 +24,7 @@ Every endpoint requires `Authorization: Bearer <token>`.
 
   Among the admin endpoints, `GET` performs no permission-code check but authorizes by **scope**: the caller must have global admin access (`is_superuser`, or any role granting `admin:dashboard:access` / `*`), otherwise they must pass a `team_id` they administer as OWNER/ADMIN. `POST` requires `admin:notification:create` and `DELETE` requires `admin:notification:delete`.
 
-  External delivery channels (email, DingTalk, WeCom, Feishu, webhook, Slack) must be enabled and configured in the [Settings API](./settings) first, otherwise the create request is rejected.
+  There are exactly three external delivery channels: **email**, **webhook**, and **feishu**. They must be enabled and configured in the integration settings first, otherwise the create request is rejected. Feishu additionally requires the `notification` capability, saved app credentials, and a directory-sync Feishu identity binding for recipients. WeChat iLink is a messaging integration, not a notification channel.
 </Callout>
 
 ## Visibility
@@ -64,8 +64,8 @@ Notifications whose `expires_at` is in the past are excluded from the **list and
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `channel` | string | `email`, `dingtalk`, `wechat`, `feishu`, `webhook`, or `slack` |
-| `status` | string | `pending`, `sending`, `success`, or `failed` |
+| `channel` | string | `email`, `webhook`, or `feishu` only |
+| `status` | string | `pending`, `sending`, `success`, `failed`, or `skipped` (no eligible recipients) |
 | `error_message` | string \| null | Failure reason (localized) |
 | `retry_count` | integer | Retry count, default `0` |
 | `sent_at` | string (ISO 8601) \| null | Successful send time |
@@ -73,6 +73,10 @@ Notifications whose `expires_at` is in the past are excluded from the **list and
 
 <Callout type="info">
   The user-facing list does not populate delivery records — `deliveries` is always `[]` there; only the admin list and the create response include `deliveries`. `is_read` / `read_at` are the opposite: they appear only on the user side, and the admin list always reports `false` / `null`.
+</Callout>
+
+<Callout type="warn" title="Notification delivery is not messaging delivery">
+  `deliveries[]` here comes from `notification_deliveries` and records only in-app notifications sent externally to **email / webhook / feishu**. Feishu and WeChat Agent-chat replies and artifacts go to a different table, `integration_deliveries`, with states `pending` / `sending` / `sent` / `error` / `unavailable` / `unknown`. Query it through `GET /api/v1/admin/deliveries` or **Monitoring** > **Delivery log**; see the [Delivery log](../usage/guides/integrations/delivery-log.mdx). WeChat is not a notification channel.
 </Callout>
 
 ---
@@ -273,7 +277,7 @@ Requires the `admin:notification:create` permission.
 | `data` | object | No | Arbitrary payload |
 | `link_url` | string | No | In-app link |
 | `expires_at` | string (ISO 8601) | No | Expiry timestamp |
-| `notify_channels` | array of string | No | External delivery channels; nothing is delivered by default |
+| `notify_channels` | array of string | No | External delivery channels: `email` / `webhook` / `feishu` only; nothing is delivered by default |
 
 **Scope authorization:**
 
@@ -305,8 +309,8 @@ curl -X POST "https://your-domain.com/api/v1/admin/notifications" \
 **200 OK:** `data` is the created notification object; `deliveries` contains the newly created delivery records (`pending`, sent asynchronously by a background task).
 
 <Callout type="warn" title="External channels must be configured first">
-  Every channel in `notify_channels` is validated for enabled state and required configuration before creation; any failure returns `400`:
-  `smtp_not_enabled` / `smtp_not_configured`, `dingtalk_not_enabled` / `dingtalk_not_configured`, `wechat_not_enabled` / `wechat_not_configured`, `feishu_not_enabled` / `feishu_not_configured`, `webhook_not_enabled` / `webhook_not_configured`, `slack_not_enabled` / `slack_not_configured`. See the [Settings API](./settings) for channel configuration.
+  Every channel in `notify_channels` is validated before creation. An unknown channel returns `400` + `invalid_notification_channels`; a disabled channel or missing credentials returns `400` with one of these keys:
+  `smtp_not_enabled` / `smtp_not_configured`, `webhook_not_enabled` / `webhook_not_configured`, `feishu_notification_not_enabled` / `feishu_notification_not_configured`. Feishu recipients without a bound identity do not fail creation; the delivery is recorded as `skipped` or partially successful. See [Notifications and external channels](../usage/guides/administration/notifications.mdx) for configuration.
 </Callout>
 
 ---
@@ -355,6 +359,8 @@ Requires the `admin:notification:delete` permission. An audit record is written 
 
 ## Related
 
-- [Notification settings](/usage/guides/administration/notifications) — admin configuration and delivery channels
-- [Settings API](./settings) — enabling and testing channels (SMTP, DingTalk, WeCom, Feishu, webhook, Slack)
+- [Notification settings](../usage/guides/administration/notifications.mdx) — admin configuration and delivery channels
+- [Messaging Integrations](../usage/guides/integrations/index.mdx) — Feishu, WeChat iLink, and Agent chat
+- [Delivery Log](../usage/guides/integrations/delivery-log.mdx) — the `integration_deliveries` queue
+- [Settings API](./settings) — integration credentials and channel test endpoints
 - [Error Handling](./errors) — recover by HTTP status and business error code

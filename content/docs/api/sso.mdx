@@ -37,10 +37,7 @@ SSO API 覆盖三件事：登录页的**登录集成发现**、基于浏览器�
 | GET / PUT | `/api/v1/admin/integrations/login-settings` | 全局登录设置（入口：**站点设置** > **安全**） | 登录域读 / 写 |
 | GET / PUT | `/api/v1/admin/integrations/email`、`/webhook` | 内置通知配置 | 设置域读 / 写 |
 | POST | `/api/v1/admin/integrations/email/test`、`/webhook/test` | 测试通知投递 | 设置域 `update` |
-| GET / PUT | `/api/v1/admin/integrations/feishu/config` | 飞书配置 | 设置域读 / 写 |
-| GET | `/api/v1/admin/integrations/feishu/departments` | 浏览部门 | 设置域读 |
-| PUT | `/api/v1/admin/integrations/feishu/department-scope` | 保存同步范围 | 设置域 `update` |
-| POST | `/api/v1/admin/integrations/feishu/sync` | 手动同步通讯录 | 设置域 `update` |
+| — | 飞书与微信 iLink 的专用端点 | 配置、目录/知识同步、回调、个人偏好 | 见 [消息集成 API](./integrations.mdx) |
 
 ---
 

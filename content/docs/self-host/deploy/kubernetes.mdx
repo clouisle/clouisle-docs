@@ -12,7 +12,9 @@ Kubernetes 部署需要 Kubernetes `1.25+`、配置好的 `kubectl`、Ingress Co
 
 单文件 manifest 默认创建三个 PVC：`postgres-data`（`10Gi`，`RWO`）、`qdrant-data`（`10Gi`，`RWO`）、`uploads-data`（`10Gi`，`RWX`，仅 API 挂载 `/app/uploads`）。Redis 差异：单文件 manifest 用 `emptyDir`（缓存可恢复），Helm 默认 `5Gi` PVC。
 
-默认副本数：api `2`、worker `2`、sandbox-worker `1`、beat `1`（`Recreate` 策略）、frontend `2`。manifest 不包含 HPA，副本数静态，需用 `kubectl scale` 调整。
+沙箱数据不放在 PVC 上：`sandbox-worker` 是 DaemonSet，每个节点通过 `hostPath` 挂载 `/var/lib/clouisle/clouisle/sandbox`（`type: DirectoryOrCreate`）到 `/var/lib/clouisle/sandbox`。Helm 用 `sandboxWorker.localDataPath` 覆盖，默认 `/var/lib/clouisle/<namespace>/<release>/sandbox`；**同一路径绝不能被多个 release 或不同安装共用**。节点丢失、磁盘损坏或该目录被清理后，节点上的沙箱会话与检查点无法在别的节点恢复。
+
+默认副本数：api `2`、worker `2`、sandbox-worker `1`（每节点）、beat `1`（`Recreate` 策略）、frontend `2`。manifest 不包含 HPA，副本数静态，需用 `kubectl scale` 调整。
 
 ## ConfigMap 与 Secret
 
@@ -27,6 +29,8 @@ Kubernetes 部署需要 Kubernetes `1.25+`、配置好的 `kubectl`、Ingress Co
 | `PUBLIC_API_URL` | `""` | 部署到公网域名时填写 |
 | `SANDBOX_ARTIFACT_UPLOAD_BASE_URL` | `http://api:8000` | Sandbox 产物上传 |
 | `SANDBOX_WORKER_CONCURRENCY` | `"1"` | Sandbox Worker 并发（被启动命令的 `${SANDBOX_WORKER_CONCURRENCY:-1}` 消费） |
+| `SANDBOX_WORKSPACE_ROOT` / `SANDBOX_CHECKPOINT_ROOT` | `/var/lib/clouisle/sandbox/jobs` / `/var/lib/clouisle/sandbox/checkpoints` | API 与 Worker 看到的共享虚拟路径；物理磁盘只挂在 `sandbox-worker` 上 |
+| `WECHAT_POLL_BATCH_SIZE` / `WECHAT_POLL_CONCURRENCY` / `WECHAT_POLL_MAX_BATCHES` | `"64"` / `"16"` / `"8"` | 微信轮询批次、并发与在途批次上限 |
 | `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `"true"` | 开启 bwrap 文件系统隔离 |
 | `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `"/usr/bin/bwrap"` | 镜像内 bubblewrap 绝对路径 |
 | `FRONTEND_URL` | `http://frontend:3000` | SSO 回调基址 |
@@ -39,6 +43,10 @@ Kubernetes 部署需要 Kubernetes `1.25+`、配置好的 `kubectl`、Ingress Co
 `clouisle-secret` 有 6 个键，**必须替换**：`SECRET_KEY`、`POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`QDRANT_API_KEY`、`INTERNAL_API_TOKEN`、`SANDBOX_ARTIFACT_UPLOAD_API_KEY`。模板里的值是 Base64 占位符；手动编辑时用 `echo -n 'value' | base64` 生成。
 
 `API`、`Worker`、`Sandbox Worker`、`Beat` 都带 `wait-for-postgres` initContainer，用 `pg_isready` 等到数据库可连；API 的 readiness/liveness 探针是 `GET /api/v1/health:8000`（`initialDelaySeconds` 10/20），Frontend 探针是 `GET /:3000`。Worker 与 Sandbox Worker 通过 `INTERNAL_API_TOKEN_FILE=/var/run/secrets/clouisle/internal-api-token` 读取内部 Token（由 Secret 挂载），并设 `UPLOAD_STORAGE_MODE=remote`。
+
+`sandbox-worker` 以 DaemonSet 运行，`terminationGracePeriodSeconds: 35`，`securityContext` 为 `runAsUser: 0`、`allowPrivilegeEscalation: false`、`capabilities.drop: [ALL]` + `add: [SYS_ADMIN, SETFCAP, NET_ADMIN]`、`seccompProfile: Unconfined`，资源默认 `requests` 250m/512Mi、`limits` 2 CPU/2Gi（Helm 用 `sandboxWorker.securityContext` 与 `sandboxWorker.resources` 覆盖）。删除这些能力或改回非 root 会让 bwrap 无法创建命名空间。`SANDBOX_NODE_ID` 由 `spec.nodeName` 注入，`SANDBOX_WORKER_ID` 留空以便首次启动在本地磁盘上生成。
+
+K8s 部署同样没有 `wechat-receiver` 工作负载：微信轮询任务路由到 `default` 队列，由 `worker` 消费；飞书长连接由 `worker` 的 `agent` 队列消费者托管。只有 `clouisle-backend` 镜像显式安装 `ffmpeg`/`ffprobe`，微信音视频采集与转码运行在 `api`/`worker` 容器内；自建镜像时不要漏装。
 
 <Callout type="warn">
   `frontend` Deployment 在单文件 manifest（以及 Helm 默认值）中**不设置任何环境变量**。浏览器流量走 Ingress 的 `/api` 前缀不受影响，但 Next.js 服务端取数会回退到代码默认 `BACKEND_INTERNAL_URL=http://localhost:8000`，在 Pod 内不可达。需要 SSR 取数时给 `frontend` 显式加 `BACKEND_INTERNAL_URL=http://api:8000`。
@@ -76,7 +84,7 @@ kubectl -n clouisle scale deployment worker --replicas=4
 kubectl -n clouisle scale deployment api --replicas=3
 ```
 
-sandbox-worker 是 DaemonSet（每节点一 Pod），不能 `scale` 改副本——扩容即加节点。
+sandbox-worker 是 DaemonSet（每节点一 Pod），不能 `scale` 改副本——扩容即加节点。每个 Pod 使用各自节点的 `hostPath`，不能共享同一目录；节点上的会话与检查点随节点消失，无法迁移到其他节点。
 
 `beat` 始终保持一个副本。使用 `ReadWriteOnce` 本地上传卷时，API 保持单副本；生产多副本应配置共享卷或对象存储。
 

@@ -13,6 +13,7 @@
     "api-keys",
     "auth",
     "sso",
+    "integrations",
     "packages",
     "totp",
     "agents",

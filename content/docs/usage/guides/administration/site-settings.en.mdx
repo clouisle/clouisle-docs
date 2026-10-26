@@ -4,25 +4,26 @@ description: Configure branding, registration policy, security, notifications, s
 icon: MonitorCog
 ---
 
-Site settings determine the logged-out pages, authentication flow, resource limits, and runtime policies. Only users with the corresponding `admin:settings:*` permissions or super administrator status can see the matching tabs.
+Site settings determine the logged-out pages, authentication flow, resource limits, and runtime policies. Only administrators with permission to view site settings, or super administrators, can see the matching categories.
+
+This page covers the switches, fields, and visible effects in the interface; for exact defaults, the complete field list, and matching rules, see the [Site settings reference](../../../reference/site-settings.mdx).
 
 ## Accessing System Settings
 
-1. Log in as administrator.
+1. Log in as an administrator.
 2. Navigate to **Admin** → **Site Settings** (Settings section in the sidebar).
 3. Choose a category from the settings sub-navigation.
 
 Settings categories:
 
-- **General** (`/site-settings`)
-- **Security** (`/site-settings/security`)
-- **Notifications** (`/site-settings/notifications`)
-- **Storage** (`/site-settings/storage`)
-- **Memory** (`/site-settings/memory`)
-- **Integrations** (`/site-settings/integrations`: login identity sources, email, Webhook, Feishu directory; login and builtin-config domains authorize separately)
+- **General**
+- **Security**
+- **Notification channels**
+- **Storage**
+- **Memory**
+- **Integrations** (login identity sources, email, Webhook, Feishu, WeChat iLink)
 
-Settings are stored as key-value site settings and exposed through `GET /api/v1/admin/site-settings` (single key: `GET/PUT /api/v1/admin/site-settings/{key}`, bulk update: `PUT /api/v1/admin/site-settings`). Viewing requires `admin:settings:read`; updating requires `admin:settings:update`.
-
+Login integrations and built-in service configuration are authorized separately: someone who can change sign-in methods cannot necessarily change email, Webhook, or messaging integrations, and vice versa.
 
 ## General Settings
 
@@ -30,574 +31,449 @@ Settings are stored as key-value site settings and exposed through `GET /api/v1/
 
 Configure site name, URL, description, icon, default language, and authentication page layout:
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `site_name` | string | `Clouisle` | Site name |
-| `site_url` | string | empty | Site URL |
-| `site_description` | string | empty | Site description |
-| `site_icon` | string | empty | Site icon URL |
-| `default_language` | `en` or `zh` | `en` | Default language |
-| `auth_page_layout` | `centered` or `split` | `centered` | Authentication page layout |
+| Setting | Default | Description |
+| --- | --- | --- |
+| Site name | `Clouisle` | Shown on the sign-in page, browser title, and notifications |
+| Site URL | empty | Public address used for callbacks and share links |
+| Site description | empty | Short description on the sign-in page and share cards |
+| Site icon | empty | Site icon image URL |
+| Default language | English | Interface language for new visitors and users who have not chosen one |
+| Authentication page layout | Centered | Centered or split layout |
 
-Update site information: Navigate to **Settings** → **General**, update fields, and click **Save Changes**.
+Click **Save changes** after editing; public pages use the new values immediately.
 
 ### Theme and Display
 
-Configure theme mode, primary color, branding display, and interface elements:
+Configure the default theme mode, primary color, and branding:
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `theme_mode` | `light`, `dark`, or `system` | `system` | Site default theme mode (users can override it in their own settings) |
-| `theme_primary_color` | string | empty | Theme primary color (empty uses the built-in palette) |
-| `theme_branding_display` | `full`, `name_only`, `icon_only`, or `hidden` | `full` | Branding display |
+| Setting | Default | Description |
+| --- | --- | --- |
+| Theme mode | Follow system | Users can override it in personal settings |
+| Primary color | empty | Empty uses the built-in palette |
+| Branding display | Icon and name | Icon and name, name only, icon only, or hidden |
 
-Additional theme tokens (primary foreground, background, card, sidebar, navbar, accent, chart colors, etc.) can also be customized.
-
-Update branding: Navigate to **Settings** → **General**, adjust theme mode and color tokens, and click **Save Changes**.
+You can also customize primary-foreground, background, card, sidebar, navbar, accent, and chart colors. Colors use hexadecimal notation, for example `#3b82f6`.
 
 ### Language Settings
 
-Configure site default language and multilingual support:
+The default language controls what logged-out visitors see. Signed-in users can switch the interface language in personal settings, and notification messages are generated in the recipient's language.
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `default_language` | `en` or `zh` | `en` | Site default language |
+### Legal and Compliance
 
-Users can switch the interface language in their personal settings. After switching, interface text and notification messages use the corresponding language translation.
+Configure ICP filing, terms of service, and privacy policy:
 
-### Legal & Compliance
-
-Configure ICP record, terms of service, and privacy policy:
-
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `icp_record_number` | string | empty | ICP record number |
-| `icp_record_url` | string | empty | ICP record URL |
-| `terms_enabled` | boolean | `false` | Enable terms of service |
-| `terms_url` | string | empty | Terms URL |
-| `terms_text` | string | empty | Terms text (Markdown, used when no URL) |
-| `privacy_enabled` | boolean | `false` | Enable privacy policy |
-| `privacy_url` | string | empty | Privacy policy URL |
-| `privacy_text` | string | empty | Privacy policy text (Markdown, used when no URL) |
-| `require_terms_acceptance_on_register` | boolean | `false` | Require terms acceptance on registration |
-
-Terms and privacy entries are shown only when enabled and a URL or text is provided. Registration acceptance is enforced only when `require_terms_acceptance_on_register` is true.
+| Setting | Default | Description |
+| --- | --- | --- |
+| ICP filing number / link | empty | Shown in the page footer when filled in |
+| Enable terms of service | Off | Once on, an entry appears on the sign-in and sign-up pages |
+| Terms link / text | empty | Text is used when no link is provided (Markdown supported) |
+| Enable privacy policy | Off | Same as terms |
+| Privacy link / text | empty | Text is used when no link is provided |
+| Require accepting terms on sign-up | Off | When on, registration requires checking the agreement |
 
 ## Security Settings
 
-### Registration
+### Registration and Approval
 
-Configure registration, approval, email verification, and account deletion policies:
-
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `allow_registration` | boolean | `true` | Allow registration |
-| `require_approval` | boolean | `true` | Admin approval for new users |
-| `email_verification` | boolean | `true` | Email verification |
-| `allow_account_deletion` | boolean | `true` | Allow account deletion |
-| `default_role_id` | string | Viewer role | Default role (set automatically at initialization) |
-| `default_team_id` | string | empty | Default team |
-| `default_team_role` | `viewer`, `member`, or `admin` | `member` | Default team role |
+| Setting | Default | Description |
+| --- | --- | --- |
+| Allow registration | On | Turning it off removes the sign-up entry; existing accounts are unaffected |
+| New users require administrator approval | On | New accounts wait for approval and cannot sign in before it |
+| Email verification | On | Users must verify their email after registering |
+| Allow account deletion | On | Turning it off removes the delete-account entry in personal settings |
+| Default role | Viewer | Global role granted to new users |
+| Default team / default team role | empty / Member | Team and role new users join automatically |
 
 ### Password Policy
 
-Configure password complexity requirements:
+| Setting | Default | Description |
+| --- | --- | --- |
+| Minimum length | `8` | Shorter new passwords are rejected |
+| Require uppercase letter | On | At least one `A-Z` |
+| Require number | On | At least one `0-9` |
+| Require special character | Off | When on, punctuation and similar symbols are required |
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `min_password_length` | number | `8` | Minimum password length |
-| `require_uppercase` | boolean | `true` | Require uppercase letter |
-| `require_number` | boolean | `true` | Require number |
-| `require_special_char` | boolean | `false` | Require special character |
+The policy only applies to new passwords; changing it does not expire existing ones.
 
-<Callout type="note">There is no `require_lowercase` setting.</Callout>
+Password expiration:
 
-Password expiration configuration:
+| Setting | Default | Description |
+| --- | --- | --- |
+| Enable password expiration | Off | When on, users must change an expired password before continuing |
+| Password validity | `90` days | Expiry period |
+| Warning before expiry | `7` days | Days during which sign-in shows a reminder |
+| Remember password history | `5` | Recently used passwords cannot be reused |
+| Minimum password age | `0` days | When above 0, users cannot change the password again immediately |
+| Force password change on first sign-in | Off | New accounts and accounts after a reset must change the password |
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `password_expiration_enabled` | boolean | `false` | Enable password expiration |
-| `password_expiration_days` | number | `90` | Password expiration days |
-| `password_expiration_warning_days` | number | `7` | Warning days before expiration |
-| `password_history_count` | number | `5` | Password history count |
-| `password_min_age_days` | number | `0` | Minimum password age in days |
-| `force_password_change_first_login` | boolean | `false` | Force password change on first login |
+### Sessions and Sign-in Lockout
 
-### Session Settings
+| Setting | Default | Description |
+| --- | --- | --- |
+| Session validity | `30` days | Users must sign in again afterwards |
+| Allow a single session only | Off | When on, a new sign-in signs out the previous session |
+| Maximum sign-in attempts | `5` | Consecutive failures before the account is locked |
+| Lockout duration | `15` minutes | While locked, even a correct password is refused; the page reports the account is locked |
 
-Configure session timeout, login attempt limits, and CAPTCHA:
+A successful sign-in resets the failure counter.
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `session_timeout_days` | number | `30` | Session timeout in days |
-| `single_session` | boolean | `false` | Allow only a single session per user |
-| `max_login_attempts` | number | `5` | Max login attempts before lockout |
-| `lockout_duration_minutes` | number | `15` | Lockout duration in minutes |
-| `enable_captcha` | boolean | `false` | Enable CAPTCHA |
-
-<Callout type="note">There is no "max concurrent sessions" counter. The relevant control is the `single_session` boolean, and the session lifetime is `session_timeout_days` (default 30 days).</Callout>
+There is no "maximum concurrent sessions" setting; concurrency is controlled by the single-session switch and session validity.
 
 ### Two-Factor Authentication
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `require_totp` | boolean | `false` | Require all users to enable TOTP |
+| Setting | Default | Description |
+| --- | --- | --- |
+| Require all users to enable TOTP | Off | When on, users without TOTP must bind it during sign-in |
 
-Admin TOTP statistics and per-user status/disable endpoints are available under `/api/v1/admin/totp`.
+Administrators can see whether each user has bound TOTP and reset or disable it for them.
 
 ### Human Verification
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `enable_captcha` | boolean | `false` | Enable human verification on the login page |
-
-Once enabled, password logins must carry a one-time verification credential (`captcha_id` + `captcha_token`): the front end first calls `POST /api/v1/login/captcha/click` to exchange a valid click interaction for a private one-time proof, then submits it with the login. A missing credential raises `captcha_required`; a failed check raises `captcha_invalid`.
-
-<Callout type="warn" title="A single switch, nothing more">
-  The Security page has exactly one CAPTCHA switch ("Enable Human Verification") — there are **no** failure thresholds, validity periods, or difficulty settings. Treat it as a supplement that raises the cost of automated attempts, not as a replacement for lockout and TOTP: brute-force protection actually comes from `max_login_attempts` (default `5`) / `lockout_duration_minutes` (default `15`) and `require_totp`. Assuming `enable_captcha` means "bot logins are solved" leaves a brute-force exposure.
-</Callout>
-
-
-### Model Endpoint Allowlist
-
-Before saving or testing a model with a new API endpoint:
-
-1. Navigate to **Settings** → **Security**.
-2. Add the endpoint Origin to **Model Endpoint Allowlist**, one per line.
-3. Include only the scheme, hostname, and non-default port, for example `https://gateway.example.com` or `http://ollama.internal:11434`.
-4. Save the Security settings, then save or test the model again.
-
-<Callout type="warn" title="Security">
-Prefer HTTPS for remote endpoints. Use HTTP only for endpoints on a trusted private network because API keys and model traffic are otherwise sent without transport encryption.
-</Callout>
-
-Matching is exact. URL paths are ignored, but the scheme, hostname, and port must all match. Removing an Origin blocks subsequent model discovery, connection tests, and runtime requests without restarting the service. The default allowlist ships with 20 known provider origins (e.g. `https://api.openai.com`, `https://api.anthropic.com`, `http://localhost:11434`) and stores at most **200** entries.
-
-### Outbound Network Allowlist (SSRF Exemption)
-
-Clouisle applies one shared SSRF check to custom HTTP tools, workflow HTTP request nodes, knowledge base URL imports, and database tool connection tests: the host is resolved to IPs first, and any resolved IP falling into the **private (`is_private`) / loopback (`is_loopback`) / link-local (`is_link_local`) / reserved (`is_reserved`) / multicast (`is_multicast`) / unspecified (`is_unspecified`)** categories is rejected. Typical members: `127.0.0.1`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.169.254`, `fe80::/10`, `0.0.0.0`, `::`, and the hostnames `localhost`, `local`, `metadata.google.internal`.
-
-To call internal APIs, microservices, or intranet databases, add the approved targets one per line under **Settings** → **Security** → **Outbound Network Allowlist (SSRF Exemption)** (setting key `ssrf_allowed_targets`, a JSON array):
-
-| Form | Example | Matching rule |
+| Setting | Default | Description |
 | --- | --- | --- |
-| Single IP | `192.168.1.50` | Exact address match |
-| CIDR subnet | `10.10.0.0/16` | Any resolved IP inside the subnet is allowed |
-| Exact domain | `api.internal.service` | Must contain `.`; case-insensitive |
-| Wildcard domain | `*.corp.internal` | Matches every subdomain **and the base domain itself** |
+| Enable human verification | Off | Shows a click challenge on the sign-in page |
+
+When enabled, users must complete a click challenge before signing in; a missing or expired challenge rejects the sign-in and the page asks the user to complete it again.
+
+<Callout type="warn" title="This is the only CAPTCHA switch">
+  The Security page has no failure threshold, validity window, or difficulty setting. Human verification is a supplementary anti-automation measure, not a substitute for lockout and TOTP: brute-force protection comes from the maximum attempts, lockout duration, and TOTP.
+</Callout>
+
+### Network Access Limits: Three Independent Switches
+
+The Security page has three independent restriction switches, all on by default. Each can be turned off without affecting the others:
+
+| Switch | Effect when off |
+| --- | --- |
+| Model endpoint allowlist | Saving or testing a model no longer checks whether its address is in the list |
+| Outbound network allowlist | Custom HTTP tools, HTTP request nodes, URL imports, and database connections can reach internal addresses |
+| Sandbox egress allowlist | Newly started code jobs can reach any network target |
+
+Turning a switch off never clears its saved list: entries remain visible and editable, and enforcement resumes immediately when the switch is turned back on and saved.
+
+#### Model Endpoint Allowlist
+
+A model provider's request address must exactly match an entry (same scheme, hostname, and port; path is ignored). The list is preloaded with known providers such as OpenAI, Anthropic, DashScope, SiliconFlow, and local `http://localhost:11434`, and holds up to `200` entries.
+
+Before saving or testing a model with a new address:
+
+1. Go to **Settings** > **Security**.
+2. Add the request address to the **Model endpoint allowlist**, one per line.
+3. Enter only the scheme, hostname, and non-default port, for example `https://gateway.example.com` or `http://ollama.internal:11434`.
+4. Save the security settings, then save or test the model again.
+
+An address outside the list makes the model save or connection test fail with a message that the endpoint is not allowlisted. Removing an entry immediately blocks subsequent model discovery, connection tests, and chat requests; no restart is needed.
+
+Prefer HTTPS for remote addresses. Use HTTP only for endpoints on a trusted private network, because API keys and model traffic are sent without transport encryption.
+
+#### Outbound Network Allowlist (Internal Access Exemptions)
+
+Clouisle denies internal, loopback, and cloud metadata addresses by default. These operations fail outright when the target is refused:
+
+- Custom HTTP tools
+- HTTP request nodes in workflows
+- URL import and web page preview in Knowledge Bases
+- Connection tests for database tools
+
+To call an internal API, microservice, or database, add each approved target under **Settings** > **Security** > **Outbound network allowlist**:
+
+| Entry form | Example | Matching rule |
+| --- | --- | --- |
+| Single IP | `192.168.1.50` | Exact address |
+| CIDR range | `10.10.0.0/16` | Allowed when the resolved address falls in the range |
+| Exact hostname | `api.internal.service` | Must contain a `.`; case-insensitive |
+| Wildcard domain | `*.corp.internal` | All subdomains of the suffix, plus the base domain itself |
 
 <Callout type="error" title="Targets that can never be allowlisted">
-  Rejected at save time: `*`, `0.0.0.0`, `::`, `169.254.169.254`, `metadata.google.internal`, and any CIDR overlapping cloud metadata (`169.254.0.0/16`), multicast (`224.0.0.0/4`), or unspecified (`0.0.0.0/32`) ranges (including `0.0.0.0/0` and `::/0`). Invalid entries raise an error instead of being silently dropped.
+  Rejected on save: `*`, `0.0.0.0`, `::`, `169.254.169.254`, `metadata.google.internal`, and any range overlapping cloud metadata, multicast, or unspecified addresses (including `0.0.0.0/0` and `::/0`). Invalid entries produce an error instead of being ignored silently.
 </Callout>
 
-Other constraints and behaviour:
+Other behavior:
 
-- The allowlist holds at most **200** entries; duplicates are de-duplicated. Hostnames without a `.` (such as `localhost`) cannot be an entry — use an IP or CIDR instead.
-- An empty allowlist blocks every internal target — that is the default posture. The wider you open it, the easier tools and workflows become an intranet-probing pivot.
-- Validation re-reads the setting and resolves the host **on every request**, so changes take effect immediately with no restart.
-- The Fake-IP benchmark pool `198.18.0.0/15` (Clash/Surge/Mihomo TUN mode) is automatically allowed so public domains are not falsely flagged as SSRF.
+- Up to `200` entries, duplicates removed automatically. A hostname without a `.` (such as `localhost`) cannot be an entry; use an IP or range instead.
+- An empty list blocks every internal target.
+- The check re-reads settings on every request, so changes take effect immediately without a restart.
+- With the switch off, private, loopback, and cloud metadata targets are reachable; URL and port syntax checks still run, but they are not a security boundary. While it is off, these capabilities can be used to probe internal networks or read cloud instance credentials — narrow the allowlist instead of turning the switch off.
 
+#### Sandbox Egress Allowlist
+
+The sandbox egress allowlist is a separate policy from the outbound network allowlist above, and neither applies to the other: it only controls outbound traffic from programs inside the code sandbox.
+
+- Accepts exact hostnames only, matched case-insensitively; wildcards, IP addresses, and ranges are rejected.
+- Defaults to `pypi.org`, `files.pythonhosted.org`, `pypi.python.org`, `registry.npmjs.org`; up to `200` entries, duplicates removed.
+- An empty list blocks all outbound traffic; only HTTPS on port `443` to allowlisted hosts is permitted.
+- Custom package indexes must use HTTPS and their hostnames must be in the list.
+- Changes apply to the next job without restarting services.
+- Turning the switch off affects **new jobs only**; running jobs keep their policy, filesystem isolation and resource limits still apply, and the list is kept for re-enabling.
+
+<Callout type="warn">
+  With the sandbox egress allowlist off, sandbox code can reach any target, protocol, and port; node network policy still constrains what is actually reachable. See [Code Sandbox](../../concepts/sandbox.mdx) for details.
+</Callout>
 
 ## Notification Settings
 
-### SMTP (Email)
+### Email (SMTP)
 
-Configure email sending:
+| Setting | Default | Description |
+| --- | --- | --- |
+| Enable SMTP | Off | Email is sent only after enabling and filling in the server details |
+| Server / port | empty / `587` | Mail server address and port |
+| Encryption | TLS | None, SSL, or TLS |
+| Username / password | empty | Mail server credentials |
+| From name / address | `Clouisle` / empty | Sender information recipients see |
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `smtp_enabled` | boolean | `false` | Enable SMTP |
-| `smtp_host` | string | empty | SMTP host |
-| `smtp_port` | number | `587` | SMTP port |
-| `smtp_encryption` | `none`, `ssl`, or `tls` | `tls` | Encryption method |
-| `smtp_username` | string | empty | SMTP username |
-| `smtp_password` | string | empty | SMTP password |
-| `email_from_name` | string | `Clouisle` | Sender name |
-| `email_from_address` | string | empty | Sender address |
+To configure: go to **Settings** > **Integrations** > **Email**, fill in the server details, click **Test** to confirm a test email arrives, then click **Save changes**.
 
-Update SMTP settings: Navigate to **Settings** → **Notifications**, enter SMTP details, set sender name and address, click **Test** (`POST /api/v1/admin/site-settings/test-email`), then click **Save Changes**.
-
-<Callout type="info">
-  `smtp_enabled` defaults to `false` and `smtp_host` to empty — out of the box, email is unconfigured. Until you enable it and fill in host, port, encryption, credentials, and sender address, email notifications **silently stay in-app only**: nothing errors and nothing is replayed later. Click **Test** to confirm delivery before saving.
-</Callout>
+When SMTP is not configured or enabled, email notifications **silently stay in-app**: no error is raised and nothing is sent later.
 
 ### External Notification Channels
 
-Email and generic Webhook are the only external notification channels, configured under **Settings** → **Integrations** (`GET/PUT /api/v1/admin/integrations/email`, `/webhook`; tests: `POST …/email/test`, `POST …/webhook/test`). Legacy DingTalk, WeCom, Feishu messaging, and Slack integrations were removed; the Feishu integration only provides directory sync and optional web sign-in, not notifications.
+There are exactly three external notification channels: **email**, **Webhook**, and **Feishu**, configured under **Settings** > **Integrations**. The former DingTalk, WeCom, and Slack channels were removed; WeChat iLink is a messaging integration (Agent chat and knowledge collection), not a notification channel.
 
-| Channel | Key Settings | Test Endpoint |
+| Channel | Configuration | How to test |
 | --- | --- | --- |
-| Email | SMTP server, sender, credentials | `POST /api/v1/admin/integrations/email/test` |
-| Webhook | `webhook_enabled`, URL, method, custom headers, body template, HMAC secret | `POST /api/v1/admin/integrations/webhook/test` |
+| Email | Mail server, sender, and credentials | The **Test** button on the integration page sends a test email |
+| Webhook | URL, method, headers, body template, and signing secret | The **Test** button on the integration page |
+| Feishu | The notification capability on the Feishu integration card, bot credentials, and test recipient | The test-message button on the card |
 
-### Auto Notifications
+Feishu notifications are an explicit capability on the Feishu integration; enabling the integration alone does not send notifications. See [Feishu integration](../integrations/feishu.mdx).
 
-The **Auto Notifications** tab (`GET/PUT /api/v1/admin/site-settings/auto-notifications`) controls which event types create notifications and which external channels receive them. See [Notifications & External Channels](./notifications.mdx) for details.
+### Automatic Notifications
+
+**Automatic notifications** (**Settings** > **Notification channels**) controls which events create notifications and which external channels receive them. See [Notifications and External Channels](./notifications.mdx).
 
 ### Email Templates
 
-<Callout type="note">Not implemented / Roadmap. There is no email template editor. Notification messages are generated from built-in i18n translations (`app/core/i18n.py`).</Callout>
+<Callout type="note">Not implemented. There is no email template editor; notification bodies use built-in localized copy.</Callout>
 
 ## Notification Preferences
 
-Notification delivery in Clouisle is configured **globally by administrators** — there is no per-user notification preference system. Individual users cannot customize which notifications they receive.
+Notification delivery is configured globally by administrators; there are no per-user notification preferences. Regular users cannot choose which notifications they receive.
 
-> **Note:** Per-user preferences (email frequency/digests, per-type toggles, quiet hours / do-not-disturb, push notifications, notification grouping, priority levels, custom rules, and user webhook endpoints) are **not implemented**.
+Users can view notifications in the notification center, mark one or all as read, and filter by type, level, scope, unread state, and keyword. Notification scopes are global, team, and specific users.
 
-### In-App Notifications
+Administrators configure external channels under **Settings** > **Integrations** and choose event types under **Automatic notifications** on **Settings** > **Notification channels**. A channel sends only when selected in the global configuration and enabled/configured; otherwise notifications stay in-app. When volume is high, enable only the types you need to follow up on.
 
-Every user sees their notifications in the notification center and at `/app/notifications`. Notifications are scoped as:
+Available event types include team member and role changes, team model authorization changes, account activation/deactivation, administrator password resets, pending registrations, Knowledge Base document processing results, workflow failures, workflow approval waits, API key expiry warnings, anomalous sign-ins, account lockouts, and password changes.
 
-- **global**: visible to all users
-- **team**: visible to members of the target team
-- **user**: visible to a specific user
+## Memory Settings
 
-### External Channels (Admin-Configured)
+The **Memory** page controls background memory extraction: content from user conversations is extracted into memories after a cooldown, or immediately when the pending-turn threshold is reached. The Agent itself must also enable memory; if either switch is off, nothing is extracted.
 
-Administrators configure external delivery channels globally for automatic notification types. Available channels:
-
-- **Email** (requires SMTP configuration)
-- **DingTalk**
-- **WeChat**
-- **Feishu**
-- **Webhook** (generic webhook)
-- **Slack**
-
-A channel only sends notifications when it is both selected in the global config and enabled/configured by the administrator. If no channels are configured, notifications stay in-app only.
-
-### What Administrators Can Configure
-
-Administrators choose which automatic event types are enabled (`enabled_types`). By default the following types are enabled:
-
-| Type | Event |
-| --- | --- |
-| `team.member_added` / `team.member_removed` | Team membership changes |
-| `team.role_changed` / `team.ownership_transferred` | Role / ownership changes |
-| `team.model_granted` / `team.model_revoked` | Team model access changes |
-| `user.activated` / `user.deactivated` | Account status changes |
-| `user.password_reset` | Administrator resets a password |
-| `user.pending_approval` | New registration awaiting approval |
-| `kb.doc_indexed` / `kb.doc_failed` | Knowledge base document processing |
-| `workflow.run_failed` | Workflow execution failures |
-| `workflow.pause_pending` | A workflow paused and is waiting for human approval |
-| `apikey.expiring` / `apikey.expired` | API key lifecycle |
-| `security.login_anomaly` | Login from a new location/device |
-| `security.account_locked` | Account locked after failed attempts |
-| `security.password_changed` | Password changed |
-
-Additional types (e.g. `workflow.run_success`, `agent.published`, `agent.unpublished`, `password.expiring`) exist and can be enabled.
-
-Admins configure this under **Admin Dashboard → Site Settings → Notifications → Auto Notifications** (and the corresponding channel tabs: Email, DingTalk, WeChat, Feishu, Webhook, Slack).
-
-### What Users Can Do
-
-As a user you can:
-
-- View notifications in the notification center and at `/app/notifications`
-- Mark individual notifications as read
-- Mark all notifications as read
-- Filter the notification list (by type, level, scope, unread, and search)
-
-See [Notifications & External Channels](./notifications.mdx) for details.
-
-### Notification API
-
-- `GET /api/v1/notifications` — list visible notifications (filters: scope, type, level, unread, search)
-- `GET /api/v1/notifications/unread-count` — unread count
-- `POST /api/v1/notifications/read` — mark notifications read (`notification_ids` or `mark_all`)
-- Admin endpoints (`/api/v1/admin/notifications`) — create/delete notifications, manage auto-notification config
-
-<Callout type="note">There is no `PATCH /api/v1/notifications/{id}` and no user-level `DELETE /api/v1/notifications/{id}` — reading is a bulk action and deletion is admin-only.</Callout>
-
-### Best Practices
-
-**For users:**
-- Check the notification center regularly
-- Review security notifications immediately
-
-**For administrators:**
-- Enable external channels only after configuring them (SMTP, DingTalk, etc.)
-- Choose enabled types deliberately to avoid notification noise
-
-## Background Memory Extraction Settings
-
-**Memory** (`/site-settings/memory`) queues extraction for pending user turns after the configured cooldown, or immediately when the pending-turn threshold is reached. The Agent must also have memory enabled; disabling either the Agent memory feature or the global switch prevents extraction tasks.
-
-| Field | Type | Default | Constraints and behavior |
-| --- | --- | --- | --- |
-| `memory_async_extraction_enabled` | boolean | `false` | Enable background extraction |
-| `memory_extraction_model_id` | string | `""` | Empty uses the fallback model chain; unavailable or disabled models also fall back |
-| `memory_extraction_cooldown_seconds` | integer | `180` | `10-3600`, debounce window |
-| `memory_extraction_max_pending_turns` | integer | `6` | `1-50`, trigger immediately at this pending-turn count |
-
-The extraction model falls back in this order: explicitly configured enabled model, the Agent's assigned model, the system default chat model, then the first available chat model. The cooldown debounces extraction; reaching the pending-turn threshold queues it immediately.
+| Setting | Default | Description |
+| --- | --- | --- |
+| Enable background extraction | Off | Extraction outside conversations happens only when on |
+| Extraction model | empty | When empty, falls back in order: the Agent's model → the system default chat model → the first available chat model |
+| Cooldown | `180` seconds | `10-3600`, prevents frequent extraction |
+| Pending-turn threshold | `6` | `1-50`, triggers extraction immediately when reached |
 
 ## Storage Settings
 
-
 ### File Storage
 
-Configure storage backend and knowledge base upload size limits:
+| Setting | Default | Description |
+| --- | --- | --- |
+| Storage backend | Local | Local files or S3-compatible object storage |
+| Knowledge Base single-file upload limit | `50MB` | `1-1024`; uploads over the limit are rejected |
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `upload_storage_backend` | `local` or `object` | `local` | Upload storage backend |
-| `kb_document_max_upload_size_mb` | number (1-1024) | `50` | KB single file upload size limit (MB) |
+### Object Storage (S3-Compatible)
 
-Update storage settings: Navigate to **Settings** → **Storage**, configure storage backend and max upload size, then click **Save Changes**.
+After choosing object storage, fill in:
 
-<Callout type="note">Azure Blob storage is not supported. There is no public object-storage URL setting and no storage cleanup feature.</Callout>
+| Setting | Default | Description |
+| --- | --- | --- |
+| Endpoint | empty | Object storage service address |
+| Bucket / region | empty | Target bucket and region |
+| Access key / secret key | empty | Credentials stored server-side only |
+| Path-style access | On | For services that do not support virtual-hosted bucket names |
+| Use HTTPS | On | When off, credentials and files travel in plain text |
 
-### Object Storage (S3-compatible)
-
-Configure S3-compatible object storage:
-
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `upload_storage_backend` | `object` | - | Upload storage backend set to object storage |
-| `object_storage_endpoint` | string | empty | Object storage endpoint |
-| `object_storage_bucket` | string | empty | Bucket name |
-| `object_storage_region` | string | empty | Region |
-| `object_storage_access_key` | string | empty | Access Key |
-| `object_storage_secret_key` | string | empty | Secret Key |
-| `object_storage_force_path_style` | boolean | `true` | Use path-style URLs |
-| `object_storage_secure` | boolean | `true` | Use HTTPS |
-
-Configure object storage: Navigate to **Settings** → **Storage**, enter the endpoint, bucket, region, access key, and secret key, configure path-style and HTTPS options, then click **Save Changes**.
+After saving, uploads and downloads use object storage.
 
 ### Audit Log Retention
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `audit_log_retention_days` | number (30-3650) | `365` | Audit log retention days |
-| `audit_log_archive_path` | string | `/var/log/clouisle/audit_archives` | Local path archive JSON files are written to |
+| Setting | Default | Description |
+| --- | --- | --- |
+| Audit log retention | `365` days | `30-3650`; older logs can be archived |
+| Archive file path | `/var/log/clouisle/audit_archives` | Local path where archive JSON files are written |
 
-Logs older than the retention period are archived (manually triggered) to monthly JSON files under the archive path and then deleted. See [Audit Log Management](./audit-logs.mdx) for details.
+Administrators archive logs past the retention period manually; archived logs are deleted from the database. See [Audit log management](./audit-logs.mdx).
 
-### Audit Alerts (Not Wired Up)
+### Audit Alerts
 
-The following five keys are seeded into the database at initialization, but **no code reads them** — there is no detection task and no delivery path, so configuring them produces no alerts:
+The settings page has no working audit alert feature: no automatic detection of failed sign-ins or bulk deletions, and no alert delivery. For security alerts, use the security events and external channels in [Automatic notifications](./notifications.mdx).
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `audit_alert_enabled` | boolean | `true` | Suspected leftover alert master switch |
-| `audit_alert_webhook` | string | empty | Suspected leftover alert webhook URL |
-| `audit_alert_failed_login_threshold` | number | `5` | Suspected leftover failed-login threshold |
-| `audit_alert_failed_login_window` | number | `5` | Suspected leftover detection window (minutes) |
-| `audit_alert_bulk_deletion_threshold` | number | `10` | Suspected leftover bulk-deletion threshold |
+## Site Search
 
-For real security alerting, use the implemented path: the `security.*` events and external channels of [Auto Notifications](./notifications.mdx).
+The built-in **Web Search** tool is configured once at the site level by administrators; teams and Agents no longer store their own search credentials.
 
+1. Go to **Capabilities** in the admin console and find the built-in **Web Search** tool.
+2. Click configure to open the site search dialog.
+3. Select the search engines to enable, enter their credentials, and choose the default engine.
+4. Click **Test** to confirm results come back, then save.
 
-## Integration Settings (SSO / Email / Webhook / Feishu)
+- Supported engines: Tavily, Bocha, SearXNG, and DeepSeek. There is no keyless engine, and no automatic failover to another provider when an engine fails.
+- Engines are enabled or disabled individually at the site level; only enabled engines appear in tool configuration.
+- Saved keys show only as configured and are never displayed again; leaving a field empty keeps the current value, while a new value replaces it.
+- Disabling an engine makes tool calls using it fail immediately; switch the tool or Agent to another enabled engine.
 
-Login identity sources, email, Webhook, and the Feishu directory are managed together under **Settings** → **Integrations** (`/site-settings/integrations`) on one Integration model with separate permission domains: `admin:integrations:login:read/update` for login integrations and global SSO policy, `admin:integrations:settings:read/update` for email, Webhook, and Feishu configuration and credentials.
+Engine capabilities and limits: [Built-in tools](../tools/built-in.mdx).
 
-### Global SSO Behavior
+## Integration Settings
 
-Configured in **Settings** → **Security** (SSO section):
+Login identity sources, email, Webhook, Feishu, and WeChat iLink are managed under **Settings** > **Integrations**. Login integrations and built-in services are authorized separately: whoever manages sign-in owns SSO and login methods, while whoever manages built-in services owns email, Webhook, Feishu, WeChat iLink, and the delivery log.
 
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `sso_enabled` | boolean | `false` | Enable SSO |
-| `sso_allow_password_login` | boolean | `true` | Allow password login |
-| `sso_auto_create_users` | boolean | `true` | Auto-create users |
-| `sso_require_approval` | boolean | `false` | Require approval |
-| `sso_match_by_email` | boolean | `true` | Match by email |
+### Global SSO Policy
 
-### Login Integrations and Feishu
+Configure it in the SSO section of **Settings** > **Security**:
 
-Login integrations (OAuth2/OIDC, SAML2, CAS) are created and managed on the Integrations page; signup policy (`allow_signup`, `require_approval`, `default_role_id`) lives in `login_config`. Feishu sign-in is an opt-in capability on the Feishu integration — the button only appears once explicitly enabled. See [SSO Configuration](./sso.mdx).
+| Setting | Default | Description |
+| --- | --- | --- |
+| Enable SSO | Off | When on, the sign-in page shows buttons for enabled identity sources |
+| Allow password sign-in | On | When off, only SSO works — confirm at least one identity source is usable first |
+| Auto-create users | On | Creates an account on the first SSO sign-in |
+| Require approval | Off | When on, auto-created accounts need administrator approval |
+| Match existing accounts by email | On | When off, the same email is not linked to an existing account automatically |
+
+### Login Integrations and Feishu Sign-in
+
+Login integrations (OAuth2/OIDC, SAML2, CAS) are created and managed on the integration page. Feishu sign-in is an optional capability on the Feishu integration; the sign-in page shows the Feishu button only after you enable it explicitly. See [Configure single sign-on](./sso.mdx).
 
 ### Feishu Directory Sync
 
-Under **Settings** → **Integrations** → **Feishu directory sync**, manually sync selected Feishu department members into Clouisle accounts using the same app_id/app_secret (one-way: nothing syncs back to Feishu, and Feishu departures do not disable local accounts):
+Under **Settings** > **Integrations** > **Feishu directory sync**, use the app's App ID and App Secret to import members of selected Feishu departments as Clouisle accounts. Sync is one-way: nothing is written back to Feishu, and departures or deactivations in Feishu do not deactivate local accounts.
 
-1. Create a Feishu custom app with contact read scope covering the departments and their members; reading the root department requires full-member scope.
-2. Grant `tenant:tenant:readonly` (company name), `contact:user.employee_id:readonly` (user_id), `contact:user.base:readonly` (name), and `contact:user.email:readonly` (without it, placeholder emails are used).
-3. Save the App ID and App Secret in the Clouisle Feishu card (Fernet-encrypted; blank preserves the stored secret), browse the department tree, and save the scope: the top-level **Company** node is the root department (ID `0`); other departments cover themselves and descendants.
-4. Run **Sync selected department members** to import accounts and create/update the matching teams. The result reports created, updated, and skipped accounts plus new teams.
+1. Create a custom app in the Feishu developer console, grant directory read permissions, and add the departments to sync (including members) to the app's data scope; reading the root department requires the all-employee scope.
+2. To read the company name, member ID, name, and email, grant `tenant:tenant:readonly`, `contact:user.employee_id:readonly`, `contact:user.base:readonly`, and `contact:user.email:readonly`.
+3. Save the App ID and App Secret on the Feishu integration card, browse the department tree, and save the sync scope. The top-level **Company** node is the root department; selecting it means everyone. Other departments include themselves and descendants.
+4. Click **Sync members of selected departments**. The result reports created, updated, and skipped accounts and new teams.
 
-New accounts have no local password and take the configured default role/team; accounts without a Feishu email get a deterministic placeholder (`@accounts.clouisle.example`, RFC 6761 reserved, derived from user_id so repeat syncs are stable). Existing local accounts are never merged by email alone; repeat syncs match on the stored Feishu user_id and skip email conflicts. Legacy `.invalid` placeholders are rewritten to `.example` on startup.
+New accounts have no local password and use the default role and default team. Existing local accounts are not merged by email alone; repeated syncs match and update by Feishu member ID, and skip email conflicts.
+
+When sync fails, check the Feishu error code shown on the card first:
 
 | Feishu error | Meaning | Fix |
 | --- | --- | --- |
-| HTTP 400 `41050` (no user authority) | Member outside the app's contact data scope | Add the user/department to the scope and retry |
-| HTTP 403 `40004` (no dept authority) | Department outside the scope | Add the department to the scope |
-| HTTP 400 `40011`/`40012` | Invalid pagination parameters | Retry; report if it repeats |
-| `users without user_id` | Cannot read user IDs | Grant `contact:user.employee_id:readonly` |
-| `secret cannot be decrypted` | Backend `SECRET_KEY` changed | Re-save the App Secret |
+| `41050` (no user authority) | Member is outside the app's directory data scope | Add the user or department to the data scope in Feishu, then retry |
+| `40004` (no dept authority) | Department is outside the data scope | Add the department to the data scope |
+| `40011` / `40012` | Invalid pagination parameters | Retry; contact support if it persists |
+| Missing member ID reported | No permission to read member IDs | Add `contact:user.employee_id:readonly` |
+| Secret cannot be decrypted | The site secret was changed | Save the App Secret again |
 
-Admin endpoints: `GET/PUT /api/v1/admin/feishu/config`, `GET /feishu/departments`, `PUT /feishu/department-scope`, `POST /feishu/sync` (settings domain).
+### Feishu Agent Chat
+
+The **Agent chat** capability on the Feishu integration is an explicit switch; enabling the integration alone does not let the bot answer messages. Once the capability is on, the user has completed identity binding, and an Agent is published, users can chat with that Agent in Feishu.
+
+Messages can be received in two ways:
+
+- **HTTP callback**: point the Feishu event subscription at the callback address the site provides, and Feishu pushes messages.
+- **Long connection**: choose long connection in the Feishu Agent chat configuration; the platform connects to Feishu, so no public callback address is needed.
+
+The two modes can be used together. In personal settings, users can pause new messages, queuing, and unsent replies; pausing does not delete conversation history.
+
+Feishu attachment limits: images `10 MiB`, MP4 `30 MiB`, other files `30 MiB`. See [Feishu integration](../integrations/feishu.mdx).
+
+### Feishu Knowledge Sync
+
+A Feishu Wiki space can sync to a chosen Knowledge Base on a schedule (only super administrators can configure it). Choose the source space and target Knowledge Base, set the interval (`1-43200` minutes), and click sync now at any time. Sync uses the app credentials saved in the Feishu integration.
+
+### WeChat iLink
+
+WeChat iLink is a single-instance integration with two platform switches: **Agent chat** and **knowledge collection**. Each person also authorizes via QR code; the platform switches and personal authorization are independent.
+
+- Binding purpose can be none, knowledge collection, or a single published Agent — only one is active at a time.
+- With the platform switch off, new messages, execution, and replies pause; existing connections, credentials, and pending records are kept, and processing resumes when it is turned back on.
+- Knowledge collection saves WeChat content to a Knowledge Base and keeps each submission record and supported original files.
+
+See [WeChat iLink integration](../integrations/wechat.mdx).
 
 ## Team Settings
 
-Teams group users and resources (agents, workflows, and knowledge bases). Team admins manage **members** and **basic team information**; **model authorization can only be changed by a superuser**.
-
-> **Note:** Team slugs, visibility, invitation flows, join requests, member limits, per-team resource limits, per-team security/API settings, billing, data retention, custom domains, and branding are **not implemented**.
+Teams group users and resources (Agents, workflows, and Knowledge Bases). Team administrators manage **members** and **basic team information**; **model authorization can only be changed by a super administrator**.
 
 ### Accessing Team Management
 
-There are two entry points with completely different permissions and capabilities:
+There are two entry points with different permissions and capabilities:
 
-| Entry point | Path | Required permission | Capabilities |
+| Entry | Location | Who can enter | What they can do |
 | --- | --- | --- | --- |
-| Admin team management | `/teams` | `admin:team:read` (or superuser) | Cross-team view/create/edit; **model authorization is superuser-only** |
-| Team settings (team-scoped) | `/app/team` | Team membership plus `team:manage` / `team:update` (team admin or owner) | The current team's members, basic info, and a **read-only** model tab |
+| Admin team management | Team switcher → **Manage all teams (system admin)** | Administrators with team-view permission or super administrators | View, create, edit, and delete teams across teams; **only super administrators can change model authorization** |
+| Team settings | Team switcher → **Manage current team** | Team administrators or owners | Manage the current team's members and basic information; view model authorization read-only |
 
-Open them from the **Team switcher**: **Manage All Teams (Admin)** goes to `/teams` (shown only with `admin:team:read`) and **Manage Current Team** goes to `/app/team` (shown only with `team:manage`).
-
-<Callout type="warn">
-  **Members and Viewers do not have `admin:team:read`**, so they never see the `/teams` entry; inside the team switcher they only get **Manage current team** (and that still requires `team:manage`). When someone asks "why can't I see team management", check this permission before suspecting a frontend bug.
-</Callout>
+Regular members and viewers do not see **Manage all teams** and can only open current-team settings; without team management permission, they cannot change members there either.
 
 ### Team Information
 
-Only three fields can be edited:
+Only three fields are editable:
 
 | Field | Description |
 | --- | --- |
 | **Name** | Team display name (required) |
-| **Description** | Optional description (max 500 chars) |
+| **Description** | Optional description (up to 500 characters) |
 | **Avatar URL** | Optional avatar image URL |
 
-> **Note:** There is no team slug — teams are identified by ID and referenced by name in the UI.
+There is no team slug or custom URL; teams are referenced by name in the interface.
 
 ### Model Authorization
 
-**Team model authorization can only be performed by a superuser.** On `/app/team` → **Model Authorization**, a team admin or owner sees a **read-only** view: authorized models, enable state, and a "today's usage / limit" bar (limits are assigned by the system administrator; `no limit` means uncapped). Changing authorizations requires the team detail under `/teams`, which itself requires `admin:team:read`.
+**Only super administrators can change team model authorization.** Under **Manage current team** > **Model authorization**, team administrators and owners see a read-only view: authorized models, enabled state, and today's usage / quota progress. Super administrators assign quotas; `Unlimited` means no cap.
 
-| Operation | Endpoint | Permission |
-| --- | --- | --- |
-| List a team's authorized models | `GET /api/v1/teams/{team_id}/models` | Team member or superuser |
-| Authorize a model | `POST /api/v1/teams/{team_id}/models` | **Superuser only** |
-| Change quota/priority/enable state | `PUT /api/v1/teams/{team_id}/models/{model_id}` | **Superuser only** |
-| Revoke an authorization | `DELETE /api/v1/teams/{team_id}/models/{model_id}` | **Superuser only** |
-| Batch authorize/revoke | `POST` / `DELETE /api/v1/teams/{team_id}/models/batch` | **Superuser only** |
-| List authorizable models | `GET /api/v1/teams/{team_id}/available-models` | **Superuser only** |
-
-Only authorized models appear in the team's Agent and knowledge base model pickers.
-
-<Callout type="warn">
-  Telling team admins to "go authorize the model themselves" is a common process mistake: the UI offers no such control and a superuser must do it. It also means model quotas are centrally governed — teams cannot raise their own limits.
-</Callout>
+Only authorized models appear in the team's Agent and Knowledge Base model selectors. Contact a super administrator to add or adjust authorization.
 
 ### Member Management
 
-Members must already have Clouisle accounts; there is no email-invitation or join-request flow.
+Members must already have a Clouisle account; there is no email invitation or join-request flow.
 
-#### Adding Members
+**Add a member**
 
-1. Open **Manage Teams** (`/teams`) and select a team.
+1. Open **Manage all teams** or **Manage current team** and select the team.
 2. Open the **Members** tab.
-3. Click **Add Member**.
-4. Choose an existing user and a role (Admin, Member, or Viewer — Owner cannot be assigned here).
+3. Click **Add member**.
+4. Select an existing user and a role (administrator, member, or viewer; owner cannot be assigned here).
 5. Confirm.
 
-Only the team Owner or Admin can add members. The Owner cannot add another member as Owner.
+**Change a member role**: choose **Change role** in the member list and pick the new role. Only the team owner can change another member's role.
 
-#### Changing Member Roles
+**Remove a member**: click **Remove** and confirm. The owner cannot be removed or removed by another member.
 
-1. Find the member in the member list
-2. Choose **"Change Role"**
-3. Select the new role (Admin, Member, or Viewer)
+**Leave a team**: confirm in **Members**. The owner must transfer ownership first.
 
-Only the team Owner can change member roles (except for the Owner themselves).
-
-#### Removing Members
-
-1. Find the member in the member list
-2. Click **"Remove"**
-3. Confirm
-
-The Owner cannot be removed by other members.
-
-#### Leaving a Team
-
-1. Open **Manage Teams** (`/teams`) and select the team.
-2. Open **Members**.
-3. Confirm
-
-The Owner cannot leave until ownership is transferred.
-
-#### Transferring Ownership
-
-1. Open **Manage Teams** (`/teams`) and select the team.
-2. Open **Members**.
-3. Confirm the transfer
-
-The previous owner becomes an Admin, and the new owner gains full control.
+**Transfer ownership**: confirm in **Members**. The previous owner becomes an administrator and the new owner gains full control.
 
 ### Team Roles
 
-Roles are fixed: **Owner**, **Admin**, **Member**, **Viewer**. There are no per-team custom roles. See [Teams & Members](./teams.mdx) for the full permission matrix.
+Roles are fixed: **Owner**, **Administrator**, **Member**, and **Viewer**. There are no per-team custom roles. See [Teams and members](./teams.mdx) and [Roles and permissions](./roles-permissions.mdx) for the full matrix.
 
-### What Does NOT Exist
+### Not Implemented
 
-The following team-level features are **not implemented**:
-
-- Team slug / custom URL
-- Team visibility (private/internal/public) and discovery
-- Invitation expiry, require-approval, allowed email domains
-- Member limits
-- Resource limits (agents, KBs, workflows, conversations)
-- Per-team password/2FA/session/IP policies
-- Team API settings, API key policies, rate limits
-- Billing / subscriptions / payment methods
-- Data retention / export / deletion policies
-- Audit alerts, custom domain, branding
-
-See also:
-- [Teams & Members](./teams.mdx) — Detailed team management guide
-- [Roles & Permissions](./roles-permissions.mdx) — Roles and permissions
-
-## Rollout Settings (Private)
-
-These keys live in the `retrieval` category with `public=false`: they are absent from the site-settings UI and from the public settings API, and exist for operators to control the staged rollout of hybrid retrieval:
-
-| Field | Type | Default | Description |
-| --- | --- | --- | --- |
-| `retrieval_hybrid_mode` | `rollout`, `enabled`, or `disabled` | `rollout` | Hybrid retrieval master switch |
-| `retrieval_hybrid_team_ids` | JSON array | `[]` | Explicit team-ID allowlist included in the rollout |
-| `retrieval_hybrid_percentage` | number | `100` | Deterministic rollout percentage (0-100, bucketed by hash of the team set) |
-
-Precedence: the environment variable `RETRIEVAL_HYBRID_KILL_SWITCH=true` wins over everything and disables hybrid retrieval; `disabled` turns it off globally; `enabled` turns it on globally; under `rollout`, a team matching the allowlist is enabled, otherwise the hash bucket `< percentage` decides.
-
-<Callout type="warn">
-  Under `rollout`, `retrieval_hybrid_percentage` is a deterministic hash of the team set (the same set of teams always lands in the same bucket), not random sampling — so changing the percentage changes *which* teams are included rather than flipping individual requests. Switching the mode to `disabled` reverts retrieval to a single mode globally and directly affects recall quality.
-</Callout>
+These team-level features are not implemented: team slug / custom URL, team visibility and discovery, invitation approval and allowed email domains, member limits, team resource quotas, per-team password/2FA/session/IP policies, team APIs and rate limits, billing, data retention/export/deletion, audit alerts, custom domains, and branding.
 
 ## Feature Flags and Other Settings
 
-<Callout type="note">Not implemented / Roadmap. The following are **not** configurable system settings:</Callout>
+<Callout type="note">The following are **not** configurable site settings:</Callout>
 
-- Feature flags (enabling/disabling agents, workflows, KBs, etc.)
+- Feature flags (enabling/disabling Agents, workflows, Knowledge Bases)
 - Email templates
-- Security headers (HSTS, CSP, X-Frame-Options)
-- CORS configuration
-- IP whitelisting
+- Security headers, CORS, IP allowlists
 - API rate limiting
-- Webhook configuration as a general system feature
-- Third-party integrations (Salesforce, HubSpot, Slack apps, analytics like Google Analytics/Mixpanel)
 - Maintenance mode
-- Database pool / cache settings
-- Settings export/import and reset-to-defaults workflows
-
-Model endpoints are restricted via the **Model Endpoint Allowlist** (Security) instead of a global integration registry.
+- Settings export/import and reset to defaults
 
 ## Key Defaults
 
-Default public settings for a new site: site name `Clouisle`, centered authentication pages, theme follows system, icon and name displayed, registration allowed, email verification on, CAPTCHA off, SSO off, password login allowed, and knowledge base single-file upload `50MB`.
+A new site defaults to: site name `Clouisle`, centered authentication page, theme follows system, icon and name displayed, registration allowed, approval required, email verification on, human verification off, SSO off, password sign-in allowed, sessions `30` days, minimum password length `8`, lockout after `5` consecutive failures for `15` minutes, `50MB` Knowledge Base single-file upload, and audit log retention `365` days. All three network access limits are on by default.
 
 ## When Changes Take Effect
 
-Page settings usually affect the public site and subsequent requests immediately after saving; model endpoints, storage, and deployment environment variables are read by the server, so restart the relevant services according to your deployment after changing them. After saving, verify the login and sign-up pages in an incognito window.
+Page settings usually affect the public site and subsequent requests immediately after saving. Model endpoint, storage, and deployment-related settings are read by the server and take effect after restarting the relevant services according to your deployment. After saving, verify the sign-in and sign-up pages in an incognito window.
 
 ## Security Principles
 
-- Store `SECRET_KEY`, SMTP passwords, SSO client secrets, object storage keys, and model API Keys only as server-side secrets.
-- The allowlist matches against full Origins; an empty allowlist blocks model endpoints.
-- Before enabling SSO-only, confirm at least one connection works and keep an administrator recovery path.
-- Before changing the audit log retention days, confirm the archive path and backup policy.
+- Sensitive credentials (email passwords, SSO client secrets, object storage keys, model API Keys) stay server-side and are never shown in the interface.
+- All three network access limits default to on; confirm the blast radius before turning one off. The lists are retained and can be restored at any time.
+- Model endpoints match on the full address; emptying the allowlist blocks every model request.
+- The sandbox egress allowlist accepts exact hostnames only, and an empty list blocks all outbound traffic; it does not replace the outbound network allowlist.
+- Before switching to SSO-only, confirm at least one identity source works and keep an administrator recovery path.
+- Before changing audit log retention, confirm the archive path is on persistent storage and has backups.
 
-See the [Site settings reference](/reference/site-settings) for the field-level checklist.
+See the [Site settings reference](../../../reference/site-settings.mdx) for field-level defaults and the complete list.

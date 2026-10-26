@@ -1,63 +1,66 @@
 ---
 title: Tools and Skills
-description: Understand built-in, custom, and MCP tools, visibility permissions, sandbox boundaries, and cross-team sharing
+description: Understand built-in, custom, and MCP tool forms, visibility permissions, sandbox boundaries, and cross-team sharing
 icon: Wrench
 ---
 
-Tools let Agents and workflows perform external actions; Skills organize reusable instructions and resources into installable capabilities. Tools exist in three forms, and custom tools have three execution subtypes.
+Tools let Agents and workflows perform external actions; Skills package reusable instructions and resources into installable capabilities. Tools come in three forms, and custom tools have three execution methods.
 
 ### The three tool forms
 
 | Form | Source | Ownership and permissions |
 | --- | --- | --- |
-| **Built-in tools** (builtin) | Registered by the platform and updated with releases | No creation needed; cannot be deleted or shared; some need a feature switch or credentials |
-| **Custom tools** (custom) | Created by a team; execution subtypes `http` / `code` / `database` | Owned by the team; supports visibility, testing, and sharing |
-| **MCP servers** (mcp) | Connect an external Model Context Protocol server | Owned by the team; configure connection details per transport |
+| **Built-in tools** | Provided by the platform, updated with each release | Nothing to create; cannot be deleted or shared; some need a site switch or credentials |
+| **Custom tools** | Created by a team, as HTTP, code, or database | Owned by the team; visibility, testing, and sharing supported |
+| **MCP servers** | Connect to an external MCP server | Owned by the team; connection details depend on the transport |
 
 ### Built-in tools
 
-Built-in capabilities include current time and time formatting (`get_current_time`, `format_datetime`), calculation and unit conversion (`calculate`, `unit_convert`), web search (`web_search`), web page fetching (`fetch_webpage`), document conversion (`markitdown`), RSS feed reading (`rss_feed_reader`), and the sandbox tools `artifact`, `bash`, `edit`, `read`, and `write`. `web_search` requires `TAVILY_API_KEY`.
+Built-in capabilities include current time and date formatting, calculation and unit conversion, web search, web page fetching, document conversion, feed reading, and, in the sandbox, artifact viewing, command execution, and file read/write.
 
-Image generation (`generate_image`), video generation (`generate_video`), and asking the user a question (`ask_user`) are implemented by the platform but **never appear in the selectable tool list**; they are injected by dedicated entry points such as workflow media nodes and the Agent question switch. The built-in file parser (`markitdown`) appears alongside `category=file` custom tools in the file-parser selector.
+- Web search engines and credentials are configured once by administrators on the site capabilities page; teams and Agents no longer store search keys. Only engines enabled at the site level are available, and a failing engine does not fail over to another provider automatically.
+- Image generation, video generation, and asking the user are implemented by the platform but **do not appear in the tool picker**: they are injected by workflow media nodes and the Agent's question switch respectively.
+- The built-in document converter appears together with uploaded file parsers in the file parser selector.
 
 ### Custom tools
 
-- **HTTP API (`http`)**: configure the method, URL, headers, query parameters, body template, timeout (default `30` seconds, `1-300`), and response JSON path. **The URL must be static**: a URL containing `{{variable}}` is rejected by the executor (`http_tool_url_templates_not_supported`), so pass variables through query parameters, headers, or the body template only.
-- **Code tools (`code`)**: run Python or JavaScript in the restricted sandbox, install dependencies **pinned to an exact version** via `python_packages` / `js_packages` (for example `requests==2.32.3`), and declare artifacts under `/workspace`.
-- **Database tools (`database`)**: connect to PostgreSQL, MySQL, Redis, or MongoDB, storing connection details and the query as configuration. The query timeout defaults to `15` seconds (`1-120`) and the maximum returned rows to `100` (`1-1000`); validate connectivity before saving with `POST /api/v1/tools/database/test-connection` (requires the `tool:create` permission).
+- **HTTP request**: configure method, URL, headers, query parameters, body template, timeout (`30` seconds by default, `1-300`), and response value path. The URL must be static and cannot contain variables; variables belong in query parameters, headers, or the body, and a URL with variables is rejected on save or execution.
+- **Code**: run Python or JavaScript in a restricted sandbox, install **exact pinned** dependency versions (such as `requests==2.32.3`), and declare artifacts under `/workspace`.
+- **Database**: connect to PostgreSQL, MySQL, Redis, or MongoDB and save connection details and queries. Query timeout defaults to `15` seconds (`1-120`), and at most `100` records are returned (`1-1000`). Before saving, click **Test connection** to confirm the network and credentials work.
 
-A custom tool can be dry-run through the test endpoint before saving; parameters are passed as JSON and the result carries the output, logs, artifacts, and duration.
+Before saving a custom tool, run it with the test feature: pass parameters as JSON and get back the result, logs, artifacts, and duration. If execution fails, read the error in the test result first, then check whether the target is in the outbound network allowlist.
 
 ### MCP
 
-MCP servers support three transports: `stdio`, `sse`, and `http`. Before saving, call `POST /api/v1/tools/mcp/list-tools` to fetch the server tool list, confirm reachability, and inspect tool names, descriptions, and parameter schemas. `stdio` configures the command, arguments, and environment variables; `sse` / `http` configure the URL and optional headers.
+MCP servers support three transports: `stdio` (local command), `sse`, and `http` (remote address). Before saving, fetch the server's tool list to confirm it is reachable and inspect tool names, descriptions, and parameter shapes. `stdio` takes a command, arguments, and runtime environment settings; `sse` and `http` take a URL and optional headers.
 
 ### Visibility and permissions
 
-- `visibility = private`: only the creator can see and use it; teammates cannot even within the same team (`tool_access_denied`).
-- `visibility = team`: team members can view and use it; **edit/write operations** require the creator or a team administrator, while ordinary members are read-only.
-- **Deleting a tool requires a team administrator/owner**: the delete endpoint calls `check_team_permission(..., "tool:delete", require_team_admin=True)`, and `tool:delete` is part of the team management permission set. Built-in tools are platform read-only resources and are out of scope for deletion.
+- **Private**: only the creator can see and use it; other team members cannot.
+- **Team**: team members can view and use it; editing requires the creator or a team administrator, and regular members have read-only access.
+- **Deletion**: only team administrators or owners can delete a tool. Built-in tools are platform resources and cannot be deleted.
 
 ### Sandbox boundaries
 
-Code tools time out after `30` seconds by default, and persistent configurations allow `1-600` seconds; the direct execution interface is limited to `1-60` seconds. Default disk is `1024MB` (range `0-102400`), with `256KB` each for standard output and error (`16-8192`). Artifact paths must be under `/workspace`; writes outside it are rejected. For the isolation mechanism (Bubblewrap namespaces, read-only system roots, kernel requirements), see [Code Sandbox](./sandbox.mdx).
+Code tools time out after `30` seconds by default, with `1-600` seconds allowed in saved configuration and `1-60` seconds for direct execution. The default disk is `1024MB`, and standard output and error are `256KB` each. Artifacts must be written under `/workspace`; writes elsewhere are rejected. See [Code Sandbox](./sandbox.mdx) for isolation details and the full limits.
 
 ### Sharing
 
-Custom tools can be shared with other teams, subject to three hard rules:
+Custom tools can be shared with other teams, subject to hard constraints:
 
-1. Only a **team administrator of the owning team** can start a share (`require_admin=True`).
-2. A `private` tool cannot be shared (`private_tool_cannot_be_shared`), nor shared with its own team, and a duplicate share returns `tool_already_shared`.
-3. Only two permission levels exist: `read_only` (view and use the tool) and `read_execute` (additionally see execution results). The recipient team lists shared tools via `GET /api/v1/tools/shared-with-me`, where items have `is_owned=false` and carry `share_permission`.
+1. Only **administrators of the owning team** can start a share.
+2. A private tool cannot be shared, and a tool cannot be shared with its own team; a duplicate share is rejected.
+3. There are two permission levels: **read-only** (view and use the tool) and **read-only with execution results** (additionally view execution results).
+4. The receiving team sees these tools in its "shared with me" list, along with the source team and permission. Sharing is one-way and is created and revoked by the owning team.
 
-Built-in tools cannot be shared; sharing is one-directional, created by the owning team with `POST /api/v1/tools/{id}/share` and revoked with `DELETE /api/v1/tools/{id}/share/{team_id}`.
+Built-in tools cannot be shared.
 
-### Egress security (SSRF)
+### Outbound security
 
-Custom HTTP tools, workflow HTTP nodes, knowledge base URL imports, and database connection tests all pass through the shared outbound-access check (`app/core/network_security.py`): after resolving the target IP, **private, loopback, link-local, reserved, multicast, or unspecified** ranges are rejected outright, and a target is allowed only if it is on the `ssrf_allowed_targets` allowlist. Cloud metadata hosts such as `metadata.google.internal` are critical blocks that cannot be allowed even by configuration.
+Custom HTTP tools, workflow HTTP request nodes, Knowledge Base URL imports, and database connection tests all pass through a unified outbound check: targets that are internal, loopback, link-local, or cloud metadata addresses are refused, and are allowed only after an administrator adds them to **Settings** > **Security** > **Outbound network allowlist**. Cloud metadata addresses are permanently blocked and cannot be allowlisted.
 
 <Callout type="warn">
-Before exposing an internal service to tool calls, confirm the target is registered in `ssrf_allowed_targets`; otherwise it shows up as a tool execution failure rather than a configuration-validation error, which is easily misread as "the code is wrong".
+  Before exposing an internal service to tool calls, confirm the target is registered in the outbound network allowlist. Otherwise it shows up as a tool execution failure rather than a configuration error on save, which is easily mistaken for "the code is wrong".
 </Callout>
 
-Related content: [Built-in tools](../guides/tools/built-in.mdx), [Custom HTTP and code tools](../guides/tools/custom-tools.mdx), [Connect MCP servers](../guides/tools/mcp.mdx), [Code Sandbox](./sandbox.mdx), [Skills](../guides/tools/skills.mdx).
+Related content: [Built-in tools](../guides/tools/built-in.mdx), [Custom HTTP and code tools](../guides/tools/custom-tools.mdx), [Connect an MCP server](../guides/tools/mcp.mdx), [Code Sandbox](./sandbox.mdx), [Skills](../guides/tools/skills.mdx).

@@ -1,0 +1,265 @@
+---
+title: Messaging Integration API
+description: Feishu and WeChat iLink admin configuration, personal preferences, and delivery endpoints
+icon: MessagesSquare
+---
+
+Feishu and WeChat iLink expose two layers of HTTP contracts: **administration** configures the shared app, capability switches, directory/knowledge sync, and notification tests; **personal** endpoints act only on the caller's own connections, purposes, and Agent preferences. Both use JWT sessions; an API key cannot substitute.
+
+<Callout type="info" title="Authentication and permissions">
+  Administration lives under `/api/v1/admin/integrations` and requires `admin:integrations:settings:read` / `admin:integrations:settings:update` (superusers bypass). Feishu sign-in belongs to the login domain — see [SSO API](./sso.mdx).
+
+  Personal endpoints live under `/api/v1/feishu-agent` and `/api/v1/wechat-knowledge`. They accept only signed-in users, always act on the current user, and take no user ID.
+
+  Creating, updating, and testing integration instances (`/api/v1/admin/integrations`, `/types`, `/{id}/test`) is documented in [SSO API](./sso.mdx) section 5. Feishu and WeChat are singletons and cannot be created or deleted through the generic endpoints.
+</Callout>
+
+## Endpoint overview
+
+### Feishu (administration)
+
+| Method | Path | Purpose | Permission |
+| --- | --- | --- | --- |
+| GET / PUT | `/api/v1/admin/integrations/feishu/config` | Read/save App ID and App Secret | settings read / write |
+| POST | `/api/v1/admin/integrations/feishu/connection-check` | Verify the app credentials | settings write |
+| GET | `/api/v1/admin/integrations/feishu/departments` | List the visible department tree | settings read |
+| PUT | `/api/v1/admin/integrations/feishu/department-scope` | Save the directory sync scope | settings write |
+| POST | `/api/v1/admin/integrations/feishu/sync` | Sync members of the selected departments | settings write |
+| GET | `/api/v1/admin/integrations/feishu/test-recipients` | Search active Feishu-bound users | settings read |
+| POST | `/api/v1/admin/integrations/feishu/test-message` | Send a notification test message | settings write |
+| GET / PUT | `/api/v1/admin/integrations/feishu/agent-chat/config` | Receive mode, callback secrets, receiver state | settings read / write |
+| GET | `/api/v1/admin/integrations/feishu/knowledge/spaces` | List synchronizable Wiki spaces | superuser |
+| GET | `/api/v1/admin/integrations/feishu/knowledge/targets` | List eligible target knowledge bases | superuser |
+| GET / POST | `/api/v1/admin/integrations/feishu/knowledge/sources` | List/create sync sources | superuser |
+| PUT / DELETE | `/api/v1/admin/integrations/feishu/knowledge/sources/{source_id}` | Update/delete a source | superuser |
+| POST | `/api/v1/admin/integrations/feishu/knowledge/sources/{source_id}/sync` | Sync now | superuser |
+
+### Feishu (personal) and callback
+
+| Method | Path | Purpose | Auth |
+| --- | --- | --- | --- |
+| GET / PUT | `/api/v1/feishu-agent/config` | The caller's Agent selection and switch | signed-in user |
+| GET | `/api/v1/feishu-agent/agents` | Published Agents the caller may select | signed-in user |
+| POST | `/api/v1/integrations/feishu/callback` | Feishu event callback (provider entry point) | Feishu signature |
+
+### WeChat iLink (personal)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/v1/wechat-knowledge/features` | Enabled platform capabilities |
+| GET | `/api/v1/wechat-knowledge/bindings` | The caller's connections and purposes |
+| POST | `/api/v1/wechat-knowledge/logins` | Start QR authorization |
+| POST | `/api/v1/wechat-knowledge/logins/{identifier}/poll` | Poll authorization, optionally with a verification code |
+| PUT | `/api/v1/wechat-knowledge/bindings/{identifier}/purpose` | Switch purpose and target |
+| DELETE | `/api/v1/wechat-knowledge/bindings/{identifier}` | Disconnect |
+| GET | `/api/v1/wechat-knowledge/targets` | Collectable knowledge bases (knowledge collection must be enabled) |
+| GET | `/api/v1/wechat-knowledge/models` | Recognition models available to the target knowledge base |
+| GET | `/api/v1/wechat-knowledge/agents` | Published Agents available for chat |
+| GET | `/api/v1/wechat-knowledge/agent-models` | Speech recognition models for the selected Agent |
+| GET | `/api/v1/wechat-knowledge/receipts` | Collection receipts (latest 50) |
+| GET | `/api/v1/wechat-knowledge/agent-receipts` | Agent receipts (latest 50) |
+| GET | `/api/v1/wechat-knowledge/items/{identifier}/original` | Download a collected original |
+
+---
+
+## Feishu administration
+
+### App credentials
+
+```
+GET  /api/v1/admin/integrations/feishu/config
+PUT  /api/v1/admin/integrations/feishu/config
+```
+
+`PUT` body:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `app_id` | string (1–255) | yes | Feishu custom app App ID |
+| `app_secret` | string (≤4096) | no | Omitted or blank keeps the stored secret; a value replaces it |
+
+Response fields: `app_id`, `app_secret_configured`, `is_enabled`, `department_ids`. The App Secret is never returned in plaintext.
+
+`POST /connection-check` obtains a tenant token with the app credentials and returns `{"status": "ok"}`; failures map to the Feishu error and never echo the app secret in logs or responses.
+
+### Directory sync
+
+- `GET /departments` returns the department tree visible to the app, including children.
+- `PUT /department-scope` takes `{"department_ids": ["0", "od-xxx"]}` — `1–500` entries that must belong to the visible tree; the root department ID is `0`.
+- `POST /sync` syncs members for the saved scope and returns created/updated/skipped account counts plus created team counts. Without a saved scope it returns a validation error.
+
+### Notification tests
+
+- `GET /test-recipients?search=` requires the notification capability. It returns up to `20` `{id, username, email}` entries where `id` is the user ID.
+- `POST /test-message` takes `{"user_id": "...", "title": "...", "content": "..."}` with a `1–200` title and `1–2000` body. The recipient must be Feishu-bound and active; otherwise it returns `feishu_test_recipient_unavailable`.
+
+### Agent chat receive mode
+
+```
+GET  /api/v1/admin/integrations/feishu/agent-chat/config
+PUT  /api/v1/admin/integrations/feishu/agent-chat/config
+```
+
+`PUT` body (all fields optional; omission keeps the current value):
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `connection_mode` | `callback` \| `long_connection` | Applies on save; an unsaved mode defaults to `callback` |
+| `event_verification_token` | string (8–255) | Callback signature token |
+| `event_encrypt_key` | string (8–255) | Encrypted event key |
+
+Non-empty secrets need at least `8` characters. Response fields: `connection_mode`, `event_verification_token_configured`, `event_encrypt_key_configured`, `is_enabled`, `capability_enabled`, `receiver_status`.
+
+`receiver_status.state` values:
+
+| State | Meaning |
+| --- | --- |
+| `disabled` | Agent chat is off or no active integration exists |
+| `callback` | HTTP callback in use; no receiver needed |
+| `unconfigured` | Long connection selected but app credentials are missing |
+| `waiting` | No worker has claimed it yet, or credentials changed and it is awaiting rebuild |
+| `starting` | Establishing the connection |
+| `connected` | WebSocket is connected (**not** proof that message permissions or event subscriptions are ready) |
+| `reconnecting` | Reconnecting |
+| `error` | Connection or configuration failure |
+
+`managed` reports whether the platform hosts the connection. With long connection selected, a worker consuming the `agent` queue maintains a singleton receiver; no extra service is required. Disabling the capability or switching back to callback stops reception.
+
+### Callback endpoint
+
+```
+POST /api/v1/integrations/feishu/callback
+```
+
+A public endpoint protected by Feishu signatures; it does not accept API keys or JWTs. It requires `X-Lark-Request-Timestamp`, `X-Lark-Request-Nonce`, and `X-Lark-Signature`; timestamps more than `300` seconds from server time are rejected, and bodies are capped at `64 KiB`. The endpoint is inactive while `connection_mode` is `long_connection`. A URL verification challenge is answered with a signature only when the Verification Token matches.
+
+## Feishu knowledge sync
+
+All endpoints are superuser-only and use app credentials rather than a signed-in user's token.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/knowledge/spaces` | List Wiki spaces visible to the app |
+| GET | `/knowledge/targets` | List eligible target knowledge bases |
+| GET | `/knowledge/sources` | List sources with their latest result |
+| POST | `/knowledge/sources` | Create a source |
+| PUT | `/knowledge/sources/{source_id}` | Update name, interval, or enabled state |
+| POST | `/knowledge/sources/{source_id}/sync` | Queue an immediate sync |
+| DELETE | `/knowledge/sources/{source_id}` | Delete the source and its imported content |
+
+Create body:
+
+| Field | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `knowledge_base_id` | UUID | yes | — | Target knowledge base |
+| `space_id` | string (1–255) | yes | — | Must be a currently visible space |
+| `name` | string (1–100) | yes | — | Display name |
+| `interval_minutes` | integer | no | `60` | Auto-sync interval, `1–43200` |
+| `is_enabled` | boolean | no | `true` | Whether scheduled sync runs |
+
+Source output includes `status`, `last_synced_at`, `last_error`, `last_result`, `created_at`, and `updated_at`. When a sync is already running, update/sync/delete returns `409` (`feishu_knowledge_source_busy`); an unavailable space returns `feishu_knowledge_space_unavailable`.
+
+```bash
+curl -X POST "https://your-domain.com/api/v1/admin/integrations/feishu/knowledge/sources" \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"knowledge_base_id":"KB_UUID","space_id":"SPACE_ID","name":"Product docs","interval_minutes":60}'
+```
+
+## Feishu personal preferences
+
+```
+GET  /api/v1/feishu-agent/config
+GET  /api/v1/feishu-agent/agents
+PUT  /api/v1/feishu-agent/config
+```
+
+`GET /config` returns `{enabled, is_enabled, linked, agent_id, agent_name, agent_available}`: `enabled` is channel availability, `is_enabled` is the user's own switch, and `linked` reports whether a Feishu identity is bound. Unavailable Agent names are not disclosed.
+
+`GET /agents` returns `{id, name, description, team_name}` for published Agents the user can access in teams they belong to; it returns an empty array when the channel is unavailable or the identity is unlinked.
+
+`PUT /config` fields are all optional:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `agent_id` | UUID \| null | `null` clears the selection; a non-null value requires a linked identity, an available channel, and access to that Agent |
+| `is_enabled` | boolean | Turning it on requires a saved, authorized Agent |
+
+Turning off or clearing the selection is allowed while the channel is paused. Changes affect only later messages, not accepted receipts, running tasks, or their conversations.
+
+---
+
+## WeChat iLink personal endpoints
+
+Every endpoint requires the current user's JWT and offers no administrator impersonation. When the platform capability is off, the endpoint returns `403` (`integration_feature_disabled`).
+
+### Capabilities and connections
+
+```
+GET /api/v1/wechat-knowledge/features
+GET /api/v1/wechat-knowledge/bindings
+```
+
+`features` returns `{"agent_chat": boolean, "knowledge_collection": boolean}`. `bindings` returns every connection for the caller, each with `id`, `bot_id`, `purpose` (`none` / `knowledge_collection` / `agent`), `agent_config`, `collection`, `status`, `last_error`, `last_received_at`, and `created_at`.
+
+### QR authorization
+
+```
+POST /api/v1/wechat-knowledge/logins
+POST /api/v1/wechat-knowledge/logins/{identifier}/poll
+```
+
+`logins` returns `{id, status, qrcode_content, expires_at}`; a user may have at most `3` unfinished authorizations at once, beyond which it returns `429` (`wechat_login_limit`). `poll` takes `{"verify_code": "123456"}` (optional, digits only, ≤32). A confirmed authorization returns the connection summary; an identity already bound to another account returns `409` (`wechat_identity_in_use`).
+
+### Purpose switching
+
+```
+PUT /api/v1/wechat-knowledge/bindings/{identifier}/purpose
+```
+
+Body:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `purpose` | `none` \| `knowledge_collection` \| `agent` | Target purpose |
+| `knowledge_base_id` | UUID \| null | Knowledge collection only |
+| `vision_model_id` / `stt_model_id` | UUID \| null | Knowledge collection only |
+| `agent_id` | UUID \| null | Agent chat only |
+| `variables` | object | Agent chat only; initial Agent input variables |
+
+Purposes are mutually exclusive: sending `agent` with knowledge-base fields, or `knowledge_collection` with Agent fields, fails validation. Omitted optional fields keep their saved values. The target knowledge base needs write access; unavailable or read-only targets return `400`. Switching is rejected while accepted work is unfinished.
+
+`DELETE /bindings/{identifier}` disconnects the connection, writes an audit record, and returns `{"id": "..."}`. Collected documents remain.
+
+### Collection and Agent receipts
+
+- `GET /receipts?binding_id=` returns the latest `50` collection receipts: `id`, `binding_id`, `knowledge_base_id`, `status`, `results[]` (per-attachment outcomes with localized errors), `last_error`, `reply_status`, `created_at`.
+- `GET /agent-receipts?binding_id=` returns the latest `50` Agent receipts: `id`, `binding_id`, `status`, `agent_name`, `agent_id`, `conversation_id`, `run_id`, `run_status`, `error`, `delivery_status[]`, `created_at`.
+- Passing `binding_id` first checks ownership; a connection owned by someone else returns `404` (`wechat_binding_not_found`).
+
+`GET /items/{identifier}/original` downloads a collected original as a file stream (`application/octet-stream`) rather than the unified envelope. The caller still needs access to the original target knowledge base; a missing record, unexpected original path, or absent file returns `404` (`file_not_found`).
+
+### Collection targets and models
+
+```
+GET /api/v1/wechat-knowledge/targets
+GET /api/v1/wechat-knowledge/models?knowledge_base_id=UUID
+GET /api/v1/wechat-knowledge/agents
+GET /api/v1/wechat-knowledge/agent-models?agent_id=UUID
+```
+
+`targets` returns only active knowledge bases the caller can write to, as `{id, name, team_name}`; `models` returns that base's available vision and speech recognition models. `agents` returns `{id, name, team_name, variables, enable_attachments, attachment_config}`; `agent-models` returns `{"stt": [...]}`.
+
+## Permissions and errors
+
+| HTTP / code | Case |
+| --- | --- |
+| `401 / 2000` | Not authenticated |
+| `403 / 3000` | Missing integration management permission |
+| `403 / 1004` | Platform capability disabled (`integration_feature_disabled`) |
+| `404 / 4000` | Connection, source, or original not found |
+| `409` | Identity already bound to another account; source already syncing |
+| `429` | Too many unfinished authorizations (`wechat_login_limit`) |
+| `502` | Feishu or WeChat upstream failure (mapped to a localized message) |
+
+Delivery query endpoints are documented in [Admin API](./admin.mdx#delivery-log); configuration and usage steps are in [Messaging Integrations](../usage/guides/integrations/index.en.mdx).

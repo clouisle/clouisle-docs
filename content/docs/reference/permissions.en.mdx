@@ -39,8 +39,8 @@ Clouisle authorization is a four-layer composite: **identity bypass** (`is_super
 | `admin:settings:update` | Modify site settings |
 | `admin:integrations:login:read` | View login integrations and global SSO policy |
 | `admin:integrations:login:update` | Manage login integrations and user SSO connections |
-| `admin:integrations:settings:read` | View builtin email, Webhook and Feishu integrations |
-| `admin:integrations:settings:update` | Manage builtin email, Webhook and Feishu integrations (credentials, tests, directory sync) |
+| `admin:integrations:settings:read` | View builtin email, Webhook, Feishu, and WeChat iLink integrations and the delivery log (`/deliveries`) |
+| `admin:integrations:settings:update` | Manage builtin email, Webhook, Feishu, and WeChat iLink integrations (credentials, tests, directory sync, platform capability switches) |
 | `audit:read` | View audit logs |
 | `audit:export` | Export audit logs (archiving audit logs also uses this permission, independent of `admin:settings:update`) |
 
@@ -65,7 +65,7 @@ The backend idempotently initializes 5 global built-in roles at startup, with th
 | Role | Type | Key Permissions | Typical Audience |
 | --- | --- | --- | --- |
 | **Super Admin** | Global built-in | Holds the wildcard code `*` and bypasses permission and team-membership checks via `is_superuser`, so it can perform system configuration, role management, audit export, and anything else | Operations lead, system owner |
-| **Admin** | Global built-in | Includes `admin:dashboard:access` and almost all management permissions; **excludes** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:integrations:login:update`, and `admin:memory:update/delete` | Workspace administrator, tech lead |
+| **Admin** | Global built-in | Includes `admin:dashboard:access`, almost all management permissions, and read-only integration access (`admin:integrations:login:read`, `admin:integrations:settings:read`); **excludes** `admin:role:create/update/delete`, `admin:permission:create/update/delete`, `admin:settings:update`, `admin:integrations:login:update`, `admin:integrations:settings:update`, and `admin:memory:update/delete` | Workspace administrator, tech lead |
 | **Team Admin** | Global built-in | All Member permissions plus `team:update` and `team:manage`; granted to team `owner`/`admin` members by a startup migration | Team lead, project lead |
 | **Member** | Global built-in | No `admin:dashboard:access`; full collaboration permissions to create/edit/run Agents, workflows, knowledge bases, tools, and skills within a team | Developer, solution builder |
 | **Viewer** | Global built-in | Read-only role: view/chat/run published Agents and workflows and read/execute tools and skills within a team (no `apikey:*`) | Auditor, observer |
@@ -107,13 +107,14 @@ Team management boundaries (`team_access.py`):
 | Observability | `admin:dashboard:access` | ✓ | ✓ | | |
 | Notifications | `admin:dashboard:access` | ✓ | ✓ | | |
 | Audit Logs | `audit:read` | ✓ | ✓ | | |
+| Deliveries | `admin:integrations:settings:read` | ✓ | ✓ | | |
 | Site Settings | `admin:settings:read` | ✓ | ✓ | | |
 
-The sidebar renders five groups: **General** (Dashboard, Teams, Knowledge Bases, Activities), **System** (Users, Roles, Permissions), **Resources** (Models, Apps, Capabilities, API Keys, Memories), **Monitoring** (Observability, Notifications, Audit Logs), and **Settings** (Site Settings, Help Center).
+The sidebar renders five groups: **General** (Dashboard, Teams, Knowledge Bases, Activities), **System** (Users, Roles, Permissions), **Resources** (Models, Apps, Capabilities, API Keys, Memories), **Monitoring** (Observability, Notifications, Audit Logs, Deliveries), and **Settings** (Site Settings, Help Center).
 
 - **System**, **Resources**, and **Monitoring** are gated as a whole on `admin:dashboard:access`: without it the entire group is hidden.
 - **General** and **Settings** are not hidden as a group by `admin:dashboard:access`, but each item still requires its own permission (for example, a user with only `admin:team:read` sees Teams and Activities but not Dashboard). The Help Center external link requires no permission.
-- Route permission mapping lives in `frontend/lib/route-permissions.ts`: `/apps` and `/capabilities` use prefix matching; there is no `/tools` route (tool/skill management lives under `/capabilities`); `/site-settings/integrations` uses either `admin:integrations:login:read` or `admin:integrations:settings:read`; the Storage page's "archive audit logs" action uses `audit:export` on its own.
+- Route permission mapping lives in `frontend/lib/route-permissions.ts`: `/apps` and `/capabilities` use prefix matching; there is no `/tools` route (tool/skill management lives under `/capabilities`); `/site-settings/integrations` uses either `admin:integrations:login:read` or `admin:integrations:settings:read`; `/deliveries` uses `admin:integrations:settings:read`; the Storage page's "archive audit logs" action uses `audit:export` on its own.
 
 ## Check Order
 

@@ -4,9 +4,11 @@ description: 添加、配置、测试和共享可执行能力
 icon: Wrench
 ---
 
+工具让 Agent 和工作流执行文本生成之外的动作：查时间、算数、搜索网页、调用外部 API、查询数据库或在沙箱里跑代码。按来源分为内置工具（平台注册，网页搜索由站点管理员统一配置）、团队自定义工具（HTTP、代码、数据库）、MCP 服务与 Skill 包。
+
 <Cards>
-  <Card title="内置工具" href="/usage/guides/tools/built-in">启用时间、计算、网页、文件和媒体等系统能力。</Card>
-  <Card title="自定义工具" href="/usage/guides/tools/custom-tools">创建 HTTP API、代码与数据库工具，定义参数和产物。</Card>
+  <Card title="内置工具" href="/usage/guides/tools/built-in">启用时间、计算、网页搜索、网页抓取与订阅源等系统能力；站点托管的搜索引擎在这里配置。</Card>
+  <Card title="自定义工具" href="/usage/guides/tools/custom-tools">创建 HTTP API、代码与数据库工具（PostgreSQL / MySQL / Redis / MongoDB），定义参数、测试连通性并共享给其他团队。</Card>
   <Card title="MCP 服务" href="/usage/guides/tools/mcp">通过 stdio、SSE 或 HTTP 连接 MCP Server。</Card>
   <Card title="Skills 与包" href="/usage/guides/tools/skills">从 Zip 或 Git 导入 Skill 包，沙箱测试后绑定到 Agent。</Card>
 </Cards>

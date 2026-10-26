@@ -1,46 +1,32 @@
 ---
 title: Create and Orchestrate an Agent
-description: Configure the model, prompt, variables, Knowledge Base, and tools, then publish the Agent
+description: Configure the model, prompt, variables, knowledge bases, and tools, then publish the Agent
 icon: Bot
 ---
 
-import { TypeTable } from 'fumadocs-ui/components/type-table';
+Agent Studio (`/app/apps/{agent_id}`) shows the orchestration area and a live preview side by side on desktop:
+- **Orchestration Editor (left)**: configure the model, system prompt, variables, knowledge bases, tools, and runtime parameters.
+- **Live Preview Panel (right)**: talk to the draft Agent without leaving the page or publishing changes.
+- **Top action bar**: Agent metadata, publish status (`Draft / Published`), the embed entry (`Embed`), and advanced settings (`Settings`).
 
-On desktop, Agent Studio (`/app/apps/{agent_id}`) uses a two-column layout for orchestration and live preview:
-- **Orchestration Editor**: Configure the model, system prompt, variables, knowledge bases, tools, and runtime settings.
-- **Live Preview Panel**: Test draft-agent conversations without leaving the page or publishing changes.
-- **Top Toolbar**: Access Agent metadata, publication status (`Draft` or `Published`), Embed, and Agent Settings.
-
-On phones, the side-by-side preview is hidden so the editor stays full-width. Select **Preview** in the toolbar to open the chat in a full-screen, drawer-like overlay; close it to return to editing.
+Mobile hides the side-by-side preview so the editor keeps its width. Select **Preview** in the top toolbar to open the conversation in a full-screen drawer; close it to return to editing.
 
 <Callout type="info">
-  The current team must have an enabled `chat` model authorized. Creating requires `agent:create`; publishing requires `agent:publish`.
+  The current team must have an enabled chat model authorized. Creating requires permission to create Agents; publishing requires permission to publish Agents.
 </Callout>
 
 ## Create an Agent
 
-1. Navigate to **Apps**, select **Create App** > **Agent**.
-2. Fill in the name (`1-100` characters) and description (up to `500` characters).
-3. Select an owning team.
-4. On the Agent Studio orchestration page, select **Agent Settings** in the top-right corner, choose the model, and configure the name, icon, opening message, suggested questions, and visibility.
-5. Visibility defaults to **Private** (only the creator can access it); switch it to **Team** as needed.
+1. Go to **Apps** and select **Create App** > **Agent**.
+2. Enter a name (`1-100` characters) and description (up to `500` characters).
+3. Choose the owning team.
+4. In Agent Studio, open **Agent Settings** (top right) to configure the model, opening message, suggested questions, and visibility.
+5. Visibility defaults to **Private** (creator only) and can be switched to **Team**.
 
-<TypeTable
-  type={{
-    name: { description: 'Agent display name', type: 'string', required: true },
-    description: { description: 'Agent purpose and capabilities', type: 'string' },
-    team_id: { description: 'Owning team ID', type: 'string', required: true },
-    model_id: { description: 'LLM model (team-granted TeamModel)', type: 'string', required: true },
-    system_prompt: { description: 'System prompt that defines agent behavior', type: 'string' },
-    max_iterations: { description: 'Tool-call iteration cap (each tool call counts as one iteration)', type: 'number', default: 5 },
-    visibility: { description: 'Visibility', type: "'private' | 'team'", default: 'private' },
-  }}
-/>
-
-**Max Iterations** is the Agent setting `max_iterations`: how many tool-call rounds an Agent may run within a single reply. It defaults to `5` and accepts `1-200` (server-validated). Set it too low and complex tasks end early with `max_iterations_reached`; set it too high and a repeatedly failing tool can burn a lot of tokens.
+**Max iterations** caps how many tool-call rounds the Agent may run in one reply: default `5`, range `1-200`. Too low ends complex tasks early; too high can burn tokens when tools keep failing.
 
 <Callout type="info">
-  Agents do not expose per-agent sampling parameters (Temperature, Max Tokens, Top P, Frequency/Presence Penalty). LLM sampling defaults are configured on the model itself via `default_params`. Agents only configure `model_id`, `system_prompt`, `max_iterations`, tool sets, and knowledge base attachments.
+  Agents do not expose per-call sampling parameters (Temperature, Max Tokens, Top P, Frequency/Presence Penalty). Sampling defaults live on the model itself; an Agent only selects a model, writes a system prompt, sets max iterations, and attaches tools and knowledge bases. See [Agent configuration reference](/en/reference/agent-config) for field-level details.
 </Callout>
 
 <figure>
@@ -48,226 +34,181 @@ On phones, the side-by-side preview is hidden so the editor stays full-width. Se
   <figcaption>Agent settings drawer</figcaption>
 </figure>
 
-## Write the Prompt and Variables
+## Writing Prompts and Variables
 
-1. In the **Prompt**, specify the role, task, constraints, tool usage conditions, and failure handling.
-2. Type `{` to open the variable selector. `{query}` is the current user message.
-3. In **Variables**, add user input fields. Variable names can be up to `50` characters; you can configure the display name, required, hidden, default value, options, numeric range, or maximum length.
-4. Fill in the variables in the preview on the right and confirm the substitution result.
+1. In the **prompt**, state the role, task, constraints, when to use tools, and how to handle failures.
+2. Type `{` to open the variable picker. `{query}` is the current user message.
+3. In **Variables**, add user input fields. Variable names can be up to `50` characters; configure display name, required, hidden, default value, options, numeric range, or max length.
+4. In the preview, fill in the variables and confirm the substitution.
 
-## Configure Knowledge Base and RAG
+## Configuring Knowledge Bases and RAG
 
-1. In the **Knowledge Base** area, select **Add**.
-2. Select a Knowledge Base and a `vector`, `fulltext`, or `hybrid` retrieval mode.
-3. Set Top K (`1-100`, default `5`) and the threshold (`0-1`, default `0.3`).
-4. Optionally enable **Rerank** to improve recall precision.
+1. In the **Knowledge bases** area, select **Add**.
+2. Choose a knowledge base and a **Vector**, **Full-text**, or **Hybrid** retrieval mode.
+3. Set the number of results (`1-100`, default `5`) and the similarity threshold (`0-1`, default `0.3`).
+4. Optionally enable **Rerank** to improve retrieval precision.
 5. Set the overall RAG mode: **Off**, **Auto**, or **Agentic**.
 
-<TypeTable
-  type={{
-    rag_mode: { description: 'Overall RAG mode', type: "'off' | 'auto' | 'agentic'", default: 'agentic with a KB; off without a KB' },
+A single knowledge base defaults to **Hybrid** retrieval. Multiple knowledge bases enter the retrieval context in list order, which you can drag to change while editing. With no knowledge base attached, RAG turns off automatically and the RAG mode selector is hidden; it appears once you attach one.
 
-    search_mode: { description: 'Per-KB retrieval mode', type: "'vector' | 'fulltext' | 'hybrid'", default: 'hybrid' },
-    top_k: { description: 'Per-KB result count', type: 'number', default: 5 },
-    score_threshold: { description: 'Minimum recall score', type: 'number', default: 0.3 },
-    rerank: { description: 'Enable reranking', type: 'boolean', default: false },
-  }}
-/>
+See [Retrieval and quality tuning](/en/usage/guides/knowledge/retrieval) for what each mode means, hybrid rollout, and tuning.
 
-Knowledge base ordering is defined by the `knowledge_base_configs` list and can be adjusted when editing the agent; this order is applied when the agent retrieves context.
-Without a knowledge-base association, the backend normalizes persisted `rag_mode` to `off` and the editor hides the RAG mode selector; the selector appears after a knowledge base is attached.
-
-
-## Add Tools and Capabilities
+## Adding Tools and Capabilities
 
 In the **Tools** area, select built-in tools, custom tools, MCP, or Skills.
 
-| Tool Type | Description | Prerequisite |
+| Tool type | Description | Requirement |
 | --- | --- | --- |
-| Web Search | Internet search, powered by Tavily | `TAVILY_API_KEY` stored in tool config |
-| Calculator | Mathematical computation | None |
-| Date/Time | Date and time queries | None |
+| Web Search | Site-managed web search: choose Tavily, Bocha, SearXNG, or DeepSeek; the default option uses the site default engine | An administrator has enabled and configured engines under **Capabilities** > **Configure search** |
+| Calculator | Math calculation | None |
+| Date/Time | Date and time lookup | None |
 | Unit Converter | Unit conversion | None |
-| Custom Tool | User-defined tool | Create and test in **Capabilities** first |
-| MCP | Model Context Protocol tool | Configure in **Capabilities** first |
+| Custom Tool | Custom tool | Create and test it under **Capabilities** first |
+| MCP | Model Context Protocol tools | Configure it under **Capabilities** first |
 | Skill | Predefined skill | None |
 
-When a tool shows "Configuration needed", go to **Capabilities** first to complete the credentials. Custom tools are created and tested in **Capabilities**, then enabled per agent.
+<Callout type="warn" title="Never put search keys in an Agent">
+  Agents do not store search credentials and cannot override the search endpoint. The web search engine dropdown lists only engines enabled for the site; even a saved engine is revalidated at execution, so a disabled engine makes that selection unusable. See [Built-in tools](/en/usage/guides/tools/built-in#web-search-site-managed) for engine and credential management.
+</Callout>
 
-<TypeTable
-  type={{
-    max_tool_call_iterations: { description: 'Maximum tool-call iterations', type: 'number', default: 5 },
-    tool_timeout: { description: 'Per-call tool timeout', type: 'string', default: '30s' },
-  }}
-/>
+Create and test custom tools under **Capabilities** first, then enable them per Agent. When a tool shows “needs configuration”, complete its credentials under **Capabilities** (web search is the exception — the site manages it).
 
-## Configure Attachments, Media, and Memory
+Tool timeouts and iteration limits live in Agent settings: a single tool call times out after `30` seconds by default, and the tool-call iteration limit matches max iterations (default `5`).
 
-Before enabling attachments, image generation, video generation, or cross-session memory, turn on the corresponding capabilities in the Agent **Orchestration**:
+## Configuring Attachments, Media, and Memory
 
-| Capability | Config Path | Details |
+Turn on the relevant capability in the Agent **editor** before using attachments, image generation, video generation, or cross-conversation memory:
+
+| Capability | Where to configure | Defaults and limits |
 | --- | --- | --- |
-| Attachments | **File & Image** | Single file `10MB` (`1KB-50MB`), `5` per message (`1-10`) |
-| Image Gen | **Image Gen** | Default `1024×1024` (`256-4096`), max `4` per request (`1-10`) |
-| Video Gen | **Video Gen** | Default `5s` (`1-30s`), aspect ratio `16:9` |
-| Memory | **Memory** | Max memories `10` (`1-50`), auto-extract enabled by default |
+| Attachments | **Files and images** | `10MB` per file (`1KB-50MB`), `5` per message (`1-10`); supports PDF, Word, PowerPoint, Excel, TXT, Markdown, CSV, JSON, HTML, and images |
+| Image generation | **Image generation** | Default `1024×1024` (`256-4096`), up to `4` images per call (`1-10`), reference images enabled by default |
+| Video generation | **Video generation** | Default `5` seconds (`1-30`), aspect ratio `16:9` |
+| Memory | **Memory** | Up to `10` memories injected per retrieval (`1-50`), automatic extraction on by default |
 
-Media generation covers **images and videos only** (there is no audio/TTS generation). Turning on image or video generation injects the `generate_image` / `generate_video` tool into the model and calls the team-authorized model of that kind; with the switch off the model never sees those tools.
+Two display switches live in **Agent Settings**: **Citations** (off by default) attaches source citations to replies; **Hide artifact list** (off by default) hides the generated-file list under assistant messages — display only, files are not deleted.
 
-On context: long conversations are compressed with a **single summary** — once a request exceeds the trigger budget, the older history is replaced by one generated summary while the recent stretch stays verbatim. That summary is scoped to the current conversation and is **not** cross-conversation memory, which is a separate persisted **entity/relation graph**.
+Media generation covers **images and videos** only (no audio/TTS generation). Image and video generation both call the team's authorized models; with the switch off, the model does not see these capabilities.
 
-For full configuration options, see [Attachments and Media](./media) and [Memory and Context](./memory).
+On context: long-conversation compression is a **single summary** — when the request exceeds budget, earlier history is replaced by one generated summary while the most recent turns stay verbatim. It applies to the current conversation only and is **not** cross-conversation memory. Memory is a separate **entity/relation** knowledge graph that persists across conversations.
 
-## Set Visibility and Publish
+See [Attachments and media](./media.mdx) and [Memory and context](./memory.mdx) for details.
+
+## Visibility and Publishing
 
 1. Choose **Private** or **Team** visibility.
-2. Select **Publish**. After publishing the status becomes `published` and the agent can receive messages.
-3. After publishing, you can open the **Public Page**, **Embed**, and **Access API**.
+2. Select **Publish**. The status becomes **Published** and the Agent can receive messages.
+3. After publishing you can open the **public page**, **embed** it, or **access the API**.
 
 <Callout type="info">
-  `public` visibility is retained only for legacy records; new agents should use `private` or `team`.
+  **Public** visibility is kept for historical records only; new Agents should use **Private** or **Team**.
 </Callout>
 
 <Callout type="warn">
-  Agents have exactly two statuses: `draft` and `published`. There is no `active`/`inactive` or `archived` status, and no archive/restore workflow. To take an agent out of use, unpublish it or delete it (`DELETE /api/v1/admin/agents/{agent_id}`).
+  Agents only have **Draft** and **Published** states. There is no active/inactive or archived state, and no archive/restore flow. To stop using an Agent, unpublish or delete it.
 </Callout>
 
 <figure>
-  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-published-toolbar.png" alt="Published Agent toolbar" />
-  <figcaption>Published Agent toolbar</figcaption>
+  <img src="https://rustfs-endpoint.yhnotes.com/content/agent-published-toolbar.png" alt="Toolbar of a published Agent" />
+  <figcaption>Toolbar of a published Agent</figcaption>
 </figure>
 
-## Save, Debug, and Publish
+## Saving, Debugging, and Publishing
 
 1. Select **Save**. Validation errors list the specific fields.
-2. In **Debug & Preview**, send questions that cover both normal and failure paths.
-3. When tools are present, verify tool parameters, failure prompts, and max-iteration termination behavior.
+2. In **Debug and preview**, send questions that cover both the happy path and failures.
+3. With tools attached, verify arguments, failure messages, and the max-iteration stop.
 4. Select **Publish**.
 
-To hide the generated files list below assistant messages, turn on **Hide Artifact List** in **Agent Settings**. It is off by default; enabling it hides the list without deleting the generated files.
+The display switches (**Citations**, **Hide artifact list**) are described under “Configuring attachments, media, and memory”; they affect presentation only.
 
 ## Monitoring and Statistics
 
-Each Agent has a dedicated **Monitor** page (`/app/apps/{agent_id}/monitor`), accessible via **Monitor** in the Agent sidebar. The page displays overview cards, usage trends, tool call distribution, **Execution Health**, **First Token Latency**, and **User Interventions** across `24h`, `7d` (default), and `30d`.
+Every Agent has a **Monitor** page (`/app/apps/{agent_id}/monitor`), opened from **Monitor** in the Agent sidebar. It shows overview cards, usage trends, tool-call distribution, **execution health**, **first-token latency**, and **user interventions** for `24h`, `7d` (default), and `30d`.
+
+| Metric | Description |
+| --- | --- |
+| Conversations and messages | Total conversations, total messages, active users |
+| Token usage | Input tokens, output tokens, and total |
+| Average response time and first-token latency | End-to-end average; first token `p50`/`p95`/`avg` |
+| Execution health and interventions | Run outcome distribution, success rate, intervention count |
+| Tool calls | Call count per tool |
+| Usage trends | Usage over time |
 
 <Callout type="info">
-  See [Agent Monitor](./monitor) for chart formulas, success-rate definitions, and limits.
+  Metric definitions, success-rate calculation, and limitations are in [Agent monitoring](./monitor).
 </Callout>
-
-Data is backed by three read-only endpoints (`GET /api/v1/agents/{agent_id}/stats*`, `period`: `24h`, `7d`, `30d`, `all`):
-
-| Metric | Endpoint | Description |
-| --- | --- | --- |
-| Conversations & messages | `/stats` | Total conversations, total messages, active users |
-| Token usage | `/stats` | `prompt_tokens`, `completion_tokens`, `total_tokens` |
-| Average response time & first token latency | `/stats` | End-to-end average latency; `p50`/`p95`/`avg` for first token |
-| Execution health & user interventions | `/stats` | Run outcome distribution, success rate, intervention counts |
-| Tool calls | `/stats/tool-usage` | Per-tool call count breakdown |
-| Usage trends | `/stats/trends` | Time-aggregated usage changes |
 
 <Callout type="warn">
-  Not implemented / Roadmap: per-agent cost breakdowns, request-level response-time percentiles beyond first token, statistics export (CSV/PDF), and scheduled usage reports. At the operations layer there is also no Prometheus `/metrics` endpoint.
+  Not implemented / roadmap: per-Agent cost breakdown, request-level latency percentiles beyond first token, statistics export (CSV/PDF), and scheduled usage reports. There is no Prometheus metrics endpoint either.
 </Callout>
-
-## API Endpoints
-
-Admin endpoints live under `/api/v1/admin/agents` and require `admin:app:*` permissions.
-
-```ts
-// List all agents (filter by status, visibility, team, creator, search)
-const agents = await api.get("/api/v1/admin/agents", { params: { status: ["published"] } });
-
-// Create agent for a team
-const agent = await api.post("/api/v1/admin/agents", {
-    name: "Support Agent",
-    team_id: "team-123",
-    model_id: "model-456",  // TeamModel ID (a team-granted model)
-    system_prompt: "You are a helpful assistant.",
-    rag_mode: "agentic"
-});
-
-// Update agent (PUT, not PATCH)
-const updated = await api.put(`/api/v1/admin/agents/${agent_id}`, {
-    name: "Support Agent v2"
-});
-
-// Publish / unpublish / duplicate
-await api.post(`/api/v1/admin/agents/${agent_id}/publish`);
-await api.post(`/api/v1/admin/agents/${agent_id}/unpublish`);
-await api.post(`/api/v1/admin/agents/${agent_id}/duplicate`);
-
-// Get agent statistics (period: 24h, 7d, 30d, all)
-const stats = await api.get(`/api/v1/agents/${agent_id}/stats`, { params: { period: "30d" } });
-```
-
-For full API details, see [Agents API](/reference/api/endpoints/agents).
 
 ## Best Practices
 
-### Agent Design
+### Agent design
 
-- ✅ Write clear, specific system prompts
-- ✅ Test agents thoroughly before deployment
-- ✅ Use appropriate models for tasks
-- ✅ Enable RAG for factual accuracy
-- ✅ Monitor usage via the statistics endpoints
+- ✅ Write a clear, specific system prompt
+- ✅ Test thoroughly before deploying
+- ✅ Pick a model suited to the task
+- ✅ Enable RAG to improve factual accuracy
+- ✅ Watch usage on the Monitor page
 - ✅ Collect user feedback and iterate
 
 - ❌ Use vague system prompts
-- ❌ Deploy untested agents
+- ❌ Deploy untested Agents
 - ❌ Use expensive models for simple tasks
 - ❌ Ignore error rates
-- ❌ Forget to monitor costs
+- ❌ Skip cost monitoring
 
 ### Performance
 
-- ✅ Use streaming for better UX
+- ✅ Enable streaming output for a better experience
 - ✅ Optimize knowledge base search
-- ✅ Set appropriate timeouts
+- ✅ Set sensible timeouts
 
-- ❌ Use synchronous processing for long tasks
-- ❌ Overload agents with too many knowledge bases
-- ❌ Set very high `max_tokens`
+- ❌ Process long tasks synchronously
+- ❌ Attach too many knowledge bases
+- ❌ Set an excessively high output limit
 
 ## Troubleshooting
 
-### Agent Not Responding
+### Agent Does Not Respond
 
-1. **Check agent status**: Verify it's published; check model availability.
-2. **Check model configuration**: Verify API key is valid; test model connectivity; check rate limits.
-3. **Check knowledge bases**: Verify they're indexed; confirm search works.
-4. **Check audit logs**: Filter by resource type `agent` and the matching resource ID.
+1. **Check Agent status**: confirm it is published; check model availability.
+2. **Check model configuration**: verify the API key, test connectivity, and check rate limits.
+3. **Check knowledge bases**: confirm indexing finished and search works.
+4. **Check the audit log**: filter by resource type `agent` and matching resource ID.
 
-### Poor Response Quality
+### Poor Reply Quality
 
-1. **Review system prompt**: Make instructions clearer; add examples; set boundaries.
-2. **Improve knowledge base**: Add more relevant documents; update outdated content; improve chunking strategy.
-3. **Enable Agentic RAG**: Lets the agent decide when to retrieve, improving factual grounding.
+1. **Review the system prompt**: make instructions clearer, add examples, set boundaries.
+2. **Improve knowledge bases**: add relevant documents, update stale content, tune chunking.
+3. **Enable Agentic RAG**: let the Agent decide when to retrieve.
 
-### High Costs
+### High Cost
 
-1. **Review usage**: Check `GET /api/v1/agents/{agent_id}/stats` for token usage and conversation counts; identify high-usage agents.
-2. **Optimize prompts**: Shorter system prompts; reduce context length; use cheaper models for simple tasks.
+1. **Review usage**: check token usage and conversation counts on the Monitor page to find heavy Agents.
+2. **Optimize prompts**: shorten the system prompt, reduce context, use cheaper models for simple tasks.
 
 <Callout type="warn">
-  Not implemented / Roadmap: per-agent token limits, daily limits, and cost alerts are not available. Usage monitoring is read-only via the statistics endpoints.
+  Not implemented / roadmap: per-Agent token limits, daily usage caps, and cost alerts are unavailable; usage on the Monitor page is read-only.
 </Callout>
 
 ## FAQ
 
-- **Empty model list**: The team has no authorized chat model, or the model is disabled.
-- **Tools are not called**: Check the model's function-calling capability, whether the tool is enabled, and whether the prompt defines the calling conditions.
-- **Publish fails**: Confirm you have the publish permission, and that the model, variable references, and capability configuration are valid.
-- **Public page inaccessible**: Confirm the Agent is published; private/team visibility is still affected by sign-in and team access control.
+- **The model list is empty**: the team has no authorized chat model, or the model is disabled.
+- **Tools are not called**: check the model's function-calling support, whether the tool is enabled, and whether the prompt defines when to call it.
+- **Publishing fails**: confirm you have publish permission and that the model, variable references, and capability configuration are valid.
+- **The public page is unreachable**: confirm the Agent is published; private/team visibility still requires sign-in and team access.
 
-## Limitations and Roadmap
+## Limitations and Unimplemented Features
 
 | Feature | Status | Workaround |
 | --- | --- | --- |
-| Per-agent sampling params (Temperature, etc.) | Not implemented | Configure in model `default_params` |
-| Team/agent resource limits | Not implemented | No quota gating |
-| Agent template library | Not implemented | Use duplicate (`POST .../duplicate`) |
-| Bulk edit | Not implemented | Update individual agents via `PUT` |
+| Per-Agent sampling parameters (Temperature, etc.) | Not implemented | Set them on the model itself |
+| Team/Agent resource quotas | Not implemented | No quota gating |
+| Agent template library | Not implemented | Duplicate an existing Agent |
+| Bulk editing | Not implemented | Edit Agents one by one |
 | Archive/restore | Not implemented | Unpublish or delete |
-| Cost breakdowns / request-level percentiles | Not implemented | The Monitor page provides `p50`/`p95` for first token |
+| Cost breakdown / request-level percentiles | Not implemented | The Monitor page provides first-token `p50`/`p95` |
 | Import/export | Not implemented | None |

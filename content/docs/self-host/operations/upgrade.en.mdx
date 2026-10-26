@@ -6,6 +6,21 @@ icon: RefreshCw
 
 Before upgrading, read the target version's CHANGELOG and confirm database migrations, Workflow definitions, model adapters, and deployment manifest changes.
 
+## Breaking change: unified delivery queue
+
+The messaging integrations' outbound queue moved from one table per provider to a single table:
+
+- `integration_deliveries` replaces `feishu_agent_deliveries` and `wechat_agent_deliveries`. At API startup the rows are copied into the new table and the **old tables are dropped** (a PostgreSQL advisory lock, `integration-deliveries-schema`, keeps exactly one process doing it).
+- The same startup migration adds `error_detail` to the new table and `attachments` to `feishu_agent_receipts`; `wechat_agent_receipts` is a new table created during schema generation.
+- **API and workers must run the same version.** An older worker keeps inserting into the dropped tables, losing delivery records and raising errors; an older Beat never loads the new integration schedule.
+- The order is fixed: let the API finish its schema migration (health check passing) before starting or upgrading workers and Beat.
+- **Restart Beat once** after upgrading so it starts as `IntegrationScheduler`; from then on it reconciles schedule entries against PostgreSQL every 2 seconds, and toggling WeChat/Feishu capabilities needs no further restart.
+- There is no standalone `wechat-receiver` service or process: WeChat polling is a periodic task on the `default` queue, and the Feishu long connection lives inside workers consuming the `agent` queue. If an older deployment still runs a dedicated `wechat_poll` worker, stop Beat, drain its backlog or wait for the 90-second claims to expire, then delete that workload. Removing the receiver does **not** remove the Sandbox Worker dependency — Agent code tools still need it.
+
+<Callout type="error" title="Back up before upgrading">
+  The old tables are dropped after the copy, so rolling back the image cannot restore their delivery history. Back up PostgreSQL first and make sure no older worker is still running.
+</Callout>
+
 ## Compose Upgrade
 
 The Compose file references prebuilt images and has no `build:` blocks, and `up -d --force-recreate` is a stop/recreate operation rather than a rolling update, so schedule a maintenance window. Do not rely on `latest` in production; pin an immutable tag or digest.
@@ -15,14 +30,18 @@ Before upgrading, back up PostgreSQL, Qdrant snapshots, the upload volume, and `
 ```bash
 cd /opt/clouisle        # replace with your install directory (installer default: /opt/clouisle)
 docker compose pull
-docker compose up -d --force-recreate
+# Stop workers and Beat first so old processes cannot write the legacy tables during the migration
+docker compose stop worker beat
+docker compose up -d --force-recreate api
+until curl --fail -s http://localhost:8000/api/v1/health >/dev/null; do sleep 2; done
+docker compose up -d --force-recreate worker sandbox-worker beat frontend
 
 docker compose ps
 docker compose logs --tail=50 api worker sandbox-worker beat frontend
 curl --fail http://localhost:8000/api/v1/health
 ```
 
-Confirm `worker`, `sandbox-worker`, and `beat` logs are free of startup errors and that `beat` stays at exactly one replica.
+`sandbox-worker` does not take part in the delivery-queue migration and may keep running. Confirm `worker`, `sandbox-worker`, and `beat` logs are free of startup errors and that `beat` stays at exactly one replica.
 
 When you build your own images, build all three from the **repository root** and push them under the same tag:
 
@@ -39,21 +58,32 @@ docker push "$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
 
 ## Kubernetes Upgrade
 
-Run `helm upgrade` with the same release and namespace (update the `images.backend`, `images.sandboxWorker`, and `images.frontend` tags and keep the existing Secret), or review and apply newly generated manifests. With the manifest, update each workload and watch its rollout:
+Run `helm upgrade` with the same release and namespace (update the `images.backend`, `images.sandboxWorker`, and `images.frontend` tags and keep the existing Secret), or review and apply newly generated manifests. Either way, let the API finish its schema migration before updating workers and Beat:
 
 ```bash
+# 1. Stop consumers that write the legacy delivery tables
+kubectl -n clouisle scale deployment/worker --replicas=0
+kubectl -n clouisle scale deployment/beat --replicas=0
+
+# 2. Update the API first and wait for it
 kubectl -n clouisle set image deployment/api api="$REGISTRY/clouisle-backend:$IMAGE_TAG"
+kubectl -n clouisle rollout status deployment/api
+
+# 3. Then update the remaining workloads
 kubectl -n clouisle set image deployment/worker worker="$REGISTRY/clouisle-backend:$IMAGE_TAG"
 kubectl -n clouisle set image daemonset/sandbox-worker sandbox-worker="$REGISTRY/clouisle-sandbox-worker:$IMAGE_TAG"
 kubectl -n clouisle set image deployment/beat beat="$REGISTRY/clouisle-backend:$IMAGE_TAG"
 kubectl -n clouisle set image deployment/frontend frontend="$REGISTRY/clouisle-frontend:$IMAGE_TAG"
+kubectl -n clouisle scale deployment/worker --replicas=2
+kubectl -n clouisle scale deployment/beat --replicas=1
 
-kubectl -n clouisle rollout status deployment/api
 kubectl -n clouisle rollout status deployment/worker
 kubectl -n clouisle rollout status daemonset/sandbox-worker
 kubectl -n clouisle rollout status deployment/beat
 kubectl -n clouisle rollout status deployment/frontend
 ```
+
+With `helm upgrade` the `worker` and `beat` pods are recreated in the same rollout; if the API is not ready yet, upgrade it with `--set worker.enabled=false --set beat.enabled=false` first and run a second `helm upgrade` to bring both back.
 
 The API rolling strategy is `maxUnavailable: 0` / `maxSurge: 1`, so a new pod must become ready before an old one retires. Schema changes happen when the API starts (Tortoise ORM, no Alembic), so old replicas keep serving on the new schema — schema changes must stay backward compatible.
 
@@ -68,6 +98,7 @@ The installer upgrade preserves the existing `.env`, but you still need to revie
 - All infrastructure and application services are running, with `beat` at exactly one replica.
 - `GET /api/v1/health` succeeds through the public proxy.
 - Login, Agent chat/streaming, file upload, Knowledge Base retrieval, and Workflow execution all work.
+- Messaging integrations work: the admin **Delivery Log** (`/deliveries`) shows new deliveries, WeChat polling drains again, and an `agent` queue worker re-establishes the Feishu long connection.
 - `worker`, `sandbox-worker`, and `beat` logs are free of startup errors.
 - Backup and monitoring jobs keep running.
 
@@ -80,6 +111,10 @@ The installer upgrade preserves the existing `.env`, but you still need to revie
 
 Before rolling back images, confirm whether the database schema change is reversible. If it is not reversible, do not just switch back to the old image; restore a backup in an isolated environment and verify. Workflow versions can be restored separately in the product UI, but this is not equivalent to a service rollback.
 
+<Callout type="error" title="Versions across the delivery-queue cutover cannot roll back in place">
+  The `integration_deliveries` migration drops `feishu_agent_deliveries` and `wechat_agent_deliveries`. After switching back to a pre-cutover image, that older code writes to tables that no longer exist and messaging integrations fail outright. To return to the older version, restore the pre-upgrade PostgreSQL backup into a new instance and point every service at it; do not merely `rollout undo` the workloads.
+</Callout>
+
 ```bash
 # Compose: point the Compose file/environment back at the previous image tag, then recreate
 docker compose pull
@@ -88,7 +123,7 @@ docker compose up -d --force-recreate
 # Kubernetes: undo each application workload
 kubectl -n clouisle rollout undo deployment/api
 kubectl -n clouisle rollout undo deployment/worker
-kubectl -n clouisle rollout undo deployment/sandbox-worker
+kubectl -n clouisle rollout undo daemonset/sandbox-worker
 kubectl -n clouisle rollout undo deployment/beat
 kubectl -n clouisle rollout undo deployment/frontend
 ```

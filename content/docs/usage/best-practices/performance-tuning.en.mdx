@@ -1,35 +1,61 @@
 ---
 title: Performance Tuning
-description: Reduce latency and cost through model selection, caching strategy, database optimization, and workflow runtime tuning
+description: Reduce waiting and cost through model, knowledge base, Agent, and workflow settings
 icon: Gauge
 ---
 
-Reduce latency and operating costs without sacrificing response quality through systematic tuning.
+Performance problems are usually a mismatch between configuration and usage rather than "machines being too slow". Find which step is slow — model, retrieval, tools, or loops — and change the corresponding setting. Concurrency capacity and replica planning on the deployment side are covered in [High Availability and Scaling](../../self-host/operations/high-availability.mdx).
 
-## Model Selection
+## Measure first, then change
 
-Choose from models authorized for your team based on actual needs — don't assume fixed speed or quality rankings. Measure latency, answer quality, context capacity, and cost on representative prompts before deciding on production configuration.
+- **Test with representative input**: use a fixed set of real questions or the same document, record time to first token, total turn time, and answer quality, then change one thing and measure again.
+- **Change one thing at a time**: adjusting model, chunking, and retrieval together makes it impossible to tell where the gain came from.
+- **Separate "slow" from "wrong"**: a cheap model giving bad answers and a knowledge base retrieving the wrong chunks are different problems; do not apply the same fix to both.
 
-## Caching Strategy
+## Model selection
 
-- Only cache data with a clear invalidation policy
-- JWT is the primary session mechanism; Redis supports token blacklist, optional single-session state, plus Celery brokering, rate limits, and temporary caches
-- Do not add a global LLM response cache unless prompt, model, team permissions, tools, and freshness requirements make reuse safe
+- **Match the model to the task**: summarization, classification, and format conversion can use faster, cheaper models; complex reasoning and long-form generation can use stronger ones. Different nodes in a workflow can pick different models, so simple nodes need not use the most expensive one.
+- **Control context length**: system prompts, retrieved chunks, conversation history, and attachments all consume context — longer means slower and costlier. Trimming prompts and dropping unnecessary history or attachments is often more effective than switching models.
+- **Fast first token is not fast completion**: streaming makes the first word appear sooner, but total turn time still depends on model speed and how many tools are called.
 
-## Database Optimization
+## Knowledge base and retrieval
 
-- Add indexes on fields used by frequent filters and joins
-- Configure connection pooling appropriate to the deployment
-- Measure query plans and retrieval latency before changing schema or cache settings
+- **Chunk size and overlap**: defaults are `1000` and `100` characters. Larger chunks keep more context but add noise and consume the budget; smaller chunks hit more precisely but may not carry a full answer. Preview the split before processing.
+- **Number of results**: defaults to `5`. More results improve recall but directly increase context length and response time; confirm the quality gain in the Retrieval Lab first.
+- **Only attach knowledge bases where needed**: extra associations add retrieval time to every turn. With the Agent's RAG mode set to **Smart**, the model decides per turn whether to retrieve, skipping unnecessary searches; **Auto** always retrieves, which is predictable but slower.
+- **The rerank trade-off**: reranking improves result quality at the cost of one extra scoring pass; a larger candidate pool is slower and more expensive.
+- See [Knowledge base optimization](../best-practices/kb-optimization.mdx) for trade-offs and [Retrieval and quality tuning](../guides/knowledge/retrieval.mdx) for parameters and experiments.
 
-## Workflow Runtime
+## Agent runs
 
-- Bound every loop. The editor defaults to 10 iterations and the executor caps loops at 1000
-- Use an Iteration node for array/batch processing with explicit, verifiable termination conditions
+- **Tool call limit**: `5` per turn by default, adjustable from `1-200`. A higher limit can finish more complex tasks but visibly lengthens a single turn; for genuinely complex work, consider a workflow or several Agents instead of raising the limit.
+- **Fewer tools and knowledge bases**: every extra option adds a decision the model must make each turn. Keep only what the problem domain actually needs.
+- **Attach large files only when needed**: images and document attachments go straight into context; starting a fresh conversation avoids accumulating history.
+- **Leave long tasks running**: execution continues on the platform side, so closing the page or switching conversations does not interrupt it — come back later for the result.
 
-## Key Limits
+## Workflows
 
-| Parameter | Value | Description |
-| --- | --- | --- |
-| Editor default loop count | 10 | Default iteration limit in the visual editor |
-| Executor max loop count | 1000 | Runtime hard cap — exceeded loops are force-terminated |
+- **Give every loop an explicit bound**: the editor defaults to `10` iterations and the runtime hard cap is `1000`, beyond which execution is force-terminated. Use an Iteration node when the count is known, and keep termination conditions verifiable.
+- **Let independent branches run in parallel**: put nodes without dependencies on separate branches and the platform runs them together; chaining them sequentially only makes it slower.
+- **Use Iteration for arrays**: per-item processing is clearer and keeps the total volume within the cap.
+- **Debug with draft runs**: there is no need to publish repeatedly just to test, since debug runs do not affect what is live.
+
+## Concurrency guidance
+
+- **One active run per conversation**: rapid follow-ups queue and are processed after the current turn ends. For real parallelism, open multiple conversations or use multiple Agents.
+- **Stagger bulk document imports**: processing many documents at once consumes document-processing capacity and slows other operations; the initiator gets a completion notification, so there is no need to watch the page.
+- **Team model quotas and provider rate limits**: they show up as longer waits or failed requests; back off as indicated and retry rather than retrying densely (see [Rate limits and quotas](/reference/rate-limits)).
+- **Short capacity shows up as queueing**: if everyone slows down at the same time of day, the cause is more likely execution capacity than any single setting — let operations review replicas and quotas.
+
+## Key limits
+
+| Item | Default | Cap | Notes |
+| --- | --- | --- | --- |
+| Tool calls per Agent turn | `5` | `200` | The turn stops calling tools at the cap |
+| Loop count (editor) | `10` | — | Default iteration limit in the visual editor |
+| Loop count (runtime) | — | `1000` | Hard cap; exceeded loops are force-terminated |
+| Chunk size | `1000` characters | UI suggests `2000` | Target length of one chunk |
+| Chunk overlap | `100` characters | UI suggests `500` | Context shared between adjacent chunks |
+| Retrieval results | `5` | `20` per request; `100` in knowledge base settings | Number of results handed to the model |
+
+For exact fields and ranges see the [Knowledge base settings reference](/reference/knowledge-settings) and the [Agent configuration reference](/reference/agent-config).

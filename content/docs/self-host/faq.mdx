@@ -27,6 +27,24 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 
 `worker` 必须消费 `default,agent,knowledge,workflow` 四个队列。持久化 AgentRun 被路由到 `agent` 队列，一旦 `-Q` 里少了 `agent`，任务无人消费，会话会一直显示运行中且不会报错。恢复方法：把 `-Q` 改回四个队列，或另起一个 `-Q agent` 的 Worker。`sandbox` 队列只由 `sandbox-worker` 消费，不在这份列表里。
 
+## 消息集成
+
+### 飞书长连接显示已连接，为什么发消息没反应？
+
+「已连接」只代表 WebSocket 建立成功。还需要订阅 `im.message.receive_v1` 事件、具备 `im:message.p2p_msg:readonly` 等权限并发布应用版本，同时后端要有消费 `agent` 队列的 `worker` 来托管接收器。缺任意一项都收不到消息，详见[故障排查 → 飞书长连接 Connected 但收不到消息](./operations/troubleshooting.mdx#feishu-connected-no-messages)。
+
+### 微信消息延迟或完全不回？
+
+微信靠轮询：Beat 每 3 秒派发批次，批次 30 秒截止、认领 90 秒后可被接管。检查平台开关是否启用、Beat 是否重启过、`worker` 是否消费 `default` 队列，以及绑定是否为 `connected`。常见原因与排查步骤见[故障排查 → 微信轮询暂停](./operations/troubleshooting.mdx#wechat-polling-paused)。
+
+### 消息或产物没发出去，去哪看原因？
+
+管理端 **Delivery Log**（`/deliveries`）按状态列出每条投递，`error` 与 `error_detail` 给出渠道返回的失败原因。没有记录表示上游没产生投递，而不是发送失败。字段说明见 [Delivery Log](../usage/guides/integrations/delivery-log.mdx)。
+
+### 为什么不再需要 `wechat-receiver` 服务？
+
+统一集成后微信轮询由普通 Worker 消费 `default` 队列完成，飞书长连接由 `agent` 队列 Worker 托管，不再有独立接收服务。升级时删除该服务不会影响 Sandbox Worker：Agent 的代码工具仍然依赖它。
+
 ## 存储与扩展
 
 ### API 扩容为什么需要共享卷？
@@ -35,7 +53,7 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 
 ### 为什么恢复数据库后文件或检索仍然缺失？
 
-数据库只包含元数据。原始文件在上传存储，向量在 Qdrant；三者必须从一致备份恢复。
+数据库只包含元数据。原始文件在上传存储，向量在 Qdrant；三者必须从一致备份恢复。沙箱工作区与检查点是节点本地数据，不在备份范围内，节点磁盘丢失后无法恢复。
 
 ## 检索与任务
 
@@ -60,6 +78,10 @@ Beat 是调度器。多个副本会重复投递定时任务，造成重复处理
 ### `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` 到底是开还是关？
 
 代码默认就是 `true`（`config.py`），官方镜像/Compose/Helm/K8s 同样设为 `true`。自己拼镜像或自己写 manifest 时不要漏掉这个变量，否则沙箱会在没有文件系统隔离的情况下执行代码。
+
+### 沙箱会话在 Worker 重启后还能继续吗？
+
+能，但只在同一块磁盘上：每轮结束会写检查点，进程重启或会话重置后从检查点恢复，默认只允许恢复一次（`SANDBOX_SESSION_MAX_RESETS=1`）。Compose 用 `sandbox_data` 命名卷、K8s 用节点 `hostPath`；换节点、换挂载路径或节点磁盘丢失后无法恢复，详见[故障排查 → 沙箱会话无法恢复或检查点失败](./operations/troubleshooting.mdx#sandbox-session-recovery)。
 
 ## 安全
 

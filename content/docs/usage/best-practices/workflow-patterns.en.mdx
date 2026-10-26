@@ -50,7 +50,7 @@ Start → Decision (choice: refund / technical / billing) → {refund | technica
 
 Three habits that always apply:
 
-1. **Give the fallback branch an exit**: set a **confidence threshold** (e.g. `0.6`) and connect the fallback to a human queue or a **Pause** node. The threshold reroutes only when confidence is **strictly below** it; a confidence exactly at the threshold still takes the model's branch.
+1. **Give the fallback branch an exit**: set a **confidence threshold** (e.g. `0.6`) and connect the fallback to a manual review step or a **Pause** node. The threshold reroutes only when confidence is **strictly below** it; a confidence exactly at the threshold still takes the model's branch.
 2. **Do not use a Decision node for deterministic rules**: whether an amount exceeds 5000 or a field is empty belongs in a Condition node; leave semantic judgement to the model.
 3. **Calibrate the threshold from a debug-run trace**: a flat `probabilities` distribution means the instructions or state need rewriting, while two near-equal options are what the threshold is for.
 

@@ -185,7 +185,9 @@ In addition to the [list fields](#response-fields) above, the details endpoint r
 | `hide_tool_calls` | boolean | Hide tool call details in chat UI |
 | `hide_message_actions` | boolean | Hide token usage/speed stats |
 | `hide_reasoning` | boolean | Hide reasoning/chain-of-thought |
-| `tools_config` | array | Tool configs (`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`) |
+| `hide_artifact_list` | boolean | Hide the generated files list below assistant messages; files are not deleted |
+| `enable_citations` | boolean | Attach source citations to replies |
+| `tools_config` | array | Tool configs (`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`); for `web_search`, `config` accepts only `engine` |
 | `enable_attachments` | boolean | Enable file and image attachments |
 | `enable_user_input_request` | boolean | Enable model-callable `ask_user` tool |
 | `enable_memory` | boolean | Enable cross-conversation memory |
@@ -307,8 +309,10 @@ Create a new AI agent. The agent is in `draft` status by default and must be [pu
 | `hide_tool_calls` | boolean | No | Hide tool call details in chat UI (default false) |
 | `hide_message_actions` | boolean | No | Hide token usage/speed stats (default false) |
 | `hide_reasoning` | boolean | No | Hide reasoning/chain-of-thought (default false) |
-| `tools_config` | array | No | Tool configs (`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`) |
-| `tools_credentials` | object | No | Tool credentials (API keys, tokens, etc.) |
+| `hide_artifact_list` | boolean | No | Hide the generated files list below assistant messages (default false); presentation only |
+| `enable_citations` | boolean | No | Attach source citations to replies (default false) |
+| `tools_config` | array | No | Tool configs (`type`/`name`/`tool_id`/`server_id`/`skill_id`/`config`); for `web_search`, `config` accepts only `engine` |
+| `tools_credentials` | object | No | Tool credentials (API keys, tokens, etc.); search keys are not allowed |
 | `enable_attachments` | boolean | No | Enable file and image attachments (default false) |
 | `attachment_config` | object | No | Attachment limits configuration |
 | `enable_user_input_request` | boolean | No | Enable `ask_user` tool (default false) |
@@ -325,6 +329,10 @@ Create a new AI agent. The agent is in `draft` status by default and must be [pu
 | `opening_message` | string | No | Opening message shown in chat |
 | `suggested_questions` | array | No | Suggested questions |
 | `visibility` | string | No | `private` or `team` (default `private`; the legacy value `public` is treated as `team`) |
+
+<Callout type="warn" title="Search credentials belong to the site">
+  There are no per-Agent `web_search` credentials: in `tools_config` that entry's `config` accepts only `engine` (`auto`/`tavily`/`bocha`/`searxng`/`deepseek`) and any other key fails validation; `tools_credentials` containing `TAVILY_API_KEY`, `BOCHA_API_KEY`, `SEARXNG_AUTH_TOKEN`, or `DEEPSEEK_API_KEY` is rejected too. Available engines come from the site configuration — see the [Tools API](./tools).
+</Callout>
 
 ### Request Example
 
@@ -733,6 +741,8 @@ The route declares an optional-auth dependency, but the lookup still requires an
     "hide_tool_calls": false,
     "hide_message_actions": false,
     "hide_reasoning": false,
+    "enable_citations": false,
+    "hide_artifact_list": false,
     "created_by": {
       "id": "user-001",
       "username": "alice",

@@ -1,243 +1,171 @@
 ---
-title: Agent Monitor
+title: Agent Monitoring Dashboard
 description: Review an Agent's usage statistics, execution health, and response performance
 icon: Activity
 ---
 
-The monitor dashboard (`/app/apps/{agent_id}/monitor`) aggregates one Agent's conversation volume, Token consumption, response time, tool calls, run outcomes, and user interventions. It only counts conversations and runs that reached the database, and it is the evidence you use to decide whether to change the prompt, add a knowledge base, or switch models.
+The monitoring dashboard summarizes a single Agent's conversation volume, Token consumption, response time, tool calls, execution outcomes, and user interventions. Data comes from the conversations and runs the Agent has already produced, and is the basis for deciding whether to adjust prompts, add Knowledge Bases, or switch models.
 
 <Callout type="info">
-  You need access to the Agent: superadmins can open it directly; a **private** Agent is visible only to its creator; a **team** Agent requires team access. Denied requests return `403`, and a missing Agent returns `404`.
+  The monitoring page checks **write permission**: only super administrators, the Agent's creator, or owners/administrators of the owning team can access it. Regular team members and viewers cannot see monitoring data even if they can use the Agent, and are redirected to the app list. A private Agent is accessible only to its creator; legacy private Agents without a creator are accessible to team administrators.
 </Callout>
 
-## Admin Apps list
+## Admin App List
 
-Administrators see a cross-team Agent list under **Apps** (in the admin console's **Resources** group), a separate entry point from the per-Agent monitor page above:
+Under **Apps** (admin console, **Resources** group), administrators see Agents from all teams — a different entry point from a single Agent's monitoring page:
 
-| List column | Notes |
+| Column | Description |
 | --- | --- |
 | **Name and description** | Agent name and description |
 | **Team** | Owning team |
-| **Status** | `draft` or `published` |
-| **Model** | The LLM model in use |
-| **Usage** | Only `conversation_count` and `message_count`; no separate statistics tab |
+| **Status** | Draft or published |
+| **Model** | Chat model in use |
+| **Usage** | Conversation and message counts; no separate stats tab |
 | **Created / last active** | Creation date and last activity time |
 
-The list supports filtering and search:
-
-| Capability | Values |
-| --- | --- |
-| Status filter | `draft`, `published` |
-| Visibility filter | `private` or `team` (`public` is kept for legacy records only) |
-| Team filter | By owning team |
-| Creator filter | By creator |
-| Search | By name or description |
+The list filters by status, visibility, team, and creator, and searches by name or description.
 
 <Callout type="note">
-  The admin list shows only conversation and message counts; for time-ranged volume, Tokens, latency, tool distribution, and execution health, use the Agent monitor page described on this page.
+  The admin list shows only conversation and message counts; for conversation volume, Tokens, latency, tool distribution, and execution health over a time range, use the single Agent's monitoring page.
 </Callout>
 
-## Open the Monitor
+## Opening the Monitoring Page
 
-1. Go to **Apps** (`/app/apps`) and open the target Agent.
-2. In the Agent sidebar, select **Monitor** (**Orchestration** / **API** / **Logs** / **Monitor**).
-3. The page title is **Monitor**, with the subtitle "View usage statistics and performance metrics for this Agent".
-
-<Callout type="info" title="Image needed: Agent monitor dashboard">
-  File: `/images/agent-monitor-overview.png`. Screenshot content: the first screen of the Agent monitor page, including the time-range selector and the six overview cards. Crop the screenshot to the metrics area and outline the time-range selector with the theme color. The future `alt` and caption for this image will both use "Agent monitor dashboard".
-</Callout>
+1. Go to **Apps** or the workspace and open the target Agent.
+2. Choose **Monitoring** in the Agent sidebar (alongside **Orchestration**, **API**, and **Logs**).
+3. The page title is **Monitoring**, with the subtitle "View usage statistics and performance metrics for this Agent".
 
 ## Time Range
 
-The time-range selector at the top defaults to **Last 7 days** and offers only three options:
+The time range selector at the top defaults to **Last 7 days** and offers only three options:
 
-| Option | Value | Trend granularity |
-| --- | --- | --- |
-| Last 24 hours | `24h` | Hourly, `24` points |
-| Last 7 days | `7d` | Daily, `7` points |
-| Last 30 days | `30d` | Daily, `30` points |
+| Option | Trend granularity |
+| --- | --- |
+| Last 24 hours | Hourly, 24 points |
+| Last 7 days | Daily, 7 points |
+| Last 30 days | Daily, 30 points |
 
-Point labels are aligned to the site time zone and rendered as `HH:00` (hourly) or `MM/DD` (daily).
+Point labels follow the site time zone and appear as `HH:00` (hourly) or `MM/DD` (daily).
 
-<Callout type="warn">
-  The monitor page has **no refresh button** and no manual granularity control. Changing the time range is the only way to refresh, and it fires the overview, trend, and tool-usage requests concurrently.
-</Callout>
+There is **no refresh button** and no manual granularity control. Switching the time range is the only refresh, and it reloads the overview, trends, and tool usage together.
 
 ## Overview Cards
 
-Six metric cards sit at the top of the page. Values at or above `1K` render as `K` and at or above `1M` as `M`; durations below `1` second render in milliseconds, otherwise with 2 decimal seconds.
+Six metric cards appear at the top. Values at or above `1K` show as `K` and at or above `1M` as `M`; durations under `1` second show milliseconds, otherwise seconds with two decimals.
 
-| Card | Meaning |
+| Card | Description |
 | --- | --- |
 | **Conversations** | Total conversations created in the range |
-| **Messages** | User + assistant + tool messages |
-| **Tokens** | Total Tokens, split into `↑` prompt and `↓` completion |
-| **Avg Response Time** | End-to-end average duration |
-| **Active Users** | Distinct users who created a conversation in the range |
-| **Tool Calls** | Sum of tool-call arguments across assistant messages |
+| **Messages** | Sum of user, assistant, and tool messages |
+| **Token usage** | Total Tokens, with prompt Tokens (`↑`) and completion Tokens (`↓`) separately |
+| **Average response time** | End-to-end average duration |
+| **Active users** | Distinct users who had a conversation in the range |
+| **Tool calls** | Total tool calls in assistant messages |
 
 ## Usage Trends
 
 Three area charts share the same time range:
 
-| Chart | Description | Y axis |
+| Chart | Description | Y-axis |
 | --- | --- | --- |
-| **Conversation Trend** | Number of conversations and messages over time | Count |
-| **Token Usage** | Total tokens consumed over time | Compact format (`K`/`M`) |
-| **Response Time** | Average response time over time | Seconds |
+| **Conversation trend** | Conversations and messages over time | Count |
+| **Token usage** | Total Token consumption over time | Compact `K`/`M` |
+| **Response time** | Average response time over time | Seconds |
 
-The backend returns a fixed, complete point grid and zero-fills missing buckets, so the curves stay continuous instead of breaking over idle periods.
-
-<Callout type="info" title="Image needed: Usage trends">
-  File: `/images/agent-monitor-trends.png`. Screenshot content: the Conversation Trend, Token Usage, and Response Time area charts on the monitor page. Keep the crop inside the trend cards and outline the time-range selector with the theme color to show that all three charts share one range. The future `alt` and caption for this image will both use "Usage trends".
-</Callout>
+Trend data fills the complete grid of time points, showing 0 where there is no data, so curves stay continuous and do not break when a period has no conversations.
 
 ## Tool Call Distribution
 
-The **Tool Usage** card renders a donut chart of this Agent's tool calls, ordered by descending count. The legend shows each tool's localized name and call count, and the tooltip label is **Calls**.
+The **Tool usage** card shows the Agent's tool-call distribution as a donut chart, ordered by call count descending. The legend shows each tool's localized name and call count, and the tooltip is **Call count**.
 
-- At most the top `8` tools are shown; the remainder is merged into **Other tools** with the combined count preserved.
+- At most the top `8` tools are shown; the rest merge into **Other tools** with the combined count.
 - With no tool calls, the card shows **No tool usage data**.
-- Tool names are localized to the site language; the API returns both the localized `display_name` and the raw `name`.
-
-<Callout type="note">
-  Tool statistics **do not enumerate MCP servers**. Stats requests deliberately avoid triggering external MCP calls, so MCP tools never appear in the distribution.
-</Callout>
+- Tool names are localized to the site language.
+- Statistics do not enumerate MCP server tools live, so MCP tools may not appear in the distribution.
 
 ## Execution Health
 
-The **Execution Health** donut shows the outcome distribution of this Agent's finished runs; the tooltip shows count and percentage.
+The **Execution health** donut shows the outcome distribution of the Agent's finished runs; the tooltip shows count and share.
 
 | Outcome | Meaning |
 | --- | --- |
-| **Completed** | The run finished successfully |
-| **Failed** | The run ended in a failure state |
+| **Succeeded** | The run finished normally |
+| **Failed** | The run ended in failure |
 | **Stopped** | The user stopped it |
-| **Interrupted** | The worker executing the run was lost (crash, restart, eviction), so the run never completed |
+| **Interrupted** | The service executing the run was lost (crash, restart, or eviction) and the run never finished |
 
-The success rate is **completed ÷ terminal runs** (hinted on the card as "Completed ÷ terminal runs"). The card color follows the rate:
+The success rate is **succeeded ÷ finished runs**, labelled "succeeded ÷ finished runs" in the card. Card color changes with the rate:
 
 | Success rate | Color |
 | --- | --- |
-| `>= 95%` | Green |
-| `>= 80%` and `< 95%` | Amber |
+| `≥ 95%` | Green |
+| `≥ 80%` and `< 95%` | Amber |
 | `< 80%` | Red |
 
 <Callout type="warn">
-  **Interrupted is terminal**: it lowers the success rate rather than counting as "still running". In-flight runs (`queued`, `running`, `stopping`, `completing`, `waiting`) are excluded from the denominator, and the page shows "`{count}` in progress, excluded". When nothing has ever finished, the card shows **No runs yet**.
+  **Interrupted is terminal** and lowers the success rate rather than meaning "still running". In-progress runs are excluded from the denominator, and the page notes "N more in progress, not counted". If no run has ever finished, the card shows **No run records**.
 </Callout>
 
 ## First Token Latency
 
-The **First Token Latency** card reports `p50` (median), `p95`, and average, and plots `p95` and `p50` per bucket on a line chart. Buckets without samples are `null`, and the line **breaks instead of connecting** across them; the card also shows the sample count. With no samples it shows **No latency samples yet**.
+The **First token latency** card shows the median (`p50`), `p95`, and average, with a line chart of `p50` and `p95` over time buckets. Buckets without samples are null and the line breaks there, and the card also shows the sample count. With no samples at all it shows **No latency samples**.
 
-First-token latency measures how long a user waits for the first character, which is a different signal from **Avg Response Time** (total end-to-end duration): high latency usually points at model first-token speed, context length, or queueing, while high total time can also come from many tool calls.
+First token latency reflects how long users wait for the first character, which differs from **average response time** (total end-to-end duration): high latency usually relates to model first-token speed, context length, or queuing; high total duration may also mean many tool calls.
 
 ## User Interventions
 
-The **User Interventions** bar chart counts the three ways users intervene in a run; only non-zero bars render:
+The **User interventions** bar chart counts three kinds of user involvement (only non-zero items are shown):
 
 | Label | Meaning |
 | --- | --- |
-| **Steering** (`steer`) | Inserting extra instructions mid-generation |
-| **Stopped** (`stopped`) | Manually stopping generation |
-| **Follow-ups** (`follow_up`) | Asking a follow-up about the previous result |
+| **Mid-run guidance** | Additional instructions inserted during generation |
+| **Manual stop** | The user stopped generation |
+| **Follow-up** | Continuing from the previous result |
 
-The card also shows the **intervention rate** = `interventions.total / health.total` (terminal runs, 2 decimals), hinted as "Across `{runs}` terminal runs".
+The card also shows the **intervention rate** = total interventions ÷ finished runs, with two decimals, labelled "based on N finished runs".
 
 <Callout type="note">
-  When the intervention total is `0` the card shows an empty state; if bars have values but no run has finished, the rate is omitted. A high intervention rate means the prompt, tool descriptions, or knowledge retrieval are not clear enough and users keep correcting the Agent.
+  When total interventions are 0 the card shows an empty state; if the chart has data but no run has finished, the rate is not shown. A high intervention rate usually means prompts, tool descriptions, or Knowledge Base recall are not clear enough and users keep correcting the Agent.
 </Callout>
 
-## Data Semantics and Known Limits
+## Data Scope and Known Limitations
 
-Some endpoint behaviour does not fully match the documented options, which matters when troubleshooting:
+- Time ranges are last 24 hours, 7 days, and 30 days; the default is 7 days.
+- When statistics fail, the page **silently keeps the previous or empty data** with no error message. If charts stay empty while conversations clearly exist, refresh the page, then contact operations to check the statistics service.
+- Fewer than 6 cards or blank chart areas usually mean data has not returned yet; skeleton placeholders show while loading.
+- Statistics are computed from stored conversations and runs: draft previews produce no official statistics, and direct model calls that bypass the Agent are not counted.
 
-- Overview and tool usage treat any period other than `24h`/`7d`/`30d` **as `all`**; trends treats anything other than `24h`/`7d` **as `30d`**. The UI only exposes the three supported options, so this rarely triggers.
-- On a stats failure the frontend **silently keeps the previous or empty data** and shows no error state. If charts stay empty while conversations clearly exist, reload the page first, then check the backend.
-- Fewer than `6` cards or blank chart areas usually means stats have not returned yet; skeletons occupy the card and chart slots while loading.
-
-**Unavailable** (roadmap): cost breakdowns, request-level response-time percentiles beyond first token, statistics export (CSV/PDF), and scheduled reports. At the operations layer there is also no Prometheus `/metrics` endpoint.
-
-## API Endpoints
-
-The monitor reads three read-only endpoints. All require an active JWT and pass the Agent access check:
-
-```http
-GET /api/v1/agents/{agent_id}/stats?period=7d
-GET /api/v1/agents/{agent_id}/stats/trends?period=7d
-GET /api/v1/agents/{agent_id}/stats/tool-usage?period=7d
-```
-
-`period` accepts `24h`, `7d`, `30d`, and `all` (trends accepts only `24h`/`7d`/`30d`; overview and tool usage default to `7d`).
-
-`stats` returns every section at once:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "period": "30d",
-    "overview": {
-      "total_conversations": 156,
-      "total_messages": 1234,
-      "user_messages": 620,
-      "assistant_messages": 610,
-      "tool_messages": 4,
-      "active_users": 23
-    },
-    "tokens": {
-      "prompt_tokens": 250000,
-      "completion_tokens": 206789,
-      "total_tokens": 456789
-    },
-    "performance": {
-      "avg_response_time_ms": 2300,
-      "first_token_ms": { "p50": 1200, "p95": 9000, "avg": 2500, "samples": 480 }
-    },
-    "tools": { "tool_call_count": 512 },
-    "health": {
-      "completed": 90, "failed": 6, "stopped": 4, "interrupted": 3,
-      "unrecognised": 0, "in_flight": 2, "total": 103, "success_rate": 0.8738
-    },
-    "interventions": { "steer": 12, "stop": 3, "follow_up": 5, "total": 20 }
-  },
-  "msg": "success"
-}
-```
-
-`health.unrecognised` reports stored status values this build does not know; they are reported separately instead of being folded into a bucket. `health.total` = `completed + failed + stopped + interrupted`.
-
-See [Agents API](/api/agents) for the full field reference.
+**Not available (Roadmap):** cost breakdown, additional response-time percentiles, statistics export (CSV/PDF) and scheduled reports, and Prometheus metrics.
 
 ## Troubleshooting
 
-### The monitor will not open, or jumps back to the app list
+### The monitoring page will not open or redirects to the app list
 
-1. Confirm you have access to the Agent (a private Agent is visible only to its creator).
-2. Confirm the Agent still exists; a deleted Agent returns `404` and the frontend redirects to `/app/apps`.
-3. For a team Agent, confirm you are still a member of the team.
+1. Confirm you are the Agent's creator or an owner/administrator of the owning team (a private Agent is accessible only to its creator; legacy private Agents without a creator are accessible to team administrators).
+2. Confirm the Agent has not been deleted; a deleted Agent redirects to the app list.
+3. For a team Agent, confirm you are still a member of that team.
 
-### Every metric is 0
+### All metrics are 0
 
-1. Confirm there were conversations in the range (check **Conversations** first).
-2. Confirm you are looking at a published version; draft previews do not produce official statistics.
-3. Confirm callers go through the Agent conversation API rather than calling the model directly.
+1. Confirm the range actually contains conversations (check **Conversations** first).
+2. Confirm you are looking at conversations from a published version; draft previews produce no official statistics.
+3. Confirm the caller goes through Agent conversations rather than calling the model directly.
 
-### Success rate is low
+### Low success rate
 
-1. Check the **Failed** and **Interrupted** shares in **Execution Health**. A high **Interrupted** share means an unstable runtime (worker crash or restart); talk to operations instead of rewriting the prompt.
-2. Open **Logs** and filter by `failed` to find the failing runs.
-3. Combine with the **Stopped** share in **User Interventions** to see whether timeouts or overly long replies make users give up.
+1. Check the share of **Failed** and **Interrupted** in **Execution health**. A high **Interrupted** share means an unstable execution environment — contact operations instead of changing prompts.
+2. Open **Logs**, filter by failed status, and find the error for failed runs.
+3. Compare with the **Manual stop** share in **User interventions** to judge whether timeouts or long replies made users give up.
 
-### First-token latency is high
+### High first token latency
 
 1. Check the model provider's first-token speed and current load.
-2. Shorten the system prompt and the injected knowledge-base context.
-3. Compare **First Token Latency** across models and switch to a faster `chat` model if needed.
+2. Shorten the system prompt and injected Knowledge Base context.
+3. Compare first token latency across models and switch to a faster chat model if needed.
 
-## Related pages
+## Related Pages
 
-- [Create and Orchestrate an Agent](./create-agent) — models, tools, and the statistics endpoints
-- [Conversations and Sessions](./conversation) — how conversations and runs are produced
-- [Agents API](/api/agents) — full field and error-code reference
+- [Create and orchestrate an Agent](./create-agent.mdx) — models, tools, and preview
+- [Chat and conversations](./conversation.mdx) — how conversations and run records are produced
+- [Observability reference](../../../reference/observability.mdx) — console views and time windows
+- [Agent statistics API](../../../api/agents.mdx) — statistics fields for developers

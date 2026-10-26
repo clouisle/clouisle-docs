@@ -50,23 +50,49 @@ WHERE NOT i.indisvalid;
 索引创建、清理与验证步骤见[数据库维护与索引调优](./database-maintenance.mdx)。
 
 ## 观测控制台
-+
+
 产品内置的可观测性控制台位于**监控** > **可观测性**（路由 `/dashboard/observability`），数据由 `GET /api/v1/admin/observability` 下的接口提供。读端点需要 `admin:dashboard:access` 权限；告警确认、静默与规则更新需要 `admin:observability:manage` 权限。控制台**没有** Prometheus 风格的 `/metrics` 端点，也没有内建 Prometheus/Grafana/Datadog/ELK 集成；外部监控只能采集日志并轮询健康端点与这组观测接口。
-+
+
+控制台按六个视图组织，排查时先选视图再看细节：
+
+| 视图 | 回答的问题 | 数据来源 |
+| --- | --- | --- |
+| 运行结果 | 成功/失败率、耗时分布、最近失败 | `GET /summary`、`GET /runs` |
+| 按需 trace | 某次 AgentRun/工作流运行内部发生了什么 | `GET /runs/{agent\|workflow}/{run_id}` |
+| 模型/工具/检索依赖 | 哪家供应商、哪个工具或检索环节在拖慢或报错 | `GET /dependencies` |
+| 队列 | 哪个队列在积压、哪些 Worker 在线 | `GET /queues` |
+| 基础设施 | 数据库、Redis、Qdrant、实例健康 | `GET /infrastructure` |
+| 告警 | 当前活跃告警、规则与静默 | `GET /alerts`、`GET /alerts/rules` |
+
 | 端点 | 参数 | 说明 |
-+| --- | --- | --- |
-+| `GET /summary` | `period`（`15m`/`1h`/`24h`/`7d`，默认 `1h`）、`team_id` | 紧凑的运行汇总与趋势；样本不足时百分位数与成功率为 `null` |
-+| `GET /runs` | `period`、`team_id`、`source`（`all`/`agent`/`workflow`）、`status`、`error_category`、`run_id`、`cursor`、`limit`（1–50，默认 `25`） | 仅返回摘要的游标（keyset）分页列表；详情走 `GET /runs/{agent|workflow}/{run_id}` |
-+| `GET /dependencies` | `period`、`team_id` | 在已记录遥测支持时返回模型、工具与检索聚合 |
-+| `GET /queues` | 无 | 有界的当前队列与 Worker 快照 |
-+| `GET /infrastructure` | 无 | 有界基础设施快照、依赖健康状态与安全显示的 `pg_stat_statements` 查询 |
-+| `GET /alerts`、`GET /alerts/rules` | 告警列表 `status`（`active`/`resolved`/`all`）、`cursor`、`limit`（1–50，默认 `25`） | 规则列表直接返回全部规则 |
-+| `POST /alerts/{id}/acknowledge`、`POST /alerts/{id}/silence` | 静默需 `duration_seconds`（60–604800 秒） | 确认与静默都需要 `admin:observability:manage` |
-+| `PUT /alerts/rules/{id}` | 请求体可更新阈值、静默时长与恢复窗口 | 需要 `admin:observability:manage` |
-+
-+Run 摘要保留 30 天，仅记录 allowlist 字段：时序、状态、模型名、token 数、资源与团队标识、错误码。不存 prompt、消息正文、工具参数与结果、凭据、traceback；无提交时间戳的历史运行不回填。告警规则在读告警时求值，保留任务走 `default` Celery 队列。
-+
-+基础健康检查 `GET /api/v1/health` 无需认证，供容器健康检查与外部探活使用；它只返回 `{"status": "healthy"}`，不含依赖详情。带依赖详情的基础设施快照走 `GET /api/v1/admin/observability/infrastructure`（需要 `admin:dashboard:access`）：缺失探针报 `unknown`，不可用统计不显示为 0。
+| --- | --- | --- |
+| `GET /summary` | `period`（`15m`/`1h`/`24h`/`7d`，默认 `1h`）、`team_id` | 紧凑的运行汇总与趋势；样本不足时百分位数与成功率为 `null` |
+| `GET /runs` | `period`、`team_id`、`source`（`all`/`agent`/`workflow`）、`status`、`error_category`、`run_id`、`cursor`、`limit`（1–50，默认 `25`） | 仅返回摘要的游标（keyset）分页列表；详情走 `GET /runs/{agent\|workflow}/{run_id}` |
+| `GET /dependencies` | `period`、`team_id` | 在已记录遥测支持时返回模型、工具与检索聚合 |
+| `GET /queues` | 无 | 有界的当前队列与 Worker 快照 |
+| `GET /infrastructure` | 无 | 有界基础设施快照、依赖健康状态与安全显示的 `pg_stat_statements` 查询 |
+| `GET /alerts`、`GET /alerts/rules` | 告警列表 `status`（`active`/`resolved`/`all`）、`cursor`、`limit`（1–50，默认 `25`） | 规则列表直接返回全部规则 |
+| `POST /alerts/{id}/acknowledge`、`POST /alerts/{id}/silence` | 静默需 `duration_seconds`（60–604800 秒） | 确认与静默都需要 `admin:observability:manage` |
+| `PUT /alerts/rules/{id}` | 请求体可更新阈值、静默时长与恢复窗口 | 需要 `admin:observability:manage` |
+
+Run 摘要保留 30 天，仅记录 allowlist 字段：时序、状态、模型名、token 数、资源与团队标识、错误码。不存 prompt、消息正文、工具参数与结果、凭据、traceback；无提交时间戳的历史运行不回填。单个 run 最多采集 128 个工具/检索 span，超出部分在 trace 中标记为截断。告警规则在读告警时求值，保留任务走 `default` Celery 队列。
+
+字段与记录边界的完整说明见[可观测性参考](../../reference/observability.mdx)。
+
+基础健康检查 `GET /api/v1/health` 无需认证，供容器健康检查与外部探活使用；它只返回 `{"status": "healthy"}`，不含依赖详情。带依赖详情的基础设施快照走 `GET /api/v1/admin/observability/infrastructure`（需要 `admin:dashboard:access`）：缺失探针报 `unknown`，不可用统计不显示为 0。
+
+## 消息投递日志
+
+飞书与微信的每条出站消息和产物都落在统一队列 `integration_deliveries`，管理端 **Delivery Log**（`/deliveries`）把它们按状态列出。读权限是 `admin:integrations:settings:read`，接口为 `GET /api/v1/admin/deliveries`（`provider_type`、`status` 可重复筛选，`limit` 1–100，默认 `25`）。
+
+用户报告「消息没收到」时，先在这里确认：
+
+- 记录根本不存在 → 上游没产生投递，检查 Agent 是否完成、能力开关是否启用。
+- `status=error` → 看 `error` 与 `error_detail`，通常是凭据失效、收件人未绑定或产物超过大小上限。
+- `status=pending` 长时间不动 → 消费该渠道的 Worker 停了；`sending` 卡住通常是渠道请求超时。
+- `status=unavailable` → 该集成已被关闭或不属于当前团队。
+
+页面结构、筛选条件和字段含义见 [Delivery Log](../../usage/guides/integrations/delivery-log.mdx)。注意它与站内通知的 `notification_deliveries` 是两条独立链路：后者只记录 email/webhook/feishu 通知渠道的结果。
 
 ## 产品指标
 

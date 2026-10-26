@@ -23,6 +23,7 @@ Agent 创建和更新接口对应编辑器中的基础设置与编排卡片。�
 | `hide_message_actions` | boolean | `false` | 隐藏 Token 用量/速度等消息统计 |
 | `hide_reasoning` | boolean | `false` | 隐藏推理过程/思维链 |
 | `hide_artifact_list` | boolean | `false` | 隐藏聊天界面中助手消息下方的生成文件列表；不会删除文件 |
+| `enable_citations` | boolean | `false` | 在回复中附带来源引用 |
 | `opening_message` | string 或 null | null | 会话开场白 |
 | `suggested_questions` | string[] | `[]` | 建议问题列表 |
 | `powered_by_text` | string 或 null | null | 对话页脚署名，最长 `200` 字符 |
@@ -40,6 +41,10 @@ Agent 创建和更新接口对应编辑器中的基础设置与编排卡片。�
 | `tools_config` | array | `[]` | 工具类型：`builtin`、`custom`、`mcp` 或 `skill` |
 | `variables` | array | `[]` | 用户输入字段；`name` 为 `1-50` 字符，`type` 取 `text`、`paragraph`、`select`、`number`、`checkbox` |
 | `enable_user_input_request` | boolean | `false` | 允许模型调用 `ask_user` 工具向用户请求结构化输入 |
+
+<Callout type="warn" title="web_search 只能选引擎">
+  `tools_config` 中 `type: builtin` + `name: web_search` 的 `config` 只接受 `engine`（`auto`、`tavily`、`bocha`、`searxng`、`deepseek`），其他键会被拒绝；`tools_credentials` 中出现 `TAVILY_API_KEY`、`BOCHA_API_KEY`、`SEARXNG_AUTH_TOKEN` 或 `DEEPSEEK_API_KEY` 同样被拒绝。搜索凭据和端点归站点所有，见[内置工具](/usage/guides/tools/built-in)。
+</Callout>
 
 ## 记忆与上下文压缩
 
@@ -60,11 +65,13 @@ Agent 创建和更新接口对应编辑器中的基础设置与编排卡片。�
 | `enable_attachments` | boolean | `false` | 允许上传文件和图片 |
 | `attachment_config.max_file_size` | bytes | `10485760`（`10MB`） | `1024`（`1KB`）–`52428800`（`50MB`） |
 | `attachment_config.max_files` | integer | `5` | 每条消息最多文件数，`1-10` |
-| `attachment_config.max_content_length` | integer | `100000` | 解析后内容长度上限（字符），`1000-500000` |
-| `attachment_config.truncate_strategy` | string | `end` | 截断策略：`end`（保留开头）、`start`（保留结尾）、`middle`（保留头尾） |
 | `attachment_config.allowed_extensions` | string[] | 见下 | 允许的扩展名 |
 
 默认允许的扩展名：`.pdf`、`.docx`、`.doc`、`.pptx`、`.ppt`、`.xlsx`、`.xls`、`.txt`、`.md`、`.csv`、`.json`、`.html`。
+
+<Callout type="info" title="这些字段不属于 attachment_config">
+  `max_content_length`（默认 `100000` 字符，`1000-500000`）和 `truncate_strategy`（`end` 保留开头、`start` 保留结尾、`middle` 保留头尾，默认 `end`）是**文件解析请求**的参数，不属于 Agent 的 `attachment_config`。Agent 附件只声明大小、数量和扩展名。
+</Callout>
 
 ## 媒体生成
 

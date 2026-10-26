@@ -29,6 +29,22 @@ icon: ShieldCheck
 - [ ] 流式链路用 HTTP/1.1、`proxy_buffering off`，读写超时与 1800 秒示例一致。
 - [ ] 用 RBAC、NetworkPolicy 与 Ingress 策略限制 `clouisle` 命名空间访问。
 
+## 出站网络策略
+
+**站点设置** > **安全** 里有三张互相独立的开关，默认全部为 `true`。它们保护不同的出站路径，关掉任何一张都要明确接受对应风险：
+
+| 开关 | 默认 | 管住什么 | 关闭后的风险 |
+| --- | --- | --- | --- |
+| `model_endpoint_allowlist_enabled` | `true` | LLM、嵌入、重排与媒体供应商端点（`model_endpoint_allowlist`） | 用户可把模型请求指向任意地址，包括内网服务与云元数据端点，可能泄露凭据或探测内网 |
+| `ssrf_protection_enabled` | `true` | 自定义 HTTP 工具、工作流 HTTP 节点、URL 导入/预览、数据库连接测试 | 这些功能可访问私网、回环与云元数据地址；仍保留 URL/端口语法校验，但不再阻断内网目标 |
+| `sandbox_network_allowlist_enabled` | `true` | 沙箱任务的出站目标（沙箱出口白名单） | 沙箱代码可连接任意网络，包括内网；文件系统隔离与资源上限仍然生效，且开关只影响**新任务** |
+
+- [ ] 三张开关保持开启；确需关闭时记录原因、期限与补偿控制（如 NetworkPolicy、出口代理）。
+- [ ] 关闭某张开关不会清空已保存的列表，重新开启即可恢复；值损坏时按 fail-closed 处理（当作开启）。
+- [ ] 沙箱出口白名单只接受**精确 DNS 主机名**，默认只放行 `pypi.org`、`files.pythonhosted.org`、`pypi.python.org`、`registry.npmjs.org`；通配符与 IP 地址会被拒绝，条目上限 `200`，空列表等于阻断全部外网。
+- [ ] 需要更多域名时逐条添加精确主机名，**不要**为了省事写通配符——沙箱出口白名单不支持通配符。
+- [ ] 沙箱出口白名单与 SSRF 白名单是两套配置：前者约束沙箱代码，后者约束服务端发起的 HTTP 请求，不要互相替代。
+
 ## 数据保护与恢复
 
 - [ ] 在支持的环境对 PostgreSQL、Qdrant、上传文件与备份存储启用静态加密。
@@ -41,7 +57,7 @@ icon: ShieldCheck
 
 - [ ] 生产镜像用固定 tag/digest，不用 `latest`，部署前扫描镜像。
 - [ ] 沙箱文件系统隔离保持开启，保留 Worker 所需的 seccomp/能力配置，改动前先看沙箱加固说明。
-- [ ] 按威胁模型在宿主机/集群层限制沙箱出站网络与资源。
+- [ ] 沙箱出口白名单（`sandbox_network_allowlist_enabled`）保持开启，只添加精确主机名；再按威胁模型在宿主机/集群层补充出口与资源限制。
 - [ ] Docker、Kubernetes、PostgreSQL、Redis、Qdrant、Bubblewrap、宿主机内核及时打补丁。
 
 ## 日志与事件响应

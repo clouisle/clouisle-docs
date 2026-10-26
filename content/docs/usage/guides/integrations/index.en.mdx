@@ -1,0 +1,58 @@
+---
+title: Messaging Integrations
+description: Connect Feishu and WeChat iLink to Agent chat, knowledge collection, notifications, and sign-in
+icon: MessagesSquare
+---
+
+Messaging integrations let external chat tools reuse Clouisle's Agent execution, knowledge bases, and identity system instead of running a second Agent loop inside the provider. Administrators configure the shared app and feature switches under **Site Settings** > **Integrations**; each user binds their own external identity and chooses a purpose under **Personal settings**. Outbound results are recorded in the [Delivery log](./delivery-log.mdx).
+
+## Built-in integrations and feature switches
+
+Feishu and WeChat iLink are both **built-in integrations** with a single instance each: administrators save the app credentials once for the whole site, and no second instance can be created per team or per user. The integration page offers **feature switches, not an integration master switch**:
+
+| Integration | Features you can enable |
+| --- | --- |
+| Feishu | User sign-in, directory sync, notifications, Agent chat |
+| WeChat iLink | Agent chat, knowledge collection |
+
+Enabling one feature never enables another. Disabling a feature preserves saved credentials, personal bindings, history, and pending work; tasks already started may still finish. Feishu sign-in is an explicit option — enabling the Feishu integration alone never opens Feishu login.
+
+Integration settings are split across two permission domains: **sign-in provider management** covers login methods and the global single-sign-on policy, while **service settings management** covers app credentials, feature switches, sync, and the Agent-chat channel. Feishu covers both, so an administrator holding only one domain can change only that domain's content, and the integration list shows only what that domain can see.
+
+## Administration vs. personal settings
+
+| Location | Owns | Does not own |
+| --- | --- | --- |
+| **Site Settings** > **Integrations** (`/site-settings/integrations`) | The integration catalog and feature entry points; Feishu, WeChat, email, and Webhook have dedicated subpages | Choosing another user's replying Agent, or authorizing WeChat on a user's behalf |
+| Feishu page (`/site-settings/integrations/feishu`) | App credentials, sign-in opt-in, directory scope and sync, notification tests, Agent-chat event delivery, knowledge sources | Personal Agent selection; knowledge sync is visible only to superusers |
+| WeChat page (`/site-settings/integrations/wechat`) | Platform-level Agent-chat and knowledge-collection switches | Personal WeChat credentials or a user's connection purpose |
+| **Personal settings** > **Feishu** / **WeChat iLink** | Binding one's own external identity, choosing an Agent or knowledge-base target, the personal switch, authorization and disconnect | Bypassing an administrator-disabled feature, or seeing another user's connection |
+
+## Capability matrix
+
+| Capability | Feishu | WeChat iLink |
+| --- | --- | --- |
+| Web sign-in | Yes, must be enabled explicitly; the same app reuses its identity binding | No |
+| Directory sync | Yes, manual one-way sync of department members and teams | No |
+| Notification delivery | Yes, direct messages to users with a directory-sync Feishu binding | No |
+| Knowledge sync | Yes, Feishu Wiki space → knowledge base; superuser only; imported documents are locally read-only | Yes, personal WeChat messages → knowledge base (knowledge collection) |
+| Agent chat | Yes, private bot chat; each user selects their own Agent | Yes, personal WeChat connection; one connection serves one published Agent |
+
+Both Agent-chat channels only **intake and deliver**: messages enter Clouisle's Agent execution, and models, tools, knowledge bases, memory, and quotas still follow the connected user's own authorization. The provider never owns the Agent loop or bypasses local access checks.
+
+## Delivery and troubleshooting
+
+Both Agent-chat channels share one outbound record, viewed under **Monitoring** > **Delivery log** (`/deliveries`). It records whether the provider accepted a reply request — not message history. "Sent" does not mean the recipient read the message or downloaded an artifact.
+
+- When a reply never arrives, filter the delivery log by Run ID to find that run, then check the original error.
+- [Feishu](./feishu.mdx) **Connected** only means the connection is up; it does not prove private-message permissions or event subscription.
+- [WeChat iLink](./wechat.mdx) needs no separately deployed receiving service; intake and delivery run in the platform backend. A disabled feature or an unprepared backend both look like "no new messages". Deployment and capacity requirements are covered in [Architecture](../../../self-host/architecture.mdx).
+
+## Related
+
+- [Notifications and external channels](../administration/notifications.mdx) — how in-app notifications differ from email/Webhook/Feishu delivery
+- [Site settings](../administration/site-settings.mdx) — where Integrations sits in site administration
+- [Roles and permissions](../../../reference/permissions.mdx) — the integration permission domains
+- [Messaging integration API](../../../api/integrations.mdx) — Feishu and WeChat configuration, callback, personal preference, and receipt endpoints
+- [Admin API](../../../api/admin.mdx) — delivery-record query parameters and fields
+- [Architecture](../../../self-host/architecture.mdx) — where messaging integrations sit in a deployment

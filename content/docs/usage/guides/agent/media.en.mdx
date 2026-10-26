@@ -4,10 +4,10 @@ description: Configure Agent file attachments, reference images, and image and v
 icon: Images
 ---
 
-Attachments give the Agent user assets; media generation lets the Agent call authorized image or video models. Both must be explicitly enabled in the Agent orchestration.
+Attachments give the Agent user-uploaded documents and images; media generation lets the Agent call authorized image or video models. Both must be explicitly enabled in the Agent orchestration.
 
 <Callout type="info">
-  Media generation covers **images and videos only** — no audio generation or speech synthesis. When a switch is on, the platform injects the `generate_image` / `generate_video` tool into the model; when it is off, the model never sees those tools.
+  Media generation covers **images and videos only** — no audio generation or speech synthesis. When a switch is on, the model can generate images and videos; when it is off, the model never sees those capabilities.
 </Callout>
 
 ## Configure Attachments
@@ -21,7 +21,7 @@ Enable attachments in the Agent's **Orchestration** > **Files & Images**. Defaul
 | Parsed content per file | `100,000` characters | `1,000-500,000` |
 | Truncation strategy | `end` (keep the beginning) | `end`, `start`, `middle` |
 
-Default extensions include PDF, Word, PowerPoint, Excel, TXT, Markdown, CSV, JSON, and HTML. Attachments are saved as Assets; the full text is not automatically injected into the conversation. The Agent calls the parsing capability on demand. Images go directly to the model only when the chat model supports vision.
+Default extensions include PDF, Word, PowerPoint, Excel, TXT, Markdown, CSV, JSON, and HTML. Attachments are saved as protected conversation files; the full text is not automatically injected into the conversation, and the Agent reads the parsed content on demand. Images go directly to the model only when the chat model supports vision.
 
 ## Configure Image Generation
 
@@ -35,16 +35,24 @@ Default extensions include PDF, Word, PowerPoint, Excel, TXT, Markdown, CSV, JSO
 1. Turn on **Video Generation** and select a video model.
 2. The default duration is `5` seconds and the default single-run maximum is `10` seconds; both range from `1-30` seconds.
 3. The default aspect ratio is `16:9`.
-4. The status polling interval defaults to `3000ms` (range `500-30000ms`) and the synchronous wait cap defaults to `120` seconds (range `5-600`). Once the synchronous cap is exceeded, the task may come back as still-processing rather than failed — retrieve it later via the status tool or `GET /api/v1/agents/{agent_id}/media/video-status`.
+4. The status polling interval defaults to `3000ms` (range `500-30000ms`) and the synchronous wait cap defaults to `120` seconds (range `5-600`). Once the synchronous cap is exceeded, the task may come back as still-processing rather than failed — ask the Agent to check that video task later to retrieve the final result.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/agent-media-capabilities.png" alt="Agent attachments and media capabilities" />
   <figcaption>Agent attachments and media capabilities</figcaption>
 </figure>
 
+## How Generated Media Is Stored and Served
+
+- After an image or video is generated, it is saved to site storage and linked to the **current conversation or this workflow run**; it remains visible in message history after you leave the conversation.
+- Generated results can only be downloaded by **people allowed to access that conversation or workflow run**. When you are signed out, lack permission, or the resource is missing, the UI says so explicitly and never falls back to a provider's public URL.
+- When the model later references the image or keeps editing it, it uses the platform-stored version rather than the provider's temporary link.
+- Files generated in a turn are summarized under the assistant message. **Hide Artifact List** only hides that list; it does not delete files or change download permissions.
+- When a preview cannot render, the reason is explicit: too large (default `20 MiB`), not signed in, no permission, unsupported type, or parse failure. Never copy unauthorized internal download URLs.
+
 ## Security and Failure Handling
 
 - Image/video models must be authorized for the team and enabled.
-- Reference images and generated artifacts are subject to Asset access control; do not copy unauthorized internal download URLs.
+- Reference images and generated artifacts are access-controlled per conversation/workflow; do not copy unauthorized internal download URLs.
 - Files that are too large, disallowed extensions, or insufficient vision capability return clear errors before sending or from the backend.
 - When a video provider task fails, check the tool results and provider errors in the Agent logs.

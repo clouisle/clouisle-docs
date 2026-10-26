@@ -19,6 +19,21 @@ Clouisle 提供面向平台管理员的运行可观测性 API，所有路由挂�
 
 非法窗口参数返回 `422`。
 
+## 控制台视图
+
+管理台**可观测性**页（`/dashboard/observability`）有六个视图，共用顶部时间范围：
+
+| 视图 | 内容 |
+| --- | --- |
+| 总览 | Agent 与工作流吞吐、成功率、延迟、Token 与近期趋势 |
+| 运行 | 可筛选的运行列表；点开进入单次运行详情 |
+| 依赖 | 模型、工具与检索聚合 |
+| 队列 | Worker 与队列快照 |
+| 基础设施 | API 实例、依赖健康与 PostgreSQL 慢查询 |
+| 告警 | 告警事件与规则 |
+
+时间范围按钮弹出**双月日历**：选择起止日期并应用后，两端都包含浏览器本地时区当天的完整范围（含夏令时切换）；取消或关闭弹层保持已应用区间。弹层底部的快捷范围为最近 15 分钟、1 小时、24 小时。自定义区间以 `period=custom` 加 ISO 8601 `start_time` / `end_time` 传递，后端按 UTC 处理；缺失、naive、相等或反向的区间，以及预设与显式边界同时出现，返回 `422`。URL 会保留所选区间，刷新、切换视图和运行翻页后仍生效。遥测保留 `30` 天，选择更早的区间不会恢复已过期样本。
+
 ## 运行汇总（Summary）
 
 端点：`GET /api/v1/admin/observability/summary`
@@ -46,14 +61,19 @@ Clouisle 提供面向平台管理员的运行可观测性 API，所有路由挂�
 - `{source}` 仅支持 `agent` 或 `workflow`，不支持 `all`；`run_id` 为 UUID。
 - 不存在的运行返回 `404`。权限在加载 trace 内容之前校验。
 
+按需载荷端点（读取权限，未采集或不存在时返回 `404`）：
+
+- `GET /api/v1/admin/observability/runs/{source}/{run_id}/tools/{tool_call_id}`：读取一条已记录的工具入参/结果对；只有 `agent` 运行记录工具载荷，其他来源返回 `404`。
+- `GET /api/v1/admin/observability/runs/{source}/{run_id}/trajectory/{entry_id}`：读取一条模型、工具或工作流节点快照。
+
 ## 依赖聚合（Dependencies）
 
 端点：`GET /api/v1/admin/observability/dependencies`
 
-接受与 `summary` 相同的时间窗口参数。返回模型、工具与检索三组聚合；仅在已记录的遥测支持时返回对应聚合。
+接受与 `summary` 相同的时间窗口参数。返回 `models`、`tools` 与 `retrieval` 三组聚合，每组包含请求数、完成数、失败数、成功率、`p50`/`p95` 延迟、Token 与样本数（模型组另含首 Token `p95`）。
 
-<Callout type="warn">
-工具与检索子 span 尚未采集，对应聚合标记为不可用（unavailable），不会推断数值。
+<Callout type="info">
+  AgentRun 的工具与检索 span 已采集并参与聚合。每个运行最多保留 `128` 个依赖 span，超出时运行详情把 trace 标记为不完整，因此聚合只反映已保留的样本；历史运行不回溯补齐。
 </Callout>
 
 ## 队列与基础设施快照（Queues & Infrastructure）
@@ -102,5 +122,5 @@ Span 上限：每个 Agent 运行最多保留 `128` 个依赖 span，超限时�
 ## 记录边界
 
 - 运行摘要保存在紧凑索引记录中，保留 `30` 天；无提交时间戳的历史运行不回填。
-- 仅记录白名单字段：时序、状态、模型名、Token 数、资源/团队标识符与错误代码；不保存提示词、消息正文、工具参数/结果、凭据与 traceback。
-- 新 Agent 记录包含模型聚合与安全的运行根 span；工具/检索子 span 及其聚合未采集，标记为不可用。
+- 运行摘要只写白名单字段：时序、状态、模型名、Token 数、资源/团队标识符与错误代码。工具入参与结果、模型与节点轨迹等诊断载荷按需单独存储并设大小上限（单条工具载荷最大 `256 KiB`，超限只标记未记录），可能包含用户消息、检索文档与工具输出——因此 `admin:dashboard:access` 等同于敏感运行内容的访问权限，而不只是聚合指标。
+- 新 Agent 记录包含模型聚合与安全的运行根 span；工具与检索子 span 已采集，每个运行最多保留 `128` 个依赖 span，超出时标记 trace 不完整，历史运行不回填。

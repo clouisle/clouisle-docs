@@ -1,152 +1,79 @@
 ---
 title: Code Sandbox
-description: Run Python and JavaScript code safely in isolated Bubblewrap namespaces
+description: Run Python and JavaScript code safely in an isolated environment
 icon: CodeXml
 ---
 
-The code sandbox is Clouisle's secure, isolated execution environment for running user-supplied Python and JavaScript code within workflows, agents, and tools. Sandbox tasks are submitted to a dedicated Celery worker (consuming only the `sandbox` queue, separate from the main worker's four queues), where each task runs inside its own Bubblewrap user + mount namespace and is constrained by timeouts, output limits, and disk checks.
+The code sandbox is Clouisle's isolated execution environment for running user-provided Python and JavaScript in workflows, Agents, and tools. Every job starts in its own runtime, mounts only that job's working directory, and is bounded by timeouts, output limits, and disk quotas.
 
-<Callout type="warn">
-The supplied sandbox-worker deployment runs as **root** (`user: "0"` / `runAsUser: 0`) with **`CAP_SYS_ADMIN`** added on top of the runtime default cap set and `seccomp=unconfined` — it is **not** a rootless container. Isolation comes from the **per-task** Bubblewrap user + mount namespace, not from de-privileging the worker itself; the escape consequences and hardening options are covered under "Hardening" below.
-</Callout>
+### How isolation works
 
-### Deep-Dive Bubblewrap Namespace & Mount Layout
+- **One isolated environment per job**: a job runs in a fresh isolated space and cannot see the host's other processes, files, or network configuration, nor reuse the previous job's temporary files.
+- **Read-only system directories**: the system runtime and dependency directories are mounted read-only, so jobs cannot modify system binaries, installed dependencies, or system configuration.
+- **Only the working directory is writable**: a job can write only to its own `/workspace` directory and temporary directory. Temporary files are removed with the job, and the whole working directory is cleaned up when the session expires.
+- **Processes end with the job**: when a job times out or is cancelled, every child process started inside the sandbox ends with it and leaves nothing running.
+- **Filtered runtime environment**: jobs receive a filtered process environment, not the platform's full environment.
 
-```text
-Agent/Workflow → API → Celery Queue (sandbox) → Sandbox Worker
-                                                      ↓
-                                             Bubblewrap process
-                                                      ↓
-                                  /workspace → current job/session directory
-```
+The sandbox never silently degrades to unsandboxed execution: if the isolated environment cannot start, the job fails instead of running in the host process.
 
-When filesystem isolation is enabled (`SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true`), the sandbox launcher wraps executions in a dedicated `bwrap` process configured with strict namespace isolation:
+### Supported runtimes
 
-```text
-bwrap \
-  --unshare-user --unshare-pid --unshare-ipc --unshare-uts \
-  --die-with-parent --hostname clouisle-sandbox \
-  --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib --ro-bind /etc /etc \
-  --dir /proc --dev /dev \
-  --bind <host_job_dir> /workspace \
-  --bind <host_job_dir>/tmp /tmp \
-  --chdir /workspace \
-  -- <command> <args...>
-```
-
-1. **Namespace & Process Confinement**:
-   - **Unshared Namespaces**: `--unshare-user`, `--unshare-pid`, `--unshare-ipc`, and `--unshare-uts` create an isolated environment with its own process tree (PID 1 mapping), IPC communication boundary, and isolated hostname (`clouisle-sandbox`).
-   - **Cascade Process Reaping**: `--die-with-parent` guarantees that all child processes inside the sandbox are instantly reaped if the supervising Celery worker exits or times out.
-2. **Read-Only System Roots & Workspace Mapping (`RUNTIME_READONLY_ROOTS`)**:
-   - **Read-Only System Roots**: `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and `/etc` are mounted as `--ro-bind`, ensuring code cannot modify system binaries, Python site-packages, or OS configuration.
-   - **Standard Workspace Mapping**: The host job directory is mapped directly to `/workspace`, with an isolated `/tmp` directory mounted at `/tmp` (`--bind <workspace>/tmp /tmp`).
-   - **Logical Path Auto-Rewriting**: `_logical_workspace_path` and `_map_workspace_value` automatically rewrite command arguments and environment paths so tasks only ever see `/workspace/...`.
-3. **Container Runtimes & CJK Font Support**:
-   - **Runtimes**: Pre-installed Python 3.13 (managed via `uv`) and Node.js 22.
-   - **CJK Fonts Included**: The `clouisle-sandbox-worker` image packages `fontconfig`, `fonts-wqy-zenhei`, and `fonts-wqy-microhei` with `fc-cache -fv`. Because `/usr/share/fonts` is exposed via read-only bind mount, sandbox scripts generating charts (`matplotlib`, `seaborn`, `Pillow`) render Chinese, Japanese, and Korean text flawlessly without missing-character boxes ("tofu").
-
-### Supported Runtimes
-
-| Runtime | Base Environment |
+| Runtime | Base environment |
 | --- | --- |
-| Python | Python 3.13 with standard library and configured packages |
-| JavaScript | Node.js 22 with core modules and configured packages |
+| Python | Python 3.13 with the standard library and dependencies configured by the job |
+| JavaScript | Node.js 22 with core modules and dependencies configured by the job |
 
-### Usage in the Platform
+The official sandbox image includes CJK fonts, so charts generated with `matplotlib`, `seaborn`, or `Pillow` render Chinese characters correctly instead of showing missing-glyph boxes.
 
-- **Code tool**: create reusable code utilities from **Admin Console** > **Capabilities** > **Code**. Tools can install exact-pinned packages and declare artifacts under `/workspace`; saved tools can be called by agents and workflows (see [Custom HTTP and Code Tools](../guides/tools/custom-tools.mdx)).
-- **Workflow code node**: embed code directly in workflow graphs. The code node receives input variables and returns results to downstream nodes (see [Workflow Nodes](../guides/workflow/nodes.mdx)).
-- **Agent-level execution**: agents invoke code tools via function calling; the LLM decides when to run code based on the task.
+### Use cases
 
-### Execution Limits
+- **Code tools**: create reusable code tools under **Capabilities** > **Code** in the admin console, install exact pinned dependency versions, declare artifacts under `/workspace`, and call the tool from Agents and workflows (see [Custom HTTP and code tools](../guides/tools/custom-tools.mdx)).
+- **Workflow code nodes**: embed code directly in a workflow graph, receive input variables, and pass results to downstream nodes (see [Workflow nodes](../guides/workflow/nodes.mdx)).
+- **Agent invocation**: an Agent triggers a code tool through a function call, letting the model decide when code should run.
 
-Limits come from `SandboxLimits`, and the effective value is whichever bound trips first:
+### Execution limits
+
+Every job is subject to the limits below; the effective value is whichever comes first between the job configuration and the caller's timeout:
 
 | Limit | Default | Allowed range | Notes |
 | --- | --- | --- | --- |
-| `timeout_seconds` | `30` | `1-600` | Per-task execution timeout in seconds; on expiry the process group is reaped with SIGTERM → SIGKILL |
-| `disk_mb` | `1024` | `0-102400` (also capped by `SANDBOX_MAX_DISK_MB`, default `8192`) | Workspace disk quota |
-| `max_stdout_kb` | `256` | `16-8192` | Stdout cap; excess is truncated with `...<truncated>` appended |
-| `max_stderr_kb` | `256` | `16-8192` | Stderr cap, same truncation |
+| Execution timeout | `30` seconds | `1-600` | The job and its child processes are reclaimed on timeout |
+| Disk quota | `1024MB` | Bounded by deployment | Space available to the working directory |
+| Standard output limit | `256KB` | `16-8192KB` | Excess is truncated and marked as truncated at the end |
+| Standard error limit | `256KB` | `16-8192KB` | Same as above |
 
-A second, independent timeout applies on the caller side: the direct execution endpoint `POST /api/v1/tools/execute-code` defaults `timeout` to `30` with a range of `1-60`, and Agent chat calls to a code tool are bounded by `STREAM_TOOL_TIMEOUT_CODE` (default `60` seconds). A saved tool's `limits.timeout_seconds` takes precedence over the caller-supplied value (the caller value only fills in when the config omits it). Whichever bound trips first decides the outcome: a sandbox-internal timeout fails the task as an execution timeout, while the outer bound surfaces as a tool-call timeout.
+The caller has its own timeout: direct code execution defaults to `30` seconds, and calling a code tool from an Agent chat has an outer limit of `60` seconds. A saved tool's timeout takes precedence over the value passed at call time, and whichever expires first wins: a timeout inside the sandbox reports "execution timed out", while the outer timeout reports "tool call timed out".
 
-Artifact paths must live under `/workspace`; artifacts default to `10MB` per file and `10MB` in total (`SANDBOX_ARTIFACT_MAX_FILE_SIZE_MB` / `SANDBOX_ARTIFACT_MAX_TOTAL_SIZE_MB`). See [Tools & Skills → Sandbox Boundaries](./tool.mdx) for the full limits.
+Artifacts must be written under `/workspace`; writes elsewhere are rejected. A single artifact defaults to `10MB` and total artifacts to `10MB`.
 
-### Security Model
+### Outbound network
 
-- The task payload executes inside a fresh Bubblewrap **user + mount namespace**, never in the worker's own namespaces.
-- The supplied deployments run the sandbox worker as **root with `CAP_SYS_ADMIN` added to the runtime default cap set**: the image's non-root user has empty effective capabilities, and a privileged worker can create user namespaces even on hosts that gate unprivileged user namespaces. The worker keeps `allowPrivilegeEscalation=false` and `seccomp=unconfined` (sandbox worker only).
-- Clusters that prohibit `seccomp=unconfined` must provide a Localhost seccomp profile allowing the required namespace/mount syscalls.
-- Only the current workspace and its temporary directory are writable inside the task namespace; the dependency cache and required runtime directories are read-only.
-- The child receives a filtered environment rather than the worker's full process environment.
-- Session workspaces are cleaned after TTL expiry.
+Sandbox egress is controlled by the sandbox egress allowlist under **Settings** > **Security**, a separate policy from the outbound network allowlist on the same page: allowlisting an internal host for tools does not open it to the sandbox.
 
-### Host Kernel Requirements [#kernel-requirements]
+- Accepts exact hostnames only, case-insensitively; wildcards, IP addresses, and ranges are rejected on save.
+- Defaults to `pypi.org`, `files.pythonhosted.org`, `pypi.python.org`, and `registry.npmjs.org`; up to `200` entries, duplicates removed.
+- An empty list blocks all outbound traffic. Jobs can reach allowlisted hosts only over HTTPS on port `443`; HTTP, other ports, and direct IP access are refused.
+- Custom Python package indexes and Node registries must use HTTPS, and their hostnames must be in the list.
+- Changes apply to the next job without a restart; running jobs keep the policy from their start time.
+- Turning the sandbox egress allowlist off affects **new jobs only**: new jobs can reach any target, protocol, and port; filesystem isolation, timeouts, disk, and output limits still apply, and the list is kept and restored when re-enabled.
 
-Bubblewrap creates a new user namespace with `unshare(CLONE_NEWUSER)`. The **supplied deployments** (Docker Compose, Helm, Kubernetes) run the worker as root with `CAP_SYS_ADMIN`, so user namespace creation is privileged and works even on hosts that restrict non-privileged user namespaces — no host sysctl changes are required.
+If the policy cannot be read, it is treated as an empty list, blocking all outbound traffic. Host or cluster network policy remains the outer safety net.
 
-Custom deployments that keep the worker **non-root** rely on the host kernel permitting unprivileged user namespaces; otherwise every sandbox job fails with:
+### Host and node requirements [#kernel-requirements]
 
-```text
-bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.
-```
+The sandbox relies on the host or node allowing isolated process spaces to be created. Supplied deployments run sandbox nodes with the required privileges, so node kernel settings usually need no changes. With a custom deployment, if the isolated environment cannot start, every job fails with a message that a namespace cannot be created. That is a node kernel or security configuration issue; see [Troubleshooting](../../self-host/operations/troubleshooting.mdx).
 
-Several common host distributions restrict this by default, and `seccomp=unconfined` does **not** help here because the restriction is enforced below the container seccomp profile:
+### Failures and troubleshooting
 
-| Distribution | Restriction | Fix |
-| --- | --- | --- |
-| Ubuntu 23.10+ | AppArmor blocks user namespaces for unprivileged processes (`kernel.apparmor_restrict_unprivileged_userns=1`) | `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` |
-| Debian / older kernels | User namespace cloning disabled (`kernel.unprivileged_userns_clone=0`) | `sysctl -w kernel.unprivileged_userns_clone=1` |
-
-Check the current state and verify that a user namespace can actually be created:
-
-```bash
-sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone 2>/dev/null
-unshare -U true && echo "user namespaces OK"
-```
-
-Make the change persistent:
-
-```bash
-echo 'kernel.apparmor_restrict_unprivileged_userns=0' > /etc/sysctl.d/99-clouisle-userns.conf
-sysctl --system
-```
-
-Notes:
-
-- The sysctl is a **host/node-level** setting. In Kubernetes it cannot be set per pod: apply it to every node (custom node image, `/etc/sysctl.d/` on self-managed nodes, or the equivalent node bootstrap for managed clusters).
-- Enabling unprivileged user namespaces is the standard prerequisite for rootless containers (Bubblewrap, Flatpak, Podman).
-
-### Hardening: Contain the Worker's `CAP_SYS_ADMIN` [#harden-cap-sys-admin]
-
-The sandbox task runs in a fresh Bubblewrap user + mount namespace, so it cannot directly reach the worker container's capabilities. If a task ever escapes Bubblewrap, however, it lands inside the worker container as root with `CAP_SYS_ADMIN`. On a default Docker daemon the container shares the host's initial user namespace, which makes that capability host-user-namespace-scoped and exposes well-known escape chains (cgroup `release_agent`, remounting `/proc` to write `kernel.core_pattern`, sysctl writes) in principle.
-
-- **Docker Compose**: enable daemon user namespace remapping (`"userns-remap": "default"` in `/etc/docker/daemon.json`) to place every container in a nested user namespace — `CAP_SYS_ADMIN` then only applies to the container's own user namespace and the host-escape chains no longer work. The sandbox worker still creates its Bubblewrap user namespace (privileged inside the remapped namespace), so sandbox functionality is unaffected. Existing named volumes need an ownership reset, and all containers on the daemon are remapped.
-- **Kubernetes**: daemon-level remapping does not apply; rely on NetworkPolicy for outbound sandbox traffic, keep Bubblewrap updated and monitor its CVEs, or use node-level user namespace support where the cluster provides it.
-
-### Runtime Switches and Degraded Behaviour
-
-The sandbox path is governed by `SANDBOX_RUNTIME_ENABLED` (default `true`). When `false`, the sandbox gateway is skipped and code runs in-process inside the API/worker without sandbox isolation — local debugging only. There is **no** `SANDBOX_LEGACY_FALLBACK_ENABLED` switch in the current configuration: a failed sandbox job or gateway error does not silently fall back to in-process execution.
-
-| Environment variable | Default | Effect |
-| --- | --- | --- |
-| `SANDBOX_RUNTIME_ENABLED` | `true` | Enables the sandbox runtime; when off, code runs in-process with no isolation |
-| `SANDBOX_FILESYSTEM_ISOLATION_ENABLED` | `true` (code default) | Wraps executable payloads in a Bubblewrap mount namespace |
-| `SANDBOX_FILESYSTEM_ISOLATION_BINARY` | `bwrap` in code; `/usr/bin/bwrap` in official deployments | Bubblewrap executable name or absolute path |
-
-<Callout type="warn">
-When filesystem isolation is enabled, a missing `bwrap`, a missing workspace root, or a task `cwd` escaping the workspace fails the job; the sandbox launcher never degrades to unisolated execution.
-</Callout>
-
-### Related Configuration
-
-Sandbox environment variables are listed in the [Environment Variables Reference](../../self-host/configuration/environment-variables.mdx). Enabling filesystem isolation requires `SANDBOX_FILESYSTEM_ISOLATION_ENABLED=true` with `SANDBOX_FILESYSTEM_ISOLATION_BINARY` pointing at the Bubblewrap executable (`/usr/bin/bwrap` by default in Compose/Helm). The sandbox-worker in Docker Compose and Helm defaults to the root + `CAP_SYS_ADMIN` + `seccomp=unconfined` security configuration; for bwrap user namespace errors during deployment, see [Troubleshooting](../../self-host/operations/troubleshooting.mdx).
-
----
+- **Execution timed out**: the job did not finish in time and output may be incomplete; reduce the input or raise the tool's timeout.
+- **Output truncated**: standard output or error exceeded its limit and a truncation marker appears at the end; write key information to artifact files when debugging.
+- **No artifact produced**: confirm the write path is inside `/workspace` and neither the single-file nor the total limit was exceeded.
+- **Cannot install dependencies**: the package host is not in the sandbox egress allowlist, or HTTP was used. Switch to HTTPS and ask an administrator to add the hostname.
+- **A job fails instead of degrading**: an unavailable isolated environment never falls back to unsandboxed execution. This is a deployment issue; check the sandbox node per [Troubleshooting](../../self-host/operations/troubleshooting.mdx).
 
 See also:
-- [Tools & Skills](./tool.mdx) — built-in tools and sandbox boundaries
-- [Custom HTTP and Code Tools](../guides/tools/custom-tools.mdx) — configuring the code tool
-- [Workflow Nodes](../guides/workflow/nodes.mdx) — code node integration
-- [Environment Variables Reference](../../self-host/configuration/environment-variables.mdx) — sandbox environment variables
+
+- [Tools and Skills](./tool.mdx) — built-in tools and sandbox boundaries
+- [Custom HTTP and code tools](../guides/tools/custom-tools.mdx) — configuring code tools
+- [Workflow nodes](../guides/workflow/nodes.mdx) — code node integration
+- [Self-hosted architecture](../../self-host/architecture.mdx) — sandbox nodes and deployment requirements

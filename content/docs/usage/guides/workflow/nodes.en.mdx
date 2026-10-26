@@ -1,79 +1,102 @@
 ---
 title: Workflow Nodes
-description: Configure the available nodes in Clouisle workflows by category
+description: Configure the nodes available in Clouisle workflows by category
 icon: Workflow
 ---
 
-The workflow editor registers the nodes below, grouped by the four palette categories. The exact input/output fields and configuration options for each node are determined by the editor configuration and the [node reference](/reference/workflow-nodes).
+The workflow editor registers the nodes below, organized into four categories in the node panel. Exact input/output fields and settings per node follow the editor and the [node reference](/en/reference/workflow-nodes).
 
 | Category | Nodes |
 | --- | --- |
-| Model | LLM, Media Generation |
-| Logic | Condition, Question Classifier, Decision, Iteration, Loop, Pause |
-| Transform | Code, Template, File to URL, Variable Aggregator, Variable Assignment, Parameter Extractor |
-| Extension | Sub-workflow, Agent, Tool, Knowledge Retrieval, Answer |
-| Entry and canvas helpers | Start (User Input / Trigger, chosen at creation), Note (a static annotation sticker that never executes) |
+| Model | LLM, media generation |
+| Logic | Conditional branch, question classifier, decision, iteration, loop, pause |
+| Transform | Code execution, template, file to URL, variable aggregation, variable assignment, parameter extraction |
+| Extension | Sub-workflow, Agent, tool, knowledge retrieval, answer |
+| Entry and canvas helpers | Start (user input / trigger, chosen at creation), note (static annotation, not executed) |
 
-**Types that are not in the palette**: `http_request` and `document_extractor` have executors but no node component, so they only appear in definitions submitted through the API; `iteration_exit` / `loop_exit` are end markers inside an Iteration/Loop container with no standalone executor and must not be connected as independent nodes.
+**Nodes not in the panel**: HTTP request and document extraction have execution logic but no canvas node and only appear in definitions submitted programmatically; the end markers inside iteration/loop containers are not standalone nodes and cannot be connected on their own.
 
-## Principles for Choosing Nodes
+## Choosing Nodes
 
-- Use **LLM** when chat model reasoning is needed; use **Decision** when you must pick one of several options or ordered levels and know how confident the model is; use **Agent** when you need to reuse complete Agent behavior.
-- Use **Knowledge Base Retrieval** when you need to answer based on a knowledge base, then map the results to an LLM or output.
-- Use **Tools** when you need to call existing HTTP/MCP/code capabilities; do not duplicate stored credentials in workflows.
-- Use **Iteration** to process each array item; use **Loop** to repeat until a condition is met.
-- Use **Sub-workflow** to isolate reusable flows, configuring input/output mappings and failure strategies.
+- Use **LLM** when a chat model must reason; use **Decision** when you must pick one of several options or ordered levels and also want probabilities and confidence; use **Agent** to reuse full Agent behavior.
+- Use **Knowledge retrieval** to answer from a knowledge base, then map results into an LLM or the output.
+- Use **Tool** to call existing HTTP/MCP/code capabilities; never re-store credentials in the workflow.
+- Use **Iteration** to process each array item; use **Loop** to repeat until a condition holds.
+- Use **Sub-workflow** to isolate a reusable flow, configuring input/output mappings and the failure policy.
 
 ## Decision Node
 
-The Decision node is the only node that returns **probabilities**: it hands a state to a decision model, which answers a single question and returns the probability distribution over options/levels plus a confidence; the node then takes the matching branch. Nothing is generated, so the route never has to be parsed out of model text and cannot drift because the model added a sentence. Full configuration steps and a worked example: [Orchestrate a Workflow → Decision Node](./orchestrate.mdx#decision-node).
+The decision node is the only node that **returns probabilities**: it hands a state to a decision model, which answers exactly one question with a probability distribution and confidence, and the node routes accordingly. It generates no text, so routes never need parsing model output and a chatty model cannot send the flow down the wrong branch. Full setup and examples are in [Orchestrate a workflow → Decision node](./orchestrate.mdx#decision-node).
 
-### How it differs from LLM and Question Classifier
+### Compared with LLM and question classifier
 
-| Dimension | LLM | Question Classifier | Decision |
+| Aspect | LLM | Question classifier | Decision |
 | --- | --- | --- | --- |
 | Underlying model | Chat model | Chat model | Decision model (non-generative) |
-| Output | Generated text | JSON requested in the prompt, with `category` parsed out by regex | Structured result: option/level + probability distribution + confidence |
-| Routing basis | Text content | The parsed category | The highest-probability option/level |
-| Branch handles | none | one per category | one per option/level, plus a fallback branch |
-| Uncertainty handling | none | only the `confidence` field the model happens to report | confidence threshold + fallback branch |
-| Typical use | Generation, summarization, rewriting | Intent routing | Disposition decisions, priority classification, binary gating |
+| Output | Generated text | JSON requested by the prompt, with the category parsed out | Structured result: option/level + probability distribution + confidence |
+| Branching basis | Text content | Parsed category | Highest-probability option/level |
+| Branch handles | None | One per category | One per option/level, plus a fallback |
+| Uncertainty handling | None | Only the model's self-reported confidence field | Confidence threshold + fallback branch |
+| Typical use | Generate, summarize, rewrite | Intent routing | Disposition decisions, priority assignment, binary go/no-go |
 
-Rule of thumb: when "which path" depends on natural-language meaning and you also need to know how sure the model is, use a Decision node; for pure text generation use LLM; when there is a small fixed set of categories and probabilities do not matter, the Question Classifier is lighter.
+Rule of thumb: if “which path” depends on natural-language semantics and you need to know how certain the model is, use the decision node; for pure text generation use LLM; for a fixed set of categories where probability does not matter, the question classifier is lighter.
 
-### The three question types
+### Three question types
 
-| Question type | UI Label | Option/level count | Branch handles | Confidence | Use when |
+| Question type | UI label | Options/levels | Branch handles | Confidence | When to use |
 | --- | --- | --- | --- | --- | --- |
-| `choice` | Choose an option | 1–255 unique options | one per option, plus the fallback branch | yes | Mutually exclusive dispositions (refund / technical / billing / other) |
-| `score` | Score against ordered levels | 2–10 **ordered** levels | one per level, plus the fallback branch | yes | Levels are inherently ordered (low/medium/high, P0–P3) and you also need a numeric score |
-| `noul` | Yes / No probability | fixed two | `yes`, `no`, plus the fallback branch | no | A single binary call: probability ≥ `0.5` routes `yes`, otherwise `no` |
+| Choose an option | Choose one option | 1–255 unique options | One per option, plus fallback | Yes | Mutually exclusive dispositions (refund / technical / billing / other) |
+| Score on an ordered scale | Score on an ordered scale | 2–10 **ordered** levels | One per level, plus fallback | Yes | The level is inherently ordered (low/medium/high, P0–P3) and you need a numeric score |
+| Yes / no judgment | Yes / no probability | Fixed two | **Yes**, **No**, plus fallback | No | A single binary decision: probability at least `0.5` goes **Yes**, otherwise **No** |
 
-`noul` returns no confidence, so the confidence threshold has no effect on it; switch to `choice` or `score` when you want "route to a human when unsure".
+“Yes / no judgment” returns no confidence, so the confidence threshold does not apply; use “Choose an option” or “Score on an ordered scale” when “hand off to a human if unsure” is required.
 
-### Branch handles, fallback, and threshold
+### Branch handles, fallback, and thresholds
 
-- The text of an option (`choice`) or level (`score`) is the name of that output handle on the canvas; the fallback handle is `default` unless you rename it in **Fallback branch**.
-- Editing option text remaps existing connections by position as long as the count is unchanged. Leftover connections after a count change are reported by the checklist as an outdated output handle and must be reconnected.
-- **Confidence threshold** (`0`–`1`, may be left empty) reroutes the flow to the fallback branch only when the returned confidence is **strictly below** it; a confidence equal to the threshold still takes the model's branch. The threshold affects routing only: `answer` is always the option/level the model picked, while `selected_handle` is the branch actually taken.
-- With no threshold set, only "no branch handle resolved" uses the fallback. A fallback branch with no downstream nodes ends the flow at this node.
-- A decision node is retried up to 2 times by default (1 second initial delay, exponential backoff with jitter).
+- The option or level text is the output handle name on the canvas; the fallback handle is `default` by default and can be renamed under **Fallback branch**.
+- When you change option text without changing the count, the editor remaps existing connections by position; leftover connections after changing the count are reported by the checklist as “stale output handles” and must be reconnected.
+- The **confidence threshold** (`0`–`1`, may be blank) reroutes the flow to the fallback only when confidence is **strictly below** it; equal to the threshold still follows the model's choice. The threshold affects routing only: the **judgment result** is always the model's chosen option/level, while the **actual branch** is the one taken.
+- Without a threshold, only an unparseable result goes to the fallback. A fallback branch with no downstream connection ends the flow at this node.
+- The decision node retries up to 2 times by default (exponential backoff starting at 1 second).
 
 ### Outputs and failures
 
-Output variables: `answer` (the selected option/level, or `yes`/`no`), `selected_handle` (the branch actually taken), `usage` (token usage), plus `choice` + `confidence` + `probabilities`, `score` + `confidence` + `probabilities`, or `noul` depending on the type.
+Outputs include the judgment result (the chosen option/level or yes/no), the actual branch, token usage, and — depending on the question type — confidence and the probability distribution.
 
-When it fails: missing configuration or invalid options fail as `validation_error` before the model is called; an answer whose type, option set, or probability set does not match the configuration fails as `decision_result_missing`; an unauthorized or disabled model, an endpoint blocked by the allowlist, a timeout (default `60` seconds), or exhausted quota surfaces as the corresponding provider error.
+On failure: missing configuration or invalid options fail validation before the run; a model answer, option set, or probability set that does not match the configuration reports a result mismatch; an unauthorized or disabled model, an address blocked by the allowlist, a timeout (default `60` seconds), or exhausted quota reports the corresponding provider error.
 
-### Debugging a decision branch
+### Debugging decision branches
 
-- The checklist checks each item: model not selected, empty state, empty instructions, too few or too many options/levels, empty or duplicate options, and connections using an outdated handle.
-- In the run trace, use `selected_handle` to see which branch ran, `confidence` to see whether the threshold rerouted it, and `probabilities` to decide between adjusting the threshold and rewriting the instructions.
-- A decision node is one call with one result and no intermediate steps, so there are no breakpoints or single-step debugging — you debug it by running the workflow.
+- The checklist reports, item by item: no model selected, empty input state, empty instructions, too few/too many options or levels, empty or duplicate options, and connections using stale handles.
+- In the run trace, check the actual branch (which path was taken), confidence (whether the threshold rerouted it), and the probability distribution (to decide between tuning the threshold and rewriting the instructions).
+- A decision node is one call, one result, with no intermediate steps and no breakpoints or single-stepping — debug by running the whole flow.
 
-## Node-level Failures
+## Tool Node
 
-Each executed node records inputs, outputs, model, Tokens, duration, retry count, error type, and error message. HTTP, code, MCP, and media nodes should configure an acceptable timeout; avoid unconditional repeated calls to side-effect interfaces that cannot be retried.
+The tool node executes built-in tools, custom HTTP/code/database tools, MCP tools, or Skills. Each argument has one mapping whose source is either an upstream variable or a constant.
+
+- **Declare the type of constants**: constants typed in the UI are text, and the mapping type decides the conversion before execution — integer, float, boolean, array, and object each parse accordingly. So `"10"` becomes a number only when declared as an integer. A failed conversion (not a number, invalid JSON) fails the node with an invalid-argument error instead of passing the wrong type to the tool.
+- **Choose the engine for web search**: selecting the built-in web search automatically adds an engine mapping and shows a dropdown; the default option uses the site default and the rest list only site-enabled engines. Execution revalidates, so a disabled engine fails immediately.
+- **Outputs**: the result, status (success / failure), duration (milliseconds), and any custom output variable names.
+- **Permissions**: private tools are available only to their creator; cross-team tools must be shared with the workflow's team, otherwise the node reports that the tool was not found.
+
+Full fields: [Workflow node reference](/en/reference/workflow-nodes#tool-node-tool).
+
+## Pause Node and Approvals
+
+The pause node puts the run into **waiting** until someone handles the request:
+
+- **Variable mode**: wait for members to fill in the declared fields; after submission those fields become the node output.
+- **Approval mode**: wait for an **Approve** / **Reject** decision and output the decision, whether it passed, the comment, and the submitter; a rejection fails the run as “approval rejected”.
+- **Approvers**: when a list is configured, only those team members may submit (super administrators can override); when empty, it falls back to the workflow creator plus team administrators.
+- **Approval policy**: by default one submission decides; with **Require all approvals** enabled, every approver must submit, the run resumes only when all approve, a single rejection fails immediately, and a duplicate submission by the same person is rejected.
+- **Description template**: supports `{{variables}}`, resolved before saving; unresolvable references become empty strings, so raw placeholders are never shown to approvers.
+
+The run page shows the node trace live in the run drawer (status, inputs/outputs, and duration per node), and pending pause requests are submitted in the same drawer. See the [Workflow API](/en/api/workflow) for approval endpoints.
+
+## Node-Level Failures
+
+Every run node records inputs, outputs, model, tokens, duration, retry count, error type, and error message. Set realistic timeouts on HTTP, code, MCP, and media nodes, and avoid unconditional retries against side-effecting endpoints that are not idempotent.
 
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/workflow-node-config-drawer.png" alt="Workflow node configuration drawer" />

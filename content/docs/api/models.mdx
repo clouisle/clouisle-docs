@@ -700,6 +700,11 @@ POST /api/v1/admin/models/discover
 | `6103` | Model quota exceeded | 团队模型配额已用尽 |
 | `3000` | Permission denied | 权限不足 |
 | `1001` | Validation failed | 请求数据无效 |
+| `1001` | `model_endpoint_not_allowlisted` | 模型端点 Origin 不在白名单中；在**站点设置 > 安全**添加后重试 |
+
+<Callout type="info" title="端点白名单开关">
+  白名单由 `model_endpoint_allowlist_enabled`（默认 `true`）总控，字段与默认值见[站点设置参考](/reference/site-settings)。模型发现接口不抛错，而是返回 `success: false` 和本地化 `message`；创建、更新、测试接口返回上面的 `1001` 校验错误。
+</Callout>
 
 <Callout type="info">
   当前未实现按端点的速率限制，这些端点没有速率限制中间件。

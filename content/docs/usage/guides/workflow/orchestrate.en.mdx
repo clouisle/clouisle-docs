@@ -1,798 +1,725 @@
 ---
 title: Orchestrate a Workflow
-description: Build a runnable, typed flow from the start node to the output node
+description: Build a runnable typed flow from the start node to the output node
 icon: Workflow
 ---
 
-The workflow editor uses a React Flow canvas. The node panel on the left adds nodes, the central canvas connects the flow, and the drawer on the right configures the selected node. Workflows support manual triggers, webhook triggers, and cron scheduling (requires additional deployment of a scheduler task).
+The workflow editor uses a visual canvas: the left node panel adds nodes, the central canvas connects the flow, and the right drawer configures the selected node. Workflows support manual, Webhook, and scheduled triggers.
 
-## Workflow Builder Interface
+## The Workflow Builder
 
 ### Layout
 
-The workflow editor consists of the following parts:
+- **Node panel (left)**: available node types by category
+  - **Model**: LLM, media generation
+  - **Logic**: condition, question classifier, decision, iteration, loop, pause
+  - **Transform**: code, template, file to URL, variable aggregation, variable assignment, parameter extraction
+  - **Extension**: sub-workflow, Agent, tool, knowledge retrieval, answer
+- **Canvas (center)**: the design area; add, connect, and arrange nodes
+- **Property panel (right)**: node settings and variables
+- **Toolbar (top)**: save, test (debug), zoom controls
 
-- **Nodes Panel (Left)**: Available node types, organized by category
-  - **Model**: LLM, Media Generation
-  - **Logic**: Condition, Question Classifier, Decision, Iteration, Loop, Pause
-  - **Transform**: Code, Template, File to URL, Variable Aggregator, Variable Assignment, Parameter Extractor
-  - **Extension**: Sub-workflow, Agent, Tool, Knowledge Retrieval, Answer
-- **Canvas (Center)**: Workflow design area; add, connect, and arrange nodes
-- **Properties Panel (Right)**: Node configuration, settings, and variables
-- **Toolbar (Top)**: Save workflow, test (debug) workflow, zoom controls
+### Steps to build a workflow
 
-### Building a Workflow — Step by Step
+1. **Add the start node**: every workflow begins with a start node (user input or trigger) that defines input parameters
+2. **Add processing nodes**: add nodes to process data; see node types below
+3. **Connect nodes**: click a source node's output port and drag to the target node's input port
+4. **Configure nodes**: set each node's options in the property panel
+5. **Add an answer node**: the answer node defines the workflow's final output; it is the builder's output node, not a separate runtime “end” node
+6. **Test the workflow**: click **Test** (debug), provide test data, run it, and inspect the result
+7. **Save and publish**: click **Save** to keep a draft, **Publish** to activate the workflow
 
-1. **Add a Start Node**: Every workflow begins with a start node (user input or trigger), which defines the input parameters
-2. **Add Processing Nodes**: Add nodes to process data; see Node Types below
-3. **Connect Nodes**: Click the output port of the source node, drag to the input port of the target node
-4. **Configure Nodes**: Configure each node's settings in the properties panel
-5. **Add an Answer Node**: Use the Answer node to define the final output returned by the workflow; it is the builder's output node, not a separate runtime terminal named `end`
-6. **Test the Workflow**: Click the **Test** (debug) button, enter test inputs, run, and review results
-7. **Save and Publish**: Click **Save** to store as a draft; click **Publish** to activate the workflow
+### Variables and data flow
 
-### Variables and Data Flow
+- **Input variables**: defined on the start node, collected from the user or trigger
+- **Node variables**: node outputs, referenced by later nodes
 
-**Variable Scope:**
-- **Input Variables**: Defined at the start node, collected from the user or trigger
-- **Node Variables**: Outputs from nodes, referenced in subsequent nodes
-- **System Variables**:
-  - `{{workflow.id}}` — Workflow ID
-  - `{{workflow.name}}` — Workflow name
-  - `{{run.id}}` — Current run ID
+Insert references with the variable picker in prompts and conditions — do not hand-write names that do not exist; the editor lists only currently available variables.
 
-**Variable Usage:**
-- In prompts: `Analyze this inquiry from {{customer_email}}: {{inquiry_text}}`
-- In conditions: `{{analysis.urgency}} == "high"`
+### Error handling
 
-### Error Handling
+The builder has no try-catch or retry UI. What happens after a node fails depends on the execution logic and workflow structure; errors are recorded in the run and node execution for inspection. HTTP requests retry up to 3 times by default, but the builder has no separate retry setting.
 
-There is no try-catch / retry UI in the builder. What happens after a node failure depends on the executor and workflow structure; the error is recorded on the run/node execution for inspection. The HTTP request executor retries up to 3 times by default, but the builder has no separate retry setting.
+### Workflow templates
 
-### Workflow Templates
+Built-in templates:
+- **Simple Q&A bot**: a basic Q&A bot using an LLM
+- **RAG knowledge bot**: knowledge base Q&A with retrieval augmentation
+- **Intent router**: routes the conversation by detected intent
+- **Code review assistant**: multi-perspective automated code review
 
-Built-in workflow templates:
-- **Simple Q&A Bot**: A basic question-answering bot using an LLM
-- **RAG Knowledge Bot**: Knowledge-base-powered Q&A with retrieval augmentation
-- **Intent Router**: Route conversations based on detected intent
-- **Code Review Assistant**: Automated code review with multiple perspectives
+A template instantiates into a new workflow; inspect and configure its models, knowledge bases, and other node references in the editor — do not assume the template's variable names are fixed.
 
-Templates are instantiated into new workflows. After instantiation, review and configure model, knowledge-base, and other node references in the editor; do not assume that template variable names are fixed API field names.
+### Keyboard shortcuts
 
-### Keyboard Shortcuts
+- `Space + Drag`: pan the canvas
+- `Ctrl/Cmd + Scroll`: zoom
+- `Ctrl/Cmd + 0`: reset zoom
 
-- `Space + Drag`: Pan canvas
-- `Ctrl/Cmd + Scroll`: Zoom
-- `Ctrl/Cmd + 0`: Reset zoom
+## Create and Save a Draft
 
-## Creating and Saving Drafts
+1. Go to **Apps** > **Create App** > **Workflow**.
+2. In **Workflow settings**, fill in the name, description, visibility, and owning team.
+3. Choose the start node: **User input** suits form interaction; **Trigger** suits API or Webhook calls.
+4. Drag nodes from the panel onto the canvas, or click **Add node**.
+5. Drag from a source handle to a target handle to connect. The start node cannot be deleted.
+6. Select **Save**. The editor tracks the last save time and unsaved changes.
 
-1. Navigate to **Apps** > **Create App** > **Workflow**.
-2. In **Workflow Settings**, fill in the name, description, visibility, and owning team.
-3. Choose a start node: **User Input** suits interactive forms; **Trigger** suits API or Webhook calls.
-4. Drag nodes from the node panel onto the canvas, or click **Add Node**.
-5. Drag from a source handle to a target handle to create a connection. The start node cannot be deleted.
-6. Select **Save**. The editor records the last saved time and unsaved state.
+## Define Variables
 
-## Defining Variables
+The start node uses workflow-level variables. Types include text, paragraph, dropdown, number, boolean, array, object, file, image, multiple files, and multiple images. Each variable can be required and can have a default, label, and description.
 
-Start nodes use workflow-level variables. Variable types include text, paragraph, dropdown options, number, boolean, array, object, file, image, multi-file, and multi-image. Each variable can set required, default value, label, and description.
-
-Use the editor selector when referencing variables; do not hand-write names that do not exist. The current definition format `schema_version: 2` supports native object and array passing.
+Use the editor's picker to reference variables rather than hand-writing names. The current definition format supports passing native objects and arrays.
 
 ## Node Types
 
-The editor provides the following node types, organized by category:
+The node panel is organized into four categories; the tables below list each node under the same categories:
 
-The palette organizes nodes into four categories; the tables below use the same grouping. Type identifiers are what you write in API definitions, so use the exact values from the tables.
+### Model nodes
 
-### Model Nodes
+| Node | Purpose |
+| --- | --- |
+| LLM | Call a language model for text generation and analysis |
+| Media generation | Generate images or videos with a compatible model |
 
-| Node | Type Identifier | Purpose |
-| --- | --- | --- |
-| LLM | `llm` | Call a language model for text generation and analysis |
-| Media Generation | `media_generation` | Generate media with a compatible model |
+### Logic nodes
 
-### Logic Nodes
+| Node | Purpose |
+| --- | --- |
+| User input | Entry point for manual runs (chosen when creating the workflow; not in the add-node menu) |
+| Trigger | Entry point for trigger runs (same as above) |
+| Conditional branch | Branch on an expression result |
+| Question classifier | Classify the input question with a chat model |
+| Decision | Make a typed judgment with a decision model and branch on the result |
+| Iteration | Iterate a list, running the child nodes in the container for each item |
+| Loop | Repeat a branch until a condition holds |
+| Pause | Wait for an approval or variable input |
 
-| Node | Type Identifier | Purpose |
-| --- | --- | --- |
-| User Input | `user_input` | Entry point for manually executed workflows (chosen when creating the workflow, not from the add-node menu) |
-| Trigger | `trigger` | Entry point for triggered workflows (same) |
-| Condition | `condition` | Branch based on expression result |
-| Question Classifier | `question_classifier` | Classify input text with a chat model |
-| Decision | `decision` | Ask a decision model one typed question (`choice`/`score`/`noul`) about a state and take the branch it returns |
-| Iteration | `iteration` | Iterate a list, running the container's child nodes once per item |
-| Loop | `loop` | Repeat a branch until a condition is met |
-| Pause | `pause` | Wait for approval or variable input |
+### Transform nodes
 
-### Transform Nodes
+| Node | Purpose |
+| --- | --- |
+| Code execution | Run custom Python or JavaScript |
+| Template | Render a template string |
+| File to URL | Turn a file into an accessible address |
+| Variable aggregation | Merge several variable values |
+| Variable assignment | Assign a value to a variable |
+| Parameter extraction | Extract structured parameters from text |
 
-| Node | Type Identifier | Purpose |
-| --- | --- | --- |
-| Code | `code` | Execute Python or JavaScript custom code |
-| Template | `template` | Render a template string |
-| File to URL | `file_to_url` | Convert a file asset to an accessible URL |
-| Variable Aggregator | `variable_aggregator` | Combine multiple variable values |
-| Variable Assignment | `variable_assignment` | Assign a value to a variable |
-| Parameter Extractor | `parameter_extractor` | Extract structured parameters from text |
+### Extension nodes
 
-### Extension Nodes
-
-| Node | Type Identifier | Purpose |
-| --- | --- | --- |
-| Sub-workflow | `sub_workflow` | Invoke another published workflow |
-| Agent | `agent` | Invoke a published Agent |
-| Tool | `tool` | Execute a configured tool |
-| Knowledge Retrieval | `knowledge_retrieval` | Retrieve content from a knowledge base |
-| Answer | `answer` | Define the workflow's final output |
+| Node | Purpose |
+| --- | --- |
+| Sub-workflow | Call another published workflow |
+| Agent | Call a published Agent |
+| Tool | Execute a configured tool |
+| Knowledge retrieval | Retrieve relevant content from a knowledge base |
+| Answer | Define the workflow's final output |
 
 <Callout type="info">
-  **Iteration**, **Loop**, and **Pause** cannot be nested inside another container: opening the add-node menu inside an Iteration or Loop leaves only Condition, Question Classifier, and Decision in the Logic category, plus `iteration_exit` / `loop_exit` as the container's own end marker. Those two markers have no standalone executor — they only delimit the container, so do not connect them as independent nodes.
+  **Iteration**, **loop**, and **pause** cannot be nested inside another container: inside an iteration/loop container, the logic category only offers condition, question classifier, and decision, and the container boundary is marked by end markers that cannot be connected on their own.
 
-  `http_request` and `document_extractor` have registered executors in the engine but no node component in the builder — they can only appear in definitions submitted through the API.
+  HTTP request and document extraction are available in the engine but have no node in the builder panel — they only appear in definitions submitted programmatically.
 </Callout>
 
 <Callout type="warn">
-  Not implemented: Transform, Parallel, Wait, Switch, Database, Email, Webhook (as a node), Log, Delay, Merge, Input, and Output node types. Variable handling is done via `variable_assignment` and `variable_aggregator`.
+  Not implemented: Transform, Parallel, Wait, Switch, Database, Email, Webhook (as a node), Log, Delay, Merge, Input, and Output node types. Variable handling uses the **variable assignment** and **variable aggregation** nodes.
 </Callout>
 
-## Configuring Nodes
+## Configure Nodes
 
-Configure node parameters by task:
+Configure each node for its task:
 
-### LLM Node
+### LLM node
 
-- **Model**: Select a configured model (e.g., GPT-4 Turbo, Claude, etc.)
-- **Prompt**: Use `{{variable}}` syntax to reference upstream variables
-- **Temperature**: Commonly configured as `0-2`; the available range depends on the selected model. Controls output randomness
-- **Max Tokens**: Limit the length of model output
-- **Top P**: Commonly configured as `0-1`; the available range depends on the selected model. Nucleus sampling parameter
-- **Output Variable**: Define the variable name to store model output
+- **Model**: choose a configured model (for example GPT-4 Turbo or Claude)
+- **Prompt**: reference upstream variables with `{{variable}}`
+- **Temperature**: usually `0-2`, with the usable range depending on the model; controls randomness
+- **Max tokens**: caps the output length
+- **Top P**: usually `0-1`, with the usable range depending on the model; nucleus sampling
+- **Output variables**: names for the stored model output
 
-**Output variables:** `response`, `reasoning`, `usage` (plus the configured output variable).
+**Outputs:** response text, reasoning, token usage, plus your configured output variables.
 
-### Media Generation Node
+### Media generation node
 
-- **Provider**: image | video
-- **Prompt**: `{{prompt}}`
-- **Width/Height**: (image)
-- **Duration/Aspect Ratio**: (video)
+- **Media type**: image or video
+- **Prompt**: supports upstream variables
+- **Width/height**: (image)
+- **Duration/aspect ratio**: (video)
 
-### Condition Node
+### Conditional branch node
 
-- **Condition Expression**: Use Jinja2 syntax, e.g., `{{analysis_result.urgency}} == "high"`
-- **True Branch**: Downstream node connected when condition is true
-- **False Branch**: Downstream node connected when condition is false
+- **Condition expression**: Jinja2 syntax, such as `{{analysis_result.urgency}} == "high"`
+- **True branch**: downstream nodes when the condition holds
+- **False branch**: downstream nodes when it does not
 
-### Question Classifier Node
+### Question classifier node
 
-Classify the user's input into one of several intents/categories and route accordingly. It puts the categories in a prompt for a **chat model** to answer as JSON, then parses `category` out of the text; use the **Decision** node below when you need probabilities, confidence, or a guarantee that the answer will not come back in the wrong shape.
+Classifies the input into one of several intents/categories and routes accordingly. It puts the categories in the prompt, has the **chat model** generate JSON, and parses the category from the text; when you need probabilities, confidence, and no format errors, use the **decision node** below instead.
 
-### Decision Node
+### Decision node
 
-A Decision node asks a **decision model** (non-generative) one typed question about a state and takes the branch that matches the answer. The model produces no prose — it returns a probability distribution plus a confidence, so the route never depends on parsing generated text and cannot drift because the model added an extra sentence.
+The decision node calls a **decision model** (non-generative) to make one typed judgment about a state, then follows the matching branch. The model produces no prose — only a probability distribution over options/levels plus confidence — so routes never parse model output and a chatty model cannot take the wrong branch.
 
 <Callout type="info">
-  Connect a decision model first: an administrator adds **TypeSafe AI** under **Integrations** > **Model Providers** (provider is fixed to `typesafe`, default endpoint `https://api.typesafe.ai/v1`) and authorizes that model for the team with type **Decision**. The **Decision Model** dropdown lists only the current team's enabled models of type `decision`; with none available it shows "No available models".
+  Connect a decision model first: an administrator adds **TypeSafe AI** under **Integrations** > **Model providers** (default address `https://api.typesafe.ai/v1`) and authorizes it for the current team as a **Decision** model. The node's **Decision model** dropdown lists only enabled decision-type models for the team; with none available it shows “No models available”.
 </Callout>
 
-| Setting | UI Label | Type | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `modelId` | Decision model | string | none (required) | An enabled decision model for the team; the checklist reports "Model not selected" when empty |
-| `stateTemplate` | State | template string | none (required) | What the model evaluates; supports `{{variables}}`. It is rendered to a string, so assemble objects or arrays into text with a Template or Variable Assignment node first |
-| `questionType` | Question type | `choice` \| `score` \| `noul` | `choice` | Determines branch handles and outputs, see below |
-| `instructions` | Instructions | string | none (required) | One sentence saying what to decide, e.g. "Decide whether this refund request should be approved automatically" |
-| `options` | Choice options / Ordered score levels | string array | `["yes", "no"]` | `choice` needs 1–255 unique options; `score` needs 2–10 **ordered** levels; empty or duplicate entries are rejected by the checklist |
-| `defaultHandle` | Fallback branch | string | `default` | Taken when confidence is below the threshold, or when no branch handle resolved |
-| `confidenceThreshold` | Confidence threshold | number `0`–`1` | unset (disabled) | Shown for choice/score only; a returned confidence **strictly below** it routes to the fallback branch |
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| Decision model | Model | None (required) | An enabled decision model for the team; without one the checklist reports “No model selected” |
+| Input state | Template string | None (required) | What the model evaluates, supporting `{{variables}}`. It renders to a string; to pass an object or array, build text first with template/variable-assignment nodes |
+| Question type | Choose one option / Score on an ordered scale / Yes-no judgment | Choose one option | Determines branch handles and available outputs, see below |
+| Instructions | String | None (required) | One sentence stating what to judge, for example “Decide whether this refund should be approved directly” |
+| Options / ordered levels | String list | `["yes", "no"]` | “Choose one option” needs 1–255 unique options; “Score on an ordered scale” needs 2–10 **ordered** levels; empty or duplicate values are rejected by the checklist |
+| Fallback branch | String | `default` | Where to go when confidence is below the threshold or no branch is parsed |
+| Confidence threshold | Number `0`–`1` | Unset (disabled) | Shown for choice/score types only; when confidence is **strictly below** it, the flow takes the fallback |
 
 The question type determines branch handles and outputs:
 
-| Question type | UI Label | Branch handles | Confidence | Use when |
-| --- | --- | --- | --- | --- |
-| `choice` | Choose an option | one handle per option, plus the fallback branch | yes | Picking one of several mutually exclusive dispositions (refund / technical / billing / other) |
-| `score` | Score against ordered levels | one handle per level, plus the fallback branch | yes | The levels are inherently ordered (low / medium / high, P0–P3) and you also want a numeric score |
-| `noul` | Yes / No probability | fixed `yes` and `no`, plus the fallback branch | no | A single binary call: probability ≥ `0.5` routes `yes`, otherwise `no`; no confidence is returned, so the threshold does not apply |
+| Question type | Branch handles | Confidence | When to use |
+| --- | --- | --- | --- |
+| Choose one option | One handle per option, plus a fallback | Yes | Pick one of several exclusive dispositions (refund / technical / billing / other) |
+| Score on an ordered scale | One handle per level, plus a fallback | Yes | The level is inherently ordered (low/medium/high, P0–P3) and you also need a numeric score |
+| Yes / no probability | Fixed **Yes**, **No**, plus a fallback | No | A single binary decision; probability at least `0.5` goes **Yes**, otherwise **No**; no confidence, so the threshold does not apply |
 
 **Branch handles and renaming**
 
-- Each option (choice) or level (score) is an output handle on the canvas, named after that option or level; the fallback handle is named by `defaultHandle` (`default` by default).
-- Editing option text remaps existing connections by position as long as the number of options is unchanged. If the count changed, the leftover connections point at an outdated output handle and the checklist reports `decisionBranchHandleInvalid` — reconnect them to a current handle.
-- You do not have to connect every branch, but any branch you do connect needs downstream nodes. A low-confidence answer is rerouted to the fallback branch, so if the fallback has no downstream nodes the flow ends at this node.
+- Each option or level of “Choose one option”/“Score on an ordered scale” is an output handle on the canvas, named after the option/level text; the fallback handle defaults to `default`.
+- When you change option text without changing the count, the editor remaps connections by position; if you change the count, leftover connections point at stale output handles, the checklist reports an error, and you must reconnect to current handles.
+- You do not have to connect every branch, but any connected branch needs a downstream node; low-confidence answers take the fallback, and a fallback without a downstream node ends the flow at this node.
 
-**Fallback branch and confidence threshold**
+**Fallback and confidence threshold**
 
-- The threshold only fires when confidence is **strictly below** it; a confidence exactly equal to the threshold still takes the model's branch.
-- The threshold affects routing only, not outputs: `answer` is always the option/level the model picked, while `selected_handle` is the branch actually taken.
-- Without a threshold, only "no branch handle resolved" uses the fallback. `noul` never uses the fallback because it always answers yes or no.
-- A decision node is retried up to 2 times by default (1 second initial delay, exponential backoff with jitter). Retries are independent of the threshold, which exists for answers that came back uncertain.
+- The threshold only applies when confidence is **strictly below** it; equal to the threshold still follows the model's choice.
+- The threshold affects routing only, not outputs: the judgment result is always the model's chosen option/level, and the actual branch is the one taken.
+- Without a threshold, only an unparseable result takes the fallback; “Yes / no judgment” never uses the fallback (it always returns yes or no).
+- The decision node retries up to 2 times by default (exponential backoff starting at 1 second); retries are unrelated to the threshold, which only handles “answered but unsure”.
 
-**Output variables**
+**Outputs**
 
-| Output | Type | Meaning |
-| --- | --- | --- |
-| `answer` | string | The selected option/level, or `yes`/`no` |
-| `selected_handle` | string | The branch handle actually taken (the fallback handle when the threshold rerouted it) |
-| `usage` | object | Token usage for this decision call |
-| `choice` / `score` / `noul` | type-specific | `choice` adds `choice`, `confidence`, `probabilities`; `score` adds `score`, `confidence`, `probabilities`; `noul` adds `noul` (the probability of yes) |
+| Output | Description |
+| --- | --- |
+| Judgment result | The chosen option/level, or yes/no |
+| Actual branch | The branch handle actually taken (the fallback handle when rerouted by the threshold) |
+| Token usage | Usage for this decision call |
+| Confidence / probability distribution | Choice and score types output confidence and per-option probabilities; yes/no outputs only the probability of yes |
 
-Downstream nodes can record the verdict with `{{decisionNodeId.answer}}`, or branch again on `{{decisionNodeId.confidence}}` / `{{decisionNodeId.probabilities}}` to add a human review layer.
+Downstream nodes can record the judgment result in a variable and use confidence or the probability distribution to decide whether to add a human review layer.
 
 **Failure paths**
 
-| Error | Trigger |
+| Symptom | Trigger |
 | --- | --- |
-| `validation_error` | No model, no state, or no instructions; question type is not `choice`/`score`/`noul`; option count out of range, empty, or duplicated |
-| `decision_result_missing` | The model's answer type, option set, or probability set does not match the node configuration (for example it returned an option you did not configure) |
-| Provider/model errors | The decision model is not authorized for the team, the model or authorization is disabled, the endpoint is blocked by the model-endpoint allowlist, the request times out (default `60` seconds), or auth/quota errors |
+| Validation error | No model selected; empty input state or instructions; invalid question type; option count out of range, empty, or duplicated |
+| Result mismatch | The returned answer type, option set, or probability set does not match the node configuration (for example, an option that is not configured) |
+| Provider/model error | The team has not authorized the decision model; the model or authorization is disabled; the address is blocked by the model endpoint allowlist; the request times out (default `60` seconds); authentication or quota errors |
 
-**Worked example: ticket triage**
+**Example: ticket triage**
 
 <Steps>
-  <Step>### Define the inputs</Step>
-  Add `ticket_text` (paragraph) and `customer_tier` (dropdown: `free`/`pro`/`enterprise`) to the start node.
+  <Step>### Define inputs</Step>
+  On the start node add `ticket_text` (paragraph) and `customer_tier` (dropdown: `free`/`pro`/`enterprise`).
   <Step>### Configure the decision node</Step>
-  Pick a team-authorized TypeSafe decision model as **Decision model**; set **State** to `{{start.ticket_text}}`; set **Question type** to **Choose an option**; write "Decide which queue this ticket belongs to" as **Instructions**; set **Choice options** to `refund`, `technical`, `billing`, `other`.
+  Pick an authorized TypeSafe AI decision model as the **Decision model**; set **Input state** to `{{start.ticket_text}}`; choose **Choose one option** as the **Question type**; write “Decide which handling team this ticket belongs to” as the **Instructions**; enter `refund`, `technical`, `billing`, and `other` as **Options**.
   <Step>### Set fallback and threshold</Step>
-  Set **Fallback branch** to `manual_review` and **Confidence threshold** to `0.6` — tickets the model is less than `0.6` sure about stop being auto-routed and go to a person.
-  <Step>### Connect the branches</Step>
-  Connect `refund` to a refund-approval sub-workflow, `technical` to a technical-support LLM node, `billing` to a billing template node, and `manual_review` to a **Pause** node (approval mode) for human handling. Leaving `other` unconnected ends the flow there.
+  Set **Fallback branch** to `manual_review` and **Confidence threshold** to `0.6` — tickets where the model is less than 60% confident are no longer auto-dispatched and go to a human.
+  <Step>### Connect branches</Step>
+  Connect `refund` to the refund approval sub-workflow, `technical` to a technical-support LLM node, `billing` to a billing template node, and `manual_review` to a **Pause** node (approval mode) for human handling. Leaving `other` unconnected ends the flow there.
   <Step>### Debug and calibrate</Step>
-  Debug-run with an ambiguous ticket text and confirm it lands on `manual_review`; inspect the node's `answer`, `confidence`, and `probabilities` in the run trace to decide whether `0.6` should move up or down.
+  Run a deliberately vague ticket and confirm it lands in `manual_review`; inspect the node's judgment result, confidence, and probability distribution in the run trace, then decide whether `0.6` should go up or down.
   <Step>### Pass the checklist</Step>
-  Confirm there is no "Model not selected" and no outdated decision output handle, then publish.
+  Confirm there is no “No model selected” and no “stale decision output handle”, then publish.
 </Steps>
 
-**Debugging a decision branch**
+**Debugging decision branches**
 
-- The checklist reports each problem separately: model not selected, state empty, instructions empty, too few or too many options/levels, empty or duplicate options, and connections using an outdated handle.
-- In the run trace, read `selected_handle` (which branch ran) and `confidence` (whether the threshold rerouted it). If it always falls to the fallback, check `probabilities`: two near-equal options mean adjusting the threshold, while a flat distribution means the instructions or state need rewriting.
-- A decision node is one call with one result and no intermediate steps: you can only debug it by running the whole workflow — there are no breakpoints or single-step execution.
+- The checklist reports, item by item: no model selected, empty input state, empty instructions, too few/too many options or levels, empty or duplicate options, and connections using stale handles.
+- In the run trace, check the actual branch (which path was taken) and confidence (whether the threshold rerouted it). If it always lands on the fallback, look at the probability distribution: close probabilities mean tune the threshold, while a clear but wrong choice means rewrite the instructions or input state.
+- A decision node is one call, one result with no intermediate steps: debug by running the whole flow; there are no breakpoints or single-stepping.
 
-### Iteration / Loop Node
+### Iteration/loop nodes
 
-- **Collection**: `{{items}}`
-- **Item Variable**: item
-- **Output Variable**: results
+- **Collection**: the array variable to iterate
+- **Item variable**: the name for the current item
+- **Output variable**: the name for the result array
 
-### Pause Node
+### Pause node
 
-Pause execution until a team member supplies requested variables or submits an approval decision. A pause can be configured in **Variables** mode or **Approval** mode; a waiting run resumes after the request is handled.
+Pauses execution until team members provide the requested variables or submit an approval decision. A pause can be **Variable** or **Approval** mode; a waiting run resumes after the request is handled.
 
-- **Mode**: variables | approval
-- **Title**: Review request
-- **Input Variables**: List of variables to collect or approve
+- **Mode**: **Variables** (collect form fields) or **Approval** (wait for approve/reject), default **Variables**
+- **Title**: name shown on the approval or form page; blank uses the node name
+- **Description template**: supports `{{variables}}`, resolved before saving; unresolvable references become empty strings, so raw placeholders are never shown to approvers
+- **Input variables** (variable mode): fields to collect, each with name, type, required flag, and description
+- **Approvers** (approval mode): choose team members. If none are chosen, the workflow creator and team administrators handle it; once chosen, only listed members can submit, and super administrators can override
+- **Approval policy**: off by default — one submission decides; with **Require all approvals** on, every approver must submit, the run resumes only when all approve, a single rejection fails immediately, and a duplicate submission by the same person is rejected
 
-### Code Node
+Variable mode outputs the submitted fields themselves; approval mode outputs the decision (approved/rejected), whether it passed, the comment, and the submitter, and a rejection fails the run as “approval rejected”. Pending requests and the run trace appear in the run drawer; see [Workflow nodes](./nodes.mdx#pause-node-and-approvals).
+
+### Code execution node
 
 - **Language**: Python or JavaScript
-- **Code**: Custom execution logic
-- **Timeout**: The code executor currently fixes this at `30` seconds; it is not a freely configurable `1-300` second range in the builder
-- **Input Variables**: Variables passed to the code
-- **Output Variables**: Variables returned by the code execution
+- **Code**: your execution logic
+- **Timeout**: currently fixed at `30` seconds; not a freely configurable `1-300` second range in the builder
+- **Input variables**: variables passed to the code
+- **Output variables**: variables returned by the code
 
-### Template Node
+### Template node
 
-Render a template string with variables (e.g., Jinja-like `{{variable}}` substitution).
+Renders a template string with variables (for example `{{variable}}` substitution).
 
-### File to URL Node
+### File to URL node
 
-Convert a file (e.g., a sandbox artifact) into a downloadable URL.
+Turns a file (such as a sandbox artifact) into a downloadable site address.
 
-### Variable Assignment Node
+### Variable assignment node
 
-Assign a value to a variable.
+Assigns a value to a variable.
 
-### Variable Aggregator Node
+### Variable aggregation node
 
-Aggregate values (e.g., collect loop iteration results into an array).
+Aggregates values (for example, collecting loop results into an array).
 
-### Parameter Extractor Node
+### Parameter extraction node
 
-Extract structured parameters from text using LLM, regex, or JSON path.
+Extracts structured parameters from text using a model, a regular expression, or a JSON path.
 
-- **Extraction Method**: llm | regex | json_path
-- **Source Variable**: `{{source}}`
-- **Parameters**: [...]
+- **Extraction method**: Model / Regex / JSON path
+- **Source variable**: the text to extract from
+- **Parameters**: the list of fields to extract
 
-### HTTP Request Node
+### HTTP request node
 
-- **Method**: GET / POST / PUT / PATCH / DELETE
-- **URL**: Target endpoint address
-- **Headers**: Custom HTTP headers
-- **Body**: JSON-formatted request payload
-- **Timeout**: Default `30` seconds; no verified `1-300` second code-execution timeout range is exposed
-- **Output Variable**: Store the response data
-
-<Callout type="warn">
-  The HTTP request executor retries up to 3 times by default; the builder has no separate retry setting.
+<Callout type="info">
+  The canvas panel does not offer an HTTP request node; only definitions submitted programmatically can use this type. For visual orchestration, use a **Tool** node with a created HTTP API tool instead.
 </Callout>
 
-### Tool Node
-
-- **Tool**: Select a configured tool
-- **Parameter Mapping**: Map upstream variables to tool parameters
-- **Output Variable**: Store the tool execution result
-
-**Built-in tools available:** `web_search`, `fetch_webpage`, `calculate`, `unit_convert`, `get_weather`, `get_current_time`, `format_datetime`, `markitdown`, plus sandbox tools (`bash`, `read`, `edit`, `write`, `artifact`).
-
-### Knowledge Retrieval Node
-
-- **Knowledge Base**: Select the target knowledge base
-- **Query Template**: Use `{{variable}}` to reference query content
-- **Top K**: Default `5`; the exact upper bound depends on the endpoint and configuration, so this guide does not present a fixed `1-100` range
-- **Score Threshold**: Default `0.0`. Minimum similarity score
-- **Search Mode**: hybrid
-
-### Sub-workflow Node
-
-Run another workflow as a sub-step and capture its output.
-
-### Agent Node
-
-Invoke an AI agent with a message and optional context.
-
-### Answer Node
-
-Return a final answer/output from the workflow.
+- **Method**: GET / POST / PUT / PATCH / DELETE
+- **URL**: the target endpoint
+- **Headers**: custom HTTP headers
+- **Body**: JSON payload
+- **Timeout**: default `30` seconds
+- **Output variables**: the stored response data
 
 <Callout type="warn">
-  When configuring nodes, ensure all input variables have a clear source (upstream node output or start node variable). The pre-publish checklist reports unconnected inputs as issues; resolve them before debugging and publishing.
+  HTTP requests retry up to 3 times by default; the builder has no separate retry setting.
+</Callout>
+
+### Tool node
+
+- **Tool**: choose a configured tool (built-in / custom / MCP / Skill)
+- **Argument mapping**: one mapping per argument, sourced from an upstream variable or a constant; constants must declare a type, otherwise `"10"` reaches the tool as a string
+- **Type conversion**: integer, float, boolean, array, and object each parse accordingly; invalid values fail the node with an invalid-argument error
+- **Web search engine**: selecting the built-in web search adds an engine dropdown; the default uses the site default and the rest list only enabled engines; execution revalidates, so a disabled engine fails
+- **Output variables**: the tool result, plus status and duration
+
+**Available built-in tools:** time and date, math, unit conversion, web search, web page fetching, RSS/Atom feeds, document conversion, and sandbox file tools. Image and video generation use the **Media generation** node; interactive questions come from an Agent capability switch — none of these appear in the tool catalog.
+
+### Knowledge retrieval node
+
+- **Knowledge base**: choose the target knowledge base
+- **Query template**: reference the query with `{{variable}}`
+- **Result count**: default `5`; the exact upper bound depends on the API and configuration
+- **Similarity threshold**: default `0.0`, the minimum similarity score
+- **Retrieval mode**: Vector / Full-text / Hybrid
+
+### Sub-workflow node
+
+Runs another workflow as a nested step and captures its output.
+
+### Agent node
+
+Calls an AI Agent with a message and optional context.
+
+### Answer node
+
+Returns the workflow's final answer/output.
+
+<Callout type="warn">
+  When configuring nodes, make sure every input variable has an explicit source (an upstream node output or a start-node variable). Unconnected inputs are reported by the pre-publish checklist; resolve them before debugging and publishing.
 </Callout>
 
 ## Trigger Configuration
 
 Workflows support three trigger types:
 
-### Manual Trigger
+### Manual trigger
 
-No additional configuration required. Once published, users with permissions can trigger the workflow via the UI or API.
+No extra configuration. Once published, users with permission can trigger the workflow from the UI.
 
-### Webhook Trigger
+### Webhook trigger
 
-After setting the trigger type to **Webhook**, the system automatically generates a webhook token. The trigger endpoint is:
-
-```
-POST /api/v1/workflows/webhook/{webhook_token}
-```
-
-Request requirements:
-- **Authentication**: Provide a valid `clou_` API key in the `Authorization` header
-- **Body**: Workflow input variables (raw JSON or `{"inputs": {...}}` format)
-- **Webhook token**: Matched using constant-time comparison to prevent timing attacks
+Setting the trigger type to **Webhook** generates a trigger address and trigger token. Give the address to the caller; the caller sends a POST with a `clou_` API key in the request header and the workflow input variables as the body (raw JSON or `{"inputs": {...}}`).
 
 <Callout type="warn">
-  Not implemented / Roadmap: `wh_...`/`whsec_...` credential pairs, IP allowlists, per-webhook rate limits, retry policies, and webhook request logs are currently unavailable.
+  Not implemented / roadmap: `wh_...`/`whsec_...` credential pairs, IP allowlists, per-Webhook rate limits, retry policies, and Webhook request logs are currently unavailable.
 </Callout>
 
-### Cron Trigger
+### Scheduled trigger
 
-After setting the trigger type to **Cron**, the schedule expression is stored in `trigger_config` (e.g., `0 9 * * 1-5` for weekdays at 9 AM). The UI's frequency presets are converted into the same expression; custom mode takes `minute hour day month weekday` directly.
+Setting the trigger type to **Scheduled task** lets the UI configure an interval, daily, weekly, monthly, or custom expression. The schedule is converted to a standard expression (`minute hour day month weekday`, for example `0 9 * * 1-5` for 9:00 on weekdays).
 
 <Callout type="error">
-  Saving a Cron trigger **does not** make a workflow run on its own: the `workflow.check_scheduled` task implements the cron evaluation logic, but it is neither in the shipped Celery Beat schedule (`backend/app/core/celery.py`) nor in the Celery app's `include` module list, so no supplied deployment ever schedules it. To enable scheduled triggers, an operator must do all three of these in a **custom deployment**:
-
-  1. Register the task — add `app.services.workflow.tasks` to the `celery_app` `include` list, or import the module when the worker starts.
-  2. Add it to the Beat schedule, once a minute is the intended cadence, e.g. `{"workflow-check-scheduled": {"task": "workflow.check_scheduled", "schedule": crontab(minute="*")}}`.
-  3. Align the key name: the scheduling task reads `trigger_config["cron"]`, while the **Workflow Settings** schedule form writes `trigger_config["cron_expression"]`. An expression saved through the UI has to be renamed to `cron` to match, or write the expression under the `cron` key through the API directly.
-
-  The task only selects published workflows with `trigger_type=cron`, uses `croniter` to test whether the current minute matches the expression, and fires a run with **empty inputs** `{}` attributed to the **workflow creator**. No route pattern matches it, so it lands on the `default` queue unless you set `options.queue` on the Beat entry.
+  Saving a scheduled trigger alone does **not** make the workflow run: the bundled deployment does not schedule workflows by default. For scheduled execution, ask whoever maintains the deployment to enable the scheduler and align the expression the UI saves; otherwise trigger the workflow manually or via Webhook. See [Triggers](./triggers.mdx).
 </Callout>
 
-## Draft and Publication
+## Drafts and Publishing
 
-Workflows have three statuses:
+A workflow has three states:
 
 ### Draft
 
-- Workflow is being edited
+- Being edited
 - **Cannot be triggered**
 - Visible only to editors
 - Can be saved at any time
 
 ### Published
 
-- Workflow is operational
-- **Can be triggered via UI, API, or webhook**
-- Visible to all users with permissions
-- Must be unpublished before modification
+- Runnable
+- **Can be triggered from the UI, API, or a Webhook**
+- Visible to every user with permission
+- Must be unpublished before editing
 
 ### Archived
 
-- Workflow is retired
-- Not visible in normal lists
-- Configuration preserved
+- A disabled workflow
+- Hidden from normal lists
+- Configuration is retained
 
 <Callout type="info">
-  There is no active/inactive status. Archiving is a model-level status (`archived`) applied via updates; publish/unpublish are the admin lifecycle actions.
+  There is no active/inactive state. Archived is a separate state applied via an update; publishing and unpublishing are administrator lifecycle actions.
 </Callout>
 
-## Pre-publish Checks
+## Pre-Publish Checklist
 
-Select **Checklist** and resolve the following issues before debugging and publishing:
+Open the **checklist** and resolve these issues before debugging, running, and publishing:
 
-| Check Item | Description |
+| Check | Description |
 | --- | --- |
-| Unselected Model | LLM node has no model configured |
-| Input Variable Without Source | Node input is not connected to an upstream variable |
-| Node Without Input | Required node lacks input connection |
-| Output Undefined | Answer node has no output variable configured |
-| Incomplete Condition Branch | Condition node missing True or False branch |
-| Incomplete Decision Configuration | Decision node has no model, an empty state or instructions, or an invalid number/uniqueness of options or levels |
-| Outdated Decision Branch Handle | A Decision node connection points at an option/level handle that no longer exists and must be reconnected |
-| Missing Required Tool Parameter | Tool node lacks required parameter mapping |
-| Incomplete Loop Container | Loop node not properly configured |
+| No model selected | An LLM node has no model |
+| Input variable has no source | A node input is not connected to an upstream variable |
+| Node has no input | A required node is missing an input connection |
+| Output undefined | The answer node has no output variable |
+| Incomplete conditional | A condition node is missing its True or False branch |
+| Incomplete decision config | The decision node has no model, an empty input state or instructions, or an invalid option/level count or uniqueness |
+| Stale decision handles | A decision connection points at an option/level handle that no longer exists; reconnect it |
+| Missing required tool arguments | A tool node lacks a mapping for a required argument |
+| Incomplete loop container | A loop node is misconfigured |
 
-After validation passes, use **Debug Run** to test the workflow, confirm the output matches expectations, then publish.
+Once validation passes, use **Debug run** to test the workflow and confirm the output before publishing.
 
-## Running a Workflow
+## Run a Workflow
 
-### Accessing Workflows
+### Open a workflow
 
-1. Navigate to **Apps** (`/app/apps`).
+1. Go to **Apps** (`/app/apps`).
 2. Open the **Workflow** tab.
 3. Select a workflow card to open `/app/apps/workflow/{id}`.
-4. Choose **Run** to start a manual execution.
+4. Select **Run** to start a manual execution.
 
-### Workflow List
+### Workflow list
 
 The list shows:
 
 | Column | Description |
 | --- | --- |
 | **Name** | Workflow name |
-| **Team** | Team that owns the workflow |
-| **Status** | Draft or Published |
-| **Last Run** | Last execution time; a run may be waiting at a pause node |
-| **Actions** | Run, View, Edit |
+| **Team** | Owning team |
+| **Status** | Draft or published |
+| **Last run** | Last execution time; a run may be waiting at a pause node |
+| **Actions** | Run, view, edit |
 
-### Manual Execution
-
-**Steps:**
+### Manual execution
 
 1. Open the workflow
-2. Click the **Run** button
+2. Click **Run**
 3. If the workflow has input variables:
    - Fill in required inputs
    - Review optional inputs
    - Click **Start**
-4. Watch the execution in real-time
-5. View the results when complete
+4. Watch execution in real time
+5. Inspect the result when it finishes
 
-### Input Variables
+### Input variables
 
-Workflows may require inputs:
+A workflow may need:
 
-- **Text**: Free-form text input
-- **Number**: Numeric values
-- **Select**: Dropdown options
-- **Boolean**: Yes/No checkbox
+- **Text**: free-form text
+- **Number**: numeric input
+- **Dropdown**: selectable options
+- **Boolean**: yes/no checkbox
 
-### Watching Execution
+### Watching execution
 
-**Real-time progress:**
-- ⏸️ **Pending**: Not started yet
-- ⏳ **Running**: Currently executing
-- ⏳ **Waiting**: Paused for an external input or approval
-- ✅ **Success**: Completed successfully
-- ❌ **Failed**: Execution failed
-- ⏭️ **Skipped**: Skipped (conditional)
+**Live progress:**
+- ⏸️ **Pending**: not started
+- ⏳ **Running**: executing
+- ⏳ **Waiting**: paused for external input or approval
+- ✅ **Succeeded**: completed successfully
+- ❌ **Failed**: execution failed
+- ⏭️ **Skipped**: skipped (conditional)
 
-**Execution Details:**
-Click on a node to see details including status, duration, input, and output.
+**Execution details:**
+Click a node to see its status, duration, inputs, and outputs.
 
-**Streaming Output:**
-LLM nodes stream their output in real-time; the execution view shows partial content while running.
+**Streaming output:**
+LLM nodes stream in real time; the execution view shows partial content while running.
 
-### Execution Results
+### Execution results
 
-**Success:** Shows execution duration, nodes executed, and status.
+**Success:** shows duration, number of nodes executed, and status.
 
-**Failed:** Shows the failed node and error message.
+**Failure:** shows the failing node and error message.
 
-**Common Errors:**
+**Common errors:**
 - Invalid input format
-- API call failed
-- Timeout exceeded
+- API call failure
+- Timeout
 - Resource not found
 - Permission denied
 
-### Stopping Execution
+### Stopping execution
 
-**During execution:**
-1. Click the **Stop Execution** button
-2. Confirm the stop action
+1. Click **Stop execution**
+2. Confirm
 3. The workflow stops at the current node
 
-### Workflow Variables
+### Workflow variables
 
-**Input Variables:** Provided when starting the workflow.
+**Input variables:** provided when starting the workflow.
 
-**Output Variables:** Generated during execution by the Answer node and other node outputs.
+**Output variables:** produced during execution by the answer node and other nodes.
 
-## Viewing Execution History
+## Viewing Run History
 
-### Execution History
+### Execution history
 
 1. Select a workflow
-2. Click the **Execution History** tab
-3. View the run list:
-   - Run ID
-   - Status (`running`, `success`, `failed`, etc.)
-   - Start time
-   - Duration
-   - Trigger source
-   - Input/Output
+2. Open the **Execution history** tab
+3. Review runs: run number, status, start time, duration, trigger source, inputs and outputs
 
-Related API endpoints:
-- `GET /api/v1/workflows/runs` - Get all run records
-- `GET /api/v1/workflows/{workflow_id}/runs` - Get runs for a specific workflow
-- `GET /api/v1/workflows/{workflow_id}/runs/mine` - Get current user's runs
+### Execution details
 
-### Execution Details
+Click a run to see:
 
-Click an individual run to view detailed information:
+- **Run info**: run number, workflow name, status, start and finish time, duration, trigger type
+- **Node timeline**: start time, finish time, and duration per node
+- **Node details**: inputs, outputs, status, and errors per node
+- **Live events**: node status updates and LLM output while running
 
-- **Run Information**: Run ID, workflow name, status, start time, completion time, duration, trigger method
-- **Node Execution Timeline**: Start time, completion time, and duration for each node
-- **Node-level Details**: `GET /runs/{run_id}/nodes` for per-node execution details
-- **Streamed Events**: `GET /runs/{run_id}/stream` for real-time node execution events
+### Workflow logs
 
-### Workflow Logs
+Run history is also available from the workflow **Logs** view (`/app/apps/workflow/{id}/logs`). Open **Apps** > **Workflow**, select the workflow, and choose **Logs** from the workflow menu.
 
-Workflow execution history is available from the workflow's **Logs** view at `/app/apps/workflow/{id}/logs`. Open **Apps** → **Workflow**, select the workflow, then choose **Logs** from its workflow menu.
-
-**Run Details Fields:**
+**Run detail fields:**
 
 | Field | Description |
 | --- | --- |
-| **Status** | The Logs UI displays Completed (API `success`), Failed, Running, Pending, Cancelled, or Timeout. Raw API `waiting` runs currently fall back to the Pending badge in both the list and run-detail drawer; Cancelled and Timeout have dedicated badges but no filter controls. |
-| **Started** | Execution start time |
+| **Status** | The log UI shows completed, failed, running, pending, cancelled, or timed out |
+| **Start time** | When execution started |
 | **Duration** | Total execution time |
-| **Triggered By** | User or Webhook |
-| **Input** | Input variables provided |
-| **Output** | Execution results |
-| **Nodes Executed** | Number of nodes run |
+| **Triggered by** | A user or a Webhook |
+| **Inputs** | Provided input variables |
+| **Outputs** | Execution results |
+| **Nodes executed** | Number of nodes run |
 | **Error** | Error message (if failed) |
 
-**Status Icons:**
+**Status badges:**
 
-| Badge | Logs Label | API Status | Description |
-| --- | --- | --- | --- |
-| ✅ | **Completed** | `success` | Successfully finished |
-| ❌ | **Failed** | `failed` | Execution failed |
-| ⏳ | **Running** | `running` | Currently executing |
-| ⏳ | **Pending** | `pending` | Queued before execution |
-| ⏳ | **Pending** | `waiting` | This raw status currently has no dedicated Logs badge or filter and falls back to Pending. |
-| ⏹️ | **Cancelled** | `cancelled` | Stopped or cancelled; no dedicated filter control is currently available. |
-| ⏱️ | **Timeout** | `timeout` | Exceeded the execution timeout; no dedicated filter control is currently available. |
+| Badge | Log label | Description |
+| --- | --- | --- |
+| ✅ | **Completed** | Completed successfully |
+| ❌ | **Failed** | Execution failed |
+| ⏳ | **Running** | Executing |
+| ⏳ | **Pending** | Queued before execution, or waiting at a pause node |
+| ⏹️ | **Cancelled** | Stopped or cancelled; no dedicated filter yet |
+| ⏱️ | **Timed out** | Exceeded the execution timeout; no dedicated filter yet |
 
-### Viewing Node Execution Details
+### Viewing node execution details
 
-View the node-by-node execution:
+1. Open the run's **node execution**
+2. Each node shows its status, duration, inputs, outputs, and error (if any)
 
-1. Open the run's **node executions**
-2. Each node shows its status, duration, input, output, and error (if any)
+### Live streaming
 
-### Streaming
+A running workflow streams events in real time, including node status changes and LLM text output, so the UI shows progress as it happens.
 
-Runs stream events in real-time (`GET /api/v1/workflows/runs/{run_id}/stream`), including node status updates and LLM token output.
-
-### Filtering History
+### Filtering history
 
 | Filter | Options |
 | --- | --- |
-| **Status** | All Status, Completed, Failed, Running, Pending |
-| **Date Range** | All Time, Last 7 Days, Last 30 Days, Last 90 Days |
-| **Run ID** | Exact run UUID |
+| **Status** | All, completed, failed, running, pending |
+| **Date range** | All time, last 7 days, last 30 days, last 90 days |
+| **Run number** | Exact match |
 
-### Execution Statistics
+### Execution statistics
 
 **Summary metrics (per workflow or system-wide):**
 
-- Total Runs
-- Success Rate
-- Failed Runs
-- Avg Duration
-
-### Deleting History
-
-**Delete Single Execution:**
-
-1. Find the execution in the history
-2. Click the **"..."** menu
-3. Select **"Delete"**
-4. Confirm deletion
-5. The execution is removed
+- Total runs
+- Success rate
+- Failed runs
+- Average duration
 
 <Callout type="warn">
-  Deleted executions cannot be recovered. Bulk deletion is not implemented, and there is no automatic retention/cleanup policy setting.
+  Not implemented / roadmap: a live execution dashboard (running/queued runs, success rate, average execution time, cost) is unavailable; run statistics are shown in the workflow detail's stats view.
 </Callout>
 
+### Deleting history
+
+1. Find the run in history
+2. Open the **"..."** menu
+3. Select **"Delete"**
+4. Confirm
+5. The run is removed
+
 <Callout type="warn">
-  Not implemented / Roadmap: Real-time execution dashboard (running/queued executions, success rate, average execution time, cost) is currently unavailable. Run statistics are available via `GET /api/v1/workflows/runs/stats` (team-filterable) and `GET /api/v1/workflows/{workflow_id}/stats` (+ `/stats/trends`).
+  Deleted runs cannot be recovered. Bulk deletion is not implemented, and there are no automatic retention/cleanup settings.
 </Callout>
 
 ## Webhook Management
 
-### Creating or Regenerating a Webhook Token
+### Create or regenerate the trigger token
 
 1. Edit the workflow
-2. Set trigger type to **Webhook**
-3. Save — a `webhook_token` is generated automatically
-4. Regenerate anytime via `POST /api/v1/workflows/{workflow_id}/regenerate-webhook-token`
+2. Set the trigger type to **Webhook**
+3. Save — a trigger token and address are generated automatically
+4. Regenerate the token from the **Access API** page; the old address stops working immediately
 
 ### Testing a Webhook
 
-Use curl to test the webhook:
+Copy the trigger address from the **Access API** page, send a POST with any HTTP client, include a `clou_` API key in the request header, and put the workflow input fields directly in the body. A successful trigger appears in the run history.
 
-```bash
-curl -X POST "https://your-domain.com/api/v1/workflows/webhook/TOKEN" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customer_email": "test@example.com",
-    "inquiry_text": "Test inquiry",
-    "priority": "low"
-  }'
-```
-
-### Webhook Logs
+### Webhook logs
 
 <Callout type="warn">
-  Not implemented / Roadmap: There is no separate webhook request log view. Triggered runs appear in the workflow run history (`GET /api/v1/workflows/runs`).
-</Callout>
-
-## API Endpoints
-
-The Workflow API supports programmatic management of the workflow lifecycle:
-
-| Operation | Endpoint | Description |
-| --- | --- | --- |
-| List Workflows | `GET /api/v1/workflows` | Get workflow list |
-| Create Workflow | `POST /api/v1/workflows` | Create a new workflow |
-| Get Workflow | `GET /api/v1/workflows/{id}` | Get workflow details |
-| Update Workflow | `PUT /api/v1/workflows/{id}` | Update workflow configuration |
-| Delete Workflow | `DELETE /api/v1/workflows/{id}` | Delete a workflow |
-| Publish Workflow | `POST /api/v1/workflows/{id}/publish` | Publish a workflow |
-| Unpublish | `POST /api/v1/workflows/{id}/unpublish` | Unpublish a workflow |
-| Run Workflow | `POST /api/v1/workflows/{id}/run` | Trigger workflow execution |
-| List Runs | `GET /api/v1/workflows/runs` | Get run history |
-| Get Run Details | `GET /api/v1/workflows/runs/{run_id}` | Get single run details |
-| Node Execution Details | `GET /api/v1/workflows/runs/{run_id}/nodes` | Get per-node execution info |
-| Streamed Events | `GET /api/v1/workflows/runs/{run_id}/stream` | Real-time node event stream |
-| Run Statistics | `GET /api/v1/workflows/runs/stats` | Team-level run statistics |
-| Workflow Statistics | `GET /api/v1/workflows/{id}/stats` | Single workflow statistics |
-| Trend Statistics | `GET /api/v1/workflows/{id}/stats/trends` | Execution trend data |
-| Regenerate Token | `POST /api/v1/workflows/{id}/regenerate-webhook-token` | Regenerate webhook token |
-
-<Callout type="info">
-  Admin endpoints are under `/api/v1/admin/workflows` and require `admin:app:*` permissions. Administrators can manage all workflows across teams.
+  Not implemented / roadmap: there is no separate Webhook request log view. Triggered runs appear in the workflow run history.
 </Callout>
 
 ## Troubleshooting
 
-### Workflow Execution Failed
+### Workflow execution fails
 
-1. Open the failed run in **Execution History**
-2. Check node execution details and error messages
+1. Open the failed run in **Execution history**
+2. Check node execution details and the error message
 3. Common errors:
-   - **Node Timeout**: Increase timeout or optimize the node
-   - **Invalid Input**: Validate input variable format
-   - **API Error**: Check API credentials and connectivity
-   - **LLM Error**: Verify model availability and API key
-   - **Tool Error**: Check tool configuration
-4. Re-trigger using `POST /api/v1/workflows/{workflow_id}/run`
+   - **Node timeout**: increase the timeout or optimize the node
+   - **Invalid input**: validate the input variable format
+   - **API error**: check API credentials and connectivity
+   - **LLM error**: verify model availability and the API key
+   - **Tool error**: check the tool configuration
+4. Trigger the run again after fixing the issue
 
-### Webhook Not Triggering
+### Webhook does not trigger
 
-1. Confirm the workflow trigger type is `webhook`
-2. Confirm POST to the correct `/api/v1/workflows/webhook/{webhook_token}` endpoint
-3. Confirm the `Authorization` header contains a valid `clou_` API key
-4. Confirm the workflow is published (unpublished workflows reject webhook triggers)
+1. Confirm the trigger type is **Webhook**
+2. Confirm you use the current trigger address shown on the **Access API** page
+3. Confirm the request header carries a valid `clou_` API key
+4. Confirm the workflow is published (unpublished workflows reject Webhook triggers)
 
-### Schedule Not Running
+### Scheduled task does not run
 
-1. Confirm the workflow is `published` and `trigger_type` is `cron`
-2. Confirm `trigger_config` holds a valid cron expression (the scheduling task reads the `cron` key)
-3. Confirm the custom deployment added `app.services.workflow.tasks` to the Celery `include` list and dispatches `workflow.check_scheduled` from Beat (once a minute, for example)
-4. Confirm the worker running that task consumes the queue it actually lands on (`default`)
+1. Confirm the workflow is published and the trigger type is **Scheduled task**
+2. Confirm a valid expression is saved
+3. Ask whoever maintains the deployment to confirm the scheduler is enabled and align the expression the UI saves with the deployment documentation
 
-### High Execution Time
+### Execution takes too long
 
-1. Optimize nodes: Reduce LLM `max_tokens`, use faster models, optimize tool calls
-2. Shorten the serial chain: the plan is layered by topology, but **nodes inside a layer still run one after another** and the canvas has no parallel node; fold repeated work into an Iteration node and shrink its input instead
-3. Add timeouts: Set reasonable node timeouts and handle gracefully
-4. Monitor performance: Review run duration statistics in run history
+1. Optimize nodes: lower the LLM max tokens, use a faster model, improve tool calls
+2. Shorten the serial chain: independent nodes on the same level still run one by one, and the canvas has no parallel node; fold repeatable work into an iteration node and shrink its input
+3. Set node timeouts: choose sensible timeouts and handle failures
+4. Monitor performance: review duration statistics in the run history
 
-### Workflow Won't Start
+### Workflow will not start
 
-1. Check if the workflow is published
-2. Verify you have permission to run
-3. Ensure all required inputs are provided
-4. Refresh the page and try again
+1. Check whether the workflow is published
+2. Confirm you have execution permission
+3. Make sure all required inputs are provided
+4. Refresh the page and retry
 
-### Execution Stuck
+### Execution is stuck
 
-1. Check if a node is waiting for an external response
-2. Verify API endpoints are accessible
+1. Check whether a node is waiting for an external response or an approval
+2. Confirm the external endpoint is reachable
 3. Stop and restart the execution
 4. Contact the administrator
 
-### Cannot View History
+### Cannot view history
 
 1. Refresh the page
-2. Check if you have permission
-3. Verify the workflow has been executed
-4. Check the date-range filter
+2. Check your permissions
+3. Confirm the workflow has run
+4. Check the date range filter
 5. Contact the administrator
 
-### Missing Executions
+### Runs are missing
 
-1. Check filters (may be hiding results)
-2. Verify the date range
-3. Check if executions were deleted
+1. Check the filters (they may hide results)
+2. Confirm the date range
+3. Check whether the run was deleted
 
-### Cannot Start a New Run
+### Cannot start a new run
 
-1. Check that you have permission to run the workflow
-2. Verify the workflow is published
+1. Confirm you have permission to execute the workflow
+2. Confirm the workflow is published
 3. Start a new execution from the workflow page
 
 ## Best Practices
 
-### Workflow Design
+### Workflow design
 
-- Keep workflows simple and focused; avoid excessive complexity
-- Use descriptive node names, include an action verb, be specific
-- Add error handling logic
-- Test thoroughly before activation
-- Document workflow purpose
-- Use variables for reusability; avoid hardcoding values
+- Keep workflows simple and focused
+- Use descriptive node names with action verbs
+- Add error handling
+- Test thoroughly before activating
+- Document the workflow's purpose
+- Use variables for reuse instead of hard-coded values
 - Add logging for debugging
-- Set appropriate timeouts
+- Set sensible timeouts
 
-### Performance Optimization
+### Performance
 
-- Reduce serial steps: there is no parallel node, and independent nodes in the same layer still run one after another; merging nodes beats splitting them and hoping they overlap
-- Keep iteration size down: an Iteration node that exceeds its cap truncates its input, so filter out items you do not need first
+- Reduce serial steps: there is no parallel node, and independent nodes on the same level run one by one; merging nodes beats splitting and “waiting for parallelism”
+- Control iteration size: an iteration node truncates input beyond its limit, so filter out unneeded items first
 - Cache repeated operations
 - Optimize LLM prompts
-- Use appropriate models for the task
-- Set reasonable timeouts
-- Monitor execution times
+- Choose suitable models
+- Set sensible timeouts
+- Monitor execution time
 - Optimize tool calls
 
-### Inputs and Monitoring
+### Inputs and monitoring
 
 **Inputs:**
 - Provide all required inputs
-- Use correct data types
+- Use the correct data types
 - Test with sample data first
 
 **Monitoring:**
-- Watch the execution progress
+- Watch execution progress
 - Check node outputs
-- Stop if behavior is unexpected
+- Stop when behavior looks wrong
 
-**Error Handling:**
+**Error handling:**
 - Read error messages carefully
 - Check input values
 - Review node configuration
-- Try again with corrected inputs
+- Retry with corrected inputs
 
 ### Security
 
-- Use webhook authentication (API key in Authorization header)
-- Regenerate webhook tokens when compromised
-- Enable audit logging
-- Monitor for suspicious activity
+- Webhook triggers require an API key; see the [Workflow API](../../../api/workflow.mdx)
+- Regenerate the trigger token if it leaks
+- Enable audit logs
+- Monitor unusual activity
 
 <Callout type="warn">
-  Not implemented / Roadmap: Webhook IP allowlists and rate limits are currently unavailable.
+  Not implemented / roadmap: Webhook IP allowlists and rate limits are currently unavailable.
 </Callout>
 
-## Exiting and Lost Changes
+## Leaving with Unsaved Changes
 
-Before returning to the app list or closing the page, the editor shows a confirmation dialog when there are unsaved changes. Select **Leave Without Saving** to discard the current draft changes.
+If there are unsaved changes, the editor shows a confirmation dialog before you return to the app list or close the page. Choosing **Leave without saving** discards the current draft changes.

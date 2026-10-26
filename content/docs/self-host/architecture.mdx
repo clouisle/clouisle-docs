@@ -13,7 +13,7 @@ Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 
 | `frontend` | clouisle-frontend | Next.js standalone server | `3000` |
 | `api` | clouisle-backend | FastAPI API | `8000` |
 | `worker` | clouisle-backend | Celery `default`、`agent`、`knowledge`、`workflow` 队列 | 无 |
-| `sandbox-worker` | clouisle-sandbox-worker | Celery `sandbox` 队列与产物上传 | 无 |
+| `sandbox-worker` | clouisle-sandbox-worker | Celery `sandbox` 与专属队列、产物上传 | 无 |
 | `beat` | clouisle-backend | Celery Beat 调度器，必须单副本 | 无 |
 | `db` | PostgreSQL 17 + pg_search | 业务、全文检索和审计数据 | `5432` |
 | `redis` | Redis 7 | 队列、缓存、会话 | `6379` |
@@ -29,17 +29,35 @@ Clouisle 使用 3 个镜像运行 5 个应用服务。`clouisle-backend` 提供 
 | `agent` | `worker` | `app.tasks.agent` | AgentRun 执行（模型调用与工具循环） |
 | `knowledge` | `worker` | `app.tasks.knowledge_base` | 文档解析、分块、嵌入与索引 |
 | `workflow` | `worker` | `app.tasks.workflow` | 工作流运行 |
-| `sandbox` | `sandbox-worker` | `app.tasks.sandbox`、`tasks.cleanup_expired_sandbox_sessions` | 代码沙箱执行与过期沙箱会话清理 |
+| `sandbox` + 每 Worker 的 `sandbox.worker.<hash>` | `sandbox-worker` | `app.tasks.sandbox`、`tasks.cleanup_expired_sandbox_sessions` | 代码沙箱执行与会话清理；交互式会话任务只进该会话所属 Worker 的专属队列 |
 
-官方 Compose、Helm 和单文件 manifest 的 `worker` 命令为 `python main.py worker -c 4 -Q default,agent,knowledge,workflow`，即一个服务同时消费 4 个队列；`sandbox-worker` 命令为 `python main.py sandbox-worker -c <SANDBOX_WORKER_CONCURRENCY>`，只消费 `sandbox`。
+官方 Compose、Helm 和单文件 manifest 的 `worker` 命令为 `python main.py worker -c 4 -Q default,agent,knowledge,workflow`，即一个服务同时消费 4 个队列；`sandbox-worker` 命令为 `python main.py sandbox-worker -c <SANDBOX_WORKER_CONCURRENCY>`，只消费 `sandbox` 与它自己的 `sandbox.worker.<hash>` 专属队列。
 
 Beat 投递的周期性任务：`sweep-lost-agent-runs` 每 2 分钟一次到 `default` 队列（回收 worker 崩溃后仍处于运行中的 AgentRun，是 `INTERRUPTED` 状态的唯一来源），`cleanup-expired-sandbox-sessions` 每 15 分钟一次到 `sandbox` 队列。`agent` 队列任务不配置重试：模型调用和工具执行有副作用，重试会重复执行。
 
 扩展规则：
 
 - `docker compose up -d --scale worker=4` 或 `kubectl scale deployment worker` 会同时扩展全部 4 个队列。需要按队列独立扩展时，运行额外的 Worker 容器并只订阅一个队列，例如 `-Q agent` 单独扩容 AgentRun 执行。
-- `sandbox` 队列独立成服务，扩容 `sandbox-worker` 不会影响知识库与工作流处理。
+- `sandbox` 队列独立成服务，增加 Sandbox Worker 不会影响知识库与工作流处理；但每个实例必须使用自己的节点本地磁盘，不能共享同一个卷。
 - `beat` 始终单副本，见[服务拓扑](#服务拓扑)。
+
+## 消息集成与投递
+
+飞书与微信 iLink 是同一套 `Integration` 模型的两种实现，没有独立服务，也没有按渠道划分的投递表。
+
+- **统一投递队列**：所有出站消息与产物都写入 `integration_deliveries`（`provider_type` 为 `feishu`/`wechat`），状态为 `pending`、`sending`、`sent`、`error`、`unavailable`、`unknown`。管理端 **Delivery Log**（`/deliveries`）读取 `GET /api/v1/admin/deliveries`，不返回消息正文、渠道资源键和凭据。
+- **集成调度由 Beat 对账**：Beat 使用 `IntegrationScheduler`，每 2 秒从 PostgreSQL 读取 `Integration` 的启用能力，只注册已启用的周期任务——微信绑定轮询（3 秒，`default`）、微信 Agent 绑定恢复（3 秒，`agent`）、微信知识回执恢复（60 秒，`knowledge`）、飞书 Agent 通道恢复（10 秒，`agent`）、飞书知识同步派发（60 秒，`knowledge`）。因此启停能力不需要重启 Beat，但**升级后必须重启 Beat 一次**，旧的 Beat 进程仍在跑旧调度器。
+- **微信轮询在普通 Worker**：`default` 队列每 3 秒派发一次。批次槽位（`WECHAT_POLL_MAX_BATCHES`，默认 `8`）和认领记录存在 PostgreSQL，每批最多 `WECHAT_POLL_BATCH_SIZE`（默认 `64`）个绑定、并发 `WECHAT_POLL_CONCURRENCY`（默认 `16`），30 秒截止，认领 90 秒后可由其他 Worker 接管。它只是普通 Celery 任务，没有独立接收进程。
+- **飞书长连接的归属**：`connection_mode=long_connection` 时，只有消费 `agent` 队列的 Worker 会在父进程里托管一个接收器子进程；多个 Worker 靠 Redis 租约（15 秒 TTL、2 秒对账）选出一个持有者，其余保持空闲，不会重复收消息。HTTP 回调模式仍然可用。
+- **Worker 不接触上传卷**：`worker` 与 `sandbox-worker` 设 `UPLOAD_STORAGE_MODE=remote`，用 `API_INTERNAL_BASE_URL` 和 `INTERNAL_API_TOKEN`（K8s 通过 `INTERNAL_API_TOKEN_FILE` 读取）访问 API 的认证文件网关。上传目录只挂在 `api` 上；改用对象存储后连这条挂载也不再需要。
+
+## 沙箱会话与检查点
+
+代码执行由独立的 `sandbox-worker` 承担，它对会话有强亲和性：
+
+- 每个 Sandbox Worker 在保留磁盘上生成 `worker_id` 与 `storage_id`（`.worker-identity.json`），会话的每次执行、检查点保存与过期清理都投递到该 Worker 专属队列 `sandbox.worker.<sha256(worker_id)>`。
+- 每轮执行结束由 Worker 写检查点；进程重启或会话被重置时从检查点恢复，单个会话默认只允许恢复一次（`SANDBOX_SESSION_MAX_RESETS=1`）。心跳 5 秒、20 秒过期，失联 30 秒后开始恢复。
+- 因此工作区与检查点必须放在该 Worker 的持久磁盘上：Compose 用命名卷 `sandbox_data`，Kubernetes 用节点本地 `hostPath`。它们不是共享存储，**节点或磁盘丢失后其中的会话无法在别的节点恢复**。
 
 ## 请求路由
 
@@ -59,7 +77,9 @@ Beat 投递的周期性任务：`sweep-lost-agent-runs` 每 2 分钟一次到 `d
 
 ## 持久化数据
 
-Compose 默认卷：`postgres_data`、`redis_data`、`qdrant_data` 和 `uploads_data`。多 API 副本使用本地上传存储时需要 `ReadWriteMany`；只有 `ReadWriteOnce` 时保持一个 API 副本，Worker 和 Sandbox Worker 仍可独立扩展。
+Compose 默认卷：`postgres_data`、`redis_data`、`qdrant_data`、`uploads_data` 和 `sandbox_data`。`api` 独占 `uploads_data`；多 API 副本使用本地上传存储时需要 `ReadWriteMany`，只有 `ReadWriteOnce` 时保持一个 API 副本。Worker 与 Sandbox Worker 不挂该卷，仍可独立扩展。`sandbox_data` 只由单个 `sandbox-worker` 挂载，不能共享给多个副本。
+
+站点设置（**站点设置** > **存储**）可把上传后端切换为对象存储（`object_storage_*`），此时上传不再依赖共享卷，可跨节点部署多副本。
 
 ## 内部地址
 

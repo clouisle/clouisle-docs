@@ -31,6 +31,40 @@ docker compose logs -f worker
 
 任务进了队列但没人消费，说明消费该队列的 Worker 命令/部署不对。最典型的是 `worker` 的 `-Q` 少了 `agent`：持久化 AgentRun 全部堆在 `agent` 队列，会话一直停在运行中且不报错。队列与任务的完整对应关系见[部署架构 → Celery 队列划分](../architecture.mdx#celery-队列划分)。
 
+## 消息投递失败或消息未收到 [#delivery-failures]
+
+先查管理端 **Delivery Log**（`/deliveries`，接口 `GET /api/v1/admin/deliveries`），而不是只看 Agent 日志：
+
+- **没有记录**：上游没产生投递。确认 AgentRun 已结束、该集成能力（Agent 会话）已启用、个人设置没有暂停新消息或排队。
+- **`status=error`**：`error` 与 `error_detail` 给出渠道返回的原因，常见是凭据过期、机器人未被拉进会话、收件人未绑定，或产物超过上限（图片 `10 MiB`、MP4 与其他文件 `30 MiB`）。
+- **`status=pending` 长时间不动**：没有 Worker 在消费该渠道任务。检查 `worker` 是否在跑、`-Q` 是否包含 `agent`（飞书）与 `default`（微信轮询）。
+- **`status=sending` 卡住**：渠道请求超时或网络不通，查看 `worker` 日志中的渠道错误。
+- **`status=unavailable`**：集成被关闭或不在当前团队，重新启用能力后再试。
+
+投递表是单表 `integration_deliveries`。从旧版本升级后如果这里为空且日志报关系不存在，说明迁移没跑完或 Worker 与 API 不同版本，按[升级指南](./upgrade.mdx)重新执行。
+
+## 飞书长连接显示 Connected 但收不到消息 [#feishu-connected-no-messages]
+
+长连接建立成功只说明 WebSocket 通了，消息要进来还依赖事件订阅与权限：
+
+1. 飞书开放平台必须订阅 `im.message.receive_v1`（接收消息）并发布版本，管理员审批通过。
+2. 应用需具备 `im:message.p2p_msg:readonly`（收私聊）、`im:message:send_as_bot`（发消息）、`im:resource`（附件）、`contact:user.base:readonly`（身份）。群聊 @ 权限不能替代私聊接收权限。
+3. 后端要有一个消费 `agent` 队列的 Worker：接收器只在这些 Worker 里托管，靠 Redis 租约选主。`-Q` 少了 `agent` 就没人接管长连接。
+4. 个人设置若暂停了新消息，消息会被丢弃而不进入 AgentRun；在个人设置里恢复后再发一条试试。
+5. 群里 @ 机器人、机器人自己发的消息与未绑定身份的用户消息都会被忽略，属于预期行为。
+
+配置生效后请发送**新的**私聊消息验证；此前未接收的消息不保证重放。
+
+## 微信轮询暂停 [#wechat-polling-paused]
+
+微信轮询条目由 Beat 按集成能力动态注册。整条链路不动时按顺序检查：
+
+1. **平台开关**：微信 iLink 的 Agent 会话或知识采集能力必须启用；都关闭时 Beat 会移除轮询条目，日志里没有报错属正常。
+2. **Beat 在跑且是单副本**：`docker compose ps beat` / `kubectl get pods -l app=beat`。升级后必须重启过一次 Beat，否则它可能仍跑旧调度器。
+3. **`default` 队列有消费者**：轮询派发任务路由到 `default`，`worker` 的 `-Q` 必须包含它。
+4. **批次槽位被占满**：`WECHAT_POLL_MAX_BATCHES`（默认 `8`）个槽位都带未过期认领时，新一轮会认领不到。批次 30 秒截止、认领 90 秒过期，正常几轮内自愈；持续占满说明轮询请求超时，检查网络与微信端限流。
+5. **绑定状态**：只有 `status=connected` 的绑定会被轮询，二维码授权失效需要重新绑定。
+
 ## Sandbox 产物上传失败
 
 确认 `SANDBOX_ARTIFACT_UPLOAD_BASE_URL=http://api:8000`、API 与 Sandbox Worker 使用相同签名配置，或配置专用 `SANDBOX_ARTIFACT_UPLOAD_API_KEY`。产物必须位于 `/workspace` 内（否则策略直接拒绝），上传走内部端点 `/api/v1/upload/sandbox-artifact`，单文件与总量默认均不超过 `10MB`。Worker 和 Sandbox Worker 不挂 uploads 卷，必须能通过 `API_INTERNAL_BASE_URL` 访问 API。
@@ -42,6 +76,17 @@ bwrap: No permissions to create new namespace, likely because the kernel does no
 ```
 
 项目提供的部署（Docker Compose、Helm、Kubernetes）让 sandbox-worker 以 root + `CAP_SYS_ADMIN` 运行，用户命名空间创建走特权路径，不应出现此错误。出现该错误通常说明：Worker 未按提供的安全配置运行（如自定义部署保持非 root、`cap_add: SYS_ADMIN` 缺失、`seccomp=unconfined` 被覆盖）。自定义非 root 部署需在**节点级别**启用非特权用户命名空间（`seccomp=unconfined` 无效）：Ubuntu 23.10+ 执行 `sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`；Debian 执行 `sysctl -w kernel.unprivileged_userns_clone=1`，通过 `/etc/sysctl.d/` 持久化后用 `unshare -U true` 验证。Kubernetes 中需对每个节点生效，无法按 Pod 设置。完整说明见 [代码沙箱 → 宿主内核要求](../../usage/concepts/sandbox.mdx#kernel-requirements)。
+
+## 沙箱会话无法恢复或检查点失败 [#sandbox-session-recovery]
+
+同一会话的执行、检查点与清理都路由到它首次落地的 Sandbox Worker。相关报错通常指向磁盘身份或检查点：
+
+- **启动报 Worker ID 冲突**：`SANDBOX_WORKER_ID` 与磁盘上 `.worker-identity.json` 的记录不一致。恢复原值，或换一块空磁盘让系统重新生成；不要把同一个 `SANDBOX_WORKER_ID` 挂到不同磁盘。
+- **检查点持续失败**：`SANDBOX_CHECKPOINT_ROOT` 必须位于 `SANDBOX_WORKSPACE_ROOT` 之外，且与工作区在同一块持久磁盘上。Compose 用 `sandbox_data` 卷、K8s 用节点 `hostPath`；容器重建后挂载路径变了，旧检查点就找不到了。
+- **会话重置次数用尽**：默认 `SANDBOX_SESSION_MAX_RESETS=1`，超过后不再从检查点恢复，用户需要新建会话。
+- **节点或磁盘丢失**：该节点上的会话无法迁移，只能重新执行；长期要保留的内容应导出或上传到对象存储。
+
+排查顺序：查看 `sandbox-worker` 日志中的 worker_id、storage_id 与检查点错误 → 确认挂载点没变 → 确认磁盘未满（`SANDBOX_MAX_DISK_MB`）→ 再考虑提高 `SANDBOX_SESSION_MAX_RESETS`。
 
 ## Redis 连接失败
 
@@ -84,6 +129,8 @@ SSO 提供商通过**站点设置** > **SSO** 配置（无 CLI 检查命令）�
 - CIDR 网段：`10.10.0.0/16`、`172.20.0.0/24`
 - 精确域名：`oa.company.local`、`api.internal.service`
 - 通配域名：`*.corp.internal`
+
+沙箱出口白名单（**站点设置** > **安全** 中的 `sandbox_network_allowlist`，由 `sandbox_network_allowlist_enabled` 控制）是另一套列表：只接受精确 DNS 主机名，不接受上面的通配域名、CIDR 或 IP，也不作用于服务端发起的 HTTP 请求。
 
 <Callout type="warn">
   以下目标无论是否写入白名单都会被拒绝，配置保存和请求执行两个阶段都会校验：云元数据 `169.254.169.254`、`169.254.0.0/16`、`fe80::/10`、`metadata.google.internal`；未指定地址 `0.0.0.0`、`0.0.0.0/32`、`::`；多播 `224.0.0.0/4`；全量通配符 `*`、`0.0.0.0/0`、`::/0`；以及回环地址 `127.0.0.1`、`localhost`、`::1`。

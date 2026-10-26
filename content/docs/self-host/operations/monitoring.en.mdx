@@ -50,23 +50,49 @@ WHERE NOT i.indisvalid;
 For index creation, cleanup, and verification steps, see [Database Maintenance and Index Tuning](./database-maintenance.mdx).
 
 ## Observability console
-+
+
 The built-in observability console lives under **Monitoring** > **Observability** (route `/dashboard/observability`) and is backed by the APIs under `GET /api/v1/admin/observability`. Read endpoints require the `admin:dashboard:access` permission; alert acknowledgement, silence, and rule updates require `admin:observability:manage`. There is **no** Prometheus-style `/metrics` endpoint and no built-in Prometheus, Grafana, Datadog, or ELK integration; external monitoring must collect logs and poll the health endpoint plus this API.
-+
+
+The console is organized into six views; pick the view first, then drill in:
+
+| View | Question it answers | Data source |
+| --- | --- | --- |
+| Run results | Success/failure rates, duration distribution, recent failures | `GET /summary`, `GET /runs` |
+| On-demand trace | What happened inside one AgentRun or Workflow run | `GET /runs/{agent\|workflow}/{run_id}` |
+| Model/tool/retrieval dependencies | Which provider, tool, or retrieval stage is slow or failing | `GET /dependencies` |
+| Queues | Which queue is backing up and which workers are online | `GET /queues` |
+| Infrastructure | Database, Redis, Qdrant, and instance health | `GET /infrastructure` |
+| Alerts | Active alerts, rules, and silences | `GET /alerts`, `GET /alerts/rules` |
+
 | Endpoint | Parameters | Notes |
-+| --- | --- | --- |
-+| `GET /summary` | `period` (`15m`/`1h`/`24h`/`7d`, default `1h`), `team_id` | Compact run rollups and trends; percentiles and success rates are `null` when samples are insufficient |
-+| `GET /runs` | `period`, `team_id`, `source` (`all`/`agent`/`workflow`), `status`, `error_category`, `run_id`, `cursor`, `limit` (1–50, default `25`) | Summary-only keyset-paginated list; details come from `GET /runs/{agent|workflow}/{run_id}` |
-+| `GET /dependencies` | `period`, `team_id` | Model, tool, and retrieval aggregates when supported by recorded telemetry |
-+| `GET /queues` | none | Bounded current queue and worker snapshot |
-+| `GET /infrastructure` | none | Bounded infrastructure snapshot, dependency health, and safe `pg_stat_statements` query display |
-+| `GET /alerts`, `GET /alerts/rules` | Alert list takes `status` (`active`/`resolved`/`all`), `cursor`, `limit` (1–50, default `25`); rule list returns all rules | — |
-+| `POST /alerts/{id}/acknowledge`, `POST /alerts/{id}/silence` | Silence requires `duration_seconds` (60–604800 seconds) | Both require `admin:observability:manage` |
-+| `PUT /alerts/rules/{id}` | Body updates threshold, silence duration, and recovery window | Requires `admin:observability:manage` |
-+
-+Run summaries are retained for 30 days and record only allowlisted fields: timing, status, model name, token counts, resource and team identifiers, and error codes. Prompts, message bodies, tool arguments and results, credentials, and tracebacks are never stored; historical runs without submission timestamps are not backfilled. Alert rules are evaluated on alert reads, and the retention task uses the existing `default` Celery queue.
-+
-+The basic health check `GET /api/v1/health` requires no authentication and is meant for container healthchecks and external liveness probes; it returns only `{"status": "healthy"}` with no dependency detail. The dependency-aware infrastructure snapshot is `GET /api/v1/admin/observability/infrastructure` (requires `admin:dashboard:access`): missing probes are reported as `unknown`, and unavailable statistics are not shown as zero.
+| --- | --- | --- |
+| `GET /summary` | `period` (`15m`/`1h`/`24h`/`7d`, default `1h`), `team_id` | Compact run rollups and trends; percentiles and success rates are `null` when samples are insufficient |
+| `GET /runs` | `period`, `team_id`, `source` (`all`/`agent`/`workflow`), `status`, `error_category`, `run_id`, `cursor`, `limit` (1–50, default `25`) | Summary-only keyset-paginated list; details come from `GET /runs/{agent\|workflow}/{run_id}` |
+| `GET /dependencies` | `period`, `team_id` | Model, tool, and retrieval aggregates when supported by recorded telemetry |
+| `GET /queues` | none | Bounded current queue and worker snapshot |
+| `GET /infrastructure` | none | Bounded infrastructure snapshot, dependency health, and safe `pg_stat_statements` query display |
+| `GET /alerts`, `GET /alerts/rules` | Alert list takes `status` (`active`/`resolved`/`all`), `cursor`, `limit` (1–50, default `25`); rule list returns all rules | — |
+| `POST /alerts/{id}/acknowledge`, `POST /alerts/{id}/silence` | Silence requires `duration_seconds` (60–604800 seconds) | Both require `admin:observability:manage` |
+| `PUT /alerts/rules/{id}` | Body updates threshold, silence duration, and recovery window | Requires `admin:observability:manage` |
+
+Run summaries are retained for 30 days and record only allowlisted fields: timing, status, model name, token counts, resource and team identifiers, and error codes. Prompts, message bodies, tool arguments and results, credentials, and tracebacks are never stored; historical runs without submission timestamps are not backfilled. A single run captures at most 128 tool/retrieval spans, and the trace marks the rest as truncated. Alert rules are evaluated on alert reads, and the retention task uses the existing `default` Celery queue.
+
+See the [Observability reference](../../reference/observability.mdx) for the full field list and recording boundaries.
+
+The basic health check `GET /api/v1/health` requires no authentication and is meant for container healthchecks and external liveness probes; it returns only `{"status": "healthy"}` with no dependency detail. The dependency-aware infrastructure snapshot is `GET /api/v1/admin/observability/infrastructure` (requires `admin:dashboard:access`): missing probes are reported as `unknown`, and unavailable statistics are not shown as zero.
+
+## Messaging delivery log
+
+Every outbound Feishu and WeChat message and artifact lands in the single `integration_deliveries` queue, and the admin **Delivery Log** (`/deliveries`) lists them by status. Reading requires `admin:integrations:settings:read`, and the API is `GET /api/v1/admin/deliveries` (`provider_type` and `status` are repeatable filters, `limit` is 1–100 and defaults to `25`).
+
+When a user reports a missing message, check here first:
+
+- No record at all → nothing was produced upstream; check whether the run completed and whether the capability is enabled.
+- `status=error` → read `error` and `error_detail`; usually expired credentials, an unbound recipient, or an artifact above the size limit.
+- `status=pending` for a long time → the worker consuming that provider stopped; a stuck `sending` usually means the provider request timed out.
+- `status=unavailable` → the integration was disabled or is outside the current team.
+
+See [Delivery Log](../../usage/guides/integrations/delivery-log.mdx) for the page layout, filters, and field meanings. It is a different pipeline from in-app notifications' `notification_deliveries`, which records only email/webhook/feishu notification-channel results.
 
 ## Product Metrics
 

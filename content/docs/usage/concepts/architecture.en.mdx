@@ -1,124 +1,69 @@
 ---
 title: System Architecture
-description: Understand the Clouisle tech stack, request flows, scalability, and security boundaries
+description: Understand what the platform is made of and what happens during a chat or a workflow run
 icon: Layers
 ---
 
-Clouisle uses a layered architecture separating frontend, backend, and infrastructure: a Next.js frontend for UI and SSR, a FastAPI backend for Agents/Workflows/Knowledge Base, Celery for async tasks, and PostgreSQL, Redis, and Qdrant for business data, caching/queues, and vector retrieval.
+This page answers three questions: what the platform is made of, what stages a chat or workflow run goes through in your UI, and what multi-user use and scaling feel like. The service list, deployment topology, and internal addresses belong to operations — see [Deployment Architecture](../../self-host/architecture.mdx). Here we only cover behavior you can observe.
 
-### Technology Stack
+### Three parts, three jobs
 
-| Layer | Components | Notes |
+| Part | What it does | What you notice |
 | --- | --- | --- |
-| Frontend | Next.js 16 (App Router), TypeScript, Tailwind CSS 4 + shadcn/ui, Bun | The container runs the Next.js standalone server (`node server.js`) and does **not** include Nginx; `deploy/nginx/default.conf` is only an optional external reverse-proxy example |
-| Backend | FastAPI (Python 3.13), Tortoise ORM + asyncpg, Celery + Redis | LangChain adapters (chat/embeddings/text splitting); self-built `WorkflowOrchestrator` for workflow execution; LangGraph is declared but not used at runtime; MarkItDown for document conversion |
-| Infrastructure | PostgreSQL 17 (`pg_search` full-text), Redis 7 (cache/Celery broker/SSE event buffer/rate-limit and lockout counters), Qdrant (vectors) | Vectors are stored in a dedicated collection per embedding dimension (`{prefix}_{dimension}`), determined by the selected embedding model |
+| Interface | Pages, forms, streaming output, previews, and downloads | Works right away; content survives a refresh or a device change |
+| Application layer | Actually runs Agents, workflows, and knowledge retrieval, and decides permissions and team scope | Determines who can see and change what; stop, approval, and re-run all act here |
+| Data layer | Stores conversations and run records, approvals and settings, knowledge chunk indexes, uploaded attachments, and generated artifacts | Runs continue after you leave the page; artifacts can still be opened and downloaded later |
 
-### Request Flows & Execution Lifecycle
+The data layer is split across several kinds of storage: business records, retrieval indexes, and file assets each live where they fit best. Which components are used and how they are backed up is covered in [Deployment Architecture](../../self-host/architecture.mdx) and [Storage](../../self-host/operations/storage.mdx).
 
-#### 1. Basic Request Flow
+Separating the interface from execution makes the page a viewing window: closing it does not affect a task, and results never live only in one browser or one machine.
 
-```text
-Browser → (optional external reverse proxy / Ingress) → Next.js SSR (node server.js) → FastAPI API → PostgreSQL → Response
-```
-
-#### 2. Chat Request Flow & Asynchronous AgentRun Lifecycle
-
-Clouisle implements a durable, decoupled `AgentRun` execution architecture for conversational agents:
+### Stages of a chat
 
 ```text
-User Message ──► FastAPI (POST /api/v1/agents/{agent_id}/chat/runs) ──► Redis Queue (Celery agent)
-                       │ (202 Accepted, run_id)                           │
-                       ▼                                                  ▼
-                  SSE Stream                                  Celery Worker (run_agent_task)
-     (GET /api/v1/agents/{agent_id}/chat/runs/{id}/stream)                │
-                       ▲                                         Acquires Conversation Lock
-                       │                                                  │
-              Redis Event Buffer ◄──────────────────────────── AgentLoop ReAct Cycle
-              (SSE Event Pub/Sub)                                         │
-                                                               ┌──────────┴──────────┐
-                                                               ▼                     ▼
-                                                        Tool Calling /        Context Compaction
-                                                        RAG Retrieval         (Micro & Macro)
-                                                               │                     │
-                                                               ▼                     ▼
-                                                        [ask_user pause]      Watermarked Summary
-                                                        (Status: WAITING)     (Tokens kept in budget)
+Send message → queue → execute (thinking / retrieval / tools / generation) → stream back → done
 ```
 
-1. **Durable AgentRun**: Starting a run dispatches a Celery task and immediately returns `202 Accepted` with a `run_id`. The task is routed to the `agent` queue and consumed by the main worker; **if you rewrite the worker's `-Q` and drop `agent`, runs stay in `queued` forever without any error**, and users only see "queued" (queue mapping: [Deployment Architecture](../../self-host/architecture.mdx)). The client establishes an SSE stream (`/chat/runs/{run_id}/stream`) and can disconnect or reconnect (`from_sequence`) without interrupting background tool execution. Tasks on the `agent` queue set **no automatic retries** — model calls and tool execution have side effects, so a retry would execute them twice; runs interrupted by a dead worker are reclaimed by the Beat-scheduled `sweep-lost-agent-runs` (every 2 minutes) and marked `interrupted` rather than replayed.
-2. **AgentLoop ReAct Engine**: Manages iterative reasoning and tool-calling cycles (`max_iterations`, timeouts, and credential injection).
-3. **Three-Level Context Compaction**:
-   - **Micro Compaction**: Automatically truncates and summarizes oversized tool output payloads and raw base64 data to preserve token budgets.
-   - **Macro Compaction**: When conversation tokens cross the configured trigger budget, the engine computes turn boundaries, runs an LLM summarization over older messages, inserts a `context_summary` message with watermark tracking, and retains recent turns in verbatim form.
-   - **Preflight & Recovery Guards**: Token headroom reservations and automatic retries on context-length provider errors.
-4. **Human-in-the-Loop (`ask_user`) Suspension & Resumption**: When `ask_user` is called, `AgentLoop` enters `AgentRunStatus.WAITING` with pending question metadata. Submitting answers via `POST /chat/runs/{run_id}/answers` takes an ORM row lock, validates payloads, and resumes the active run seamlessly.
+1. **Send**: the message appears in the conversation immediately and the run starts on the platform side; your page does not need to stay open.
+2. **Queue**: when many runs happen at once, the UI shows "queued" first. Normally it starts quickly; if nothing moves for a long time, execution capacity is likely insufficient or the execution service is unavailable — contact operations instead of pressing send repeatedly.
+3. **Execute**: the model reasons turn by turn, retrieving knowledge, calling tools, and generating images or video as needed. Thinking steps, tool cards, and citations appear in the conversation as they happen.
+4. **Stream back**: the reply appears while it is being generated. Closing the page, refreshing, or switching conversations does not interrupt the run; when you return, the remaining output continues and what you already saw is not rendered twice.
+5. **Needs your answer**: when the model asks you a question, the run pauses at "waiting for answer" instead of guessing. Submit the form and the same turn continues from where it paused rather than starting over.
+6. **Done**: only **Stop** truly ends the turn. Runs you stop manually, runs that fail, and runs that were interrupted are not retried automatically — a retry would repeat tool calls with side effects — so send again yourself.
 
-#### 3. Workflow Engine Execution Flow
-
-```text
-Trigger Event / User Input ──► FastAPI (POST /workflows/{id}/runs) ──► Celery Queue (workflow)
-                                                                              │
-                                                                              ▼
-                                                                   WorkflowOrchestrator
-                                                                              │
-                                                                   Parse DAG Graph Definition
-                                                                   (ExecutionPlan, filter comments)
-                                                                              │
-                                                                   Execute Node Pipeline
-                                                                   (LLM, Code, Condition,
-                                                                    Iteration, Pause...)
-                                                                              │
-                                                      ┌───────────────────────┴───────────────────────┐
-                                                      ▼                                               ▼
-                                               Node Execution                                  Pause Request
-                                            (ExecutionContext Flow)                          (Status: WAITING)
-                                                      │                                               │
-                                                      ▼                                               ▼
-                                               Completed Result                              Resume with Feedback
-```
-
-1. **Graph Topological Planner (`ExecutionPlan`)**: Validates DAG dependencies, resolves parallel executable batches, and strips non-executable canvas documentation nodes (`NON_EXECUTABLE_NODE_TYPES = {"comment"}`).
-2. **Modular Node Executors**: Handlers for `llm`, `condition`, `code` (Sandbox), `iteration`/`loop`, `template`, `variable_aggregator`, `knowledge_retrieval`, `tool`, `agent`, and `sub_workflow`.
-3. **Pause & Resume Handlers**: Nodes requiring human review (`pause`) persist a `WorkflowPauseRequest` and suspend execution until approved or filled via `/runs/{id}/pause-requests/{req_id}/submit`.
-### Scalability
-
-The frontend and API are stateless and scale horizontally. The main worker (`python main.py worker -c 4 -Q default,agent,knowledge,workflow`) consumes all four of `default`, `agent`, `knowledge`, and `workflow`; to scale one queue independently, start an extra worker subscribed to a single queue (for example `-Q agent`), but a worker must consume `default` and `agent` at all times, otherwise notifications, cleanup tasks, and Agent conversations silently pile up in the queue. The code sandbox is a separate fifth queue, `sandbox`, consumed by the dedicated `sandbox-worker`; scaling it does not affect knowledge base or workflow processing. **Celery Beat must run exactly one replica** — it is a bare scheduler without a database lock, and multiple replicas would deliver scheduled tasks repeatedly. For the full queue mapping, periodic Beat tasks, and scaling commands, see [Deployment Architecture](../../self-host/architecture.mdx).
-
-### Security and Multi-tenancy
-
-- **Authentication**: password (bcrypt), SSO (OAuth2/OIDC/SAML/CAS), API Keys (`clou_` prefix + `Authorization: Bearer`).
-- **Authorization**: JWT validation + permission checks (`resource:action` / `admin:resource:action`); Super Admin bypasses.
-- **Data isolation**: resources belong to a team, queries are filtered by team membership automatically; regular users only see their own conversations (see [Teams & Security](./security.mdx)).
-- **Audit**: records the actor, operation, and before/after snapshots, with retention days and archiving.
-
-### Performance and Caching
-
-User sessions default to `30` days (controlled by the `session_timeout_days` site setting), with a `8`-day JWT fallback token; site settings are not cached and are read directly from the database on every lookup.
-
-There is no single global rate-limiting middleware: each protection is implemented per scenario, with its own boundary:
-
-| Mechanism | Limit | Where it lives |
-| --- | --- | --- |
-| Login failure lockout | After `max_login_attempts` (default `5`) consecutive failures, the account is locked for `lockout_duration_minutes` (default `15`) minutes | Account fields + site settings |
-| TOTP verification | `5` failures within a 300-second window lock verification for `900` seconds | Redis counter |
-| Admin bulk email | `100` messages per hour per sender | Redis counter (TTL 3600s) |
-| Per-recipient email | `5` messages per day per address | Redis counter (TTL 86400s) |
-| API Key requests per minute | `rate_limit` field defaults to `1000`/min, `0` meaning unlimited — **stored but not enforced today** | Metadata field |
-
-<Callout type="warn">
-Do not treat the API Key `rate_limit` as an active abuse control, and do not assume captcha alone stops brute force: what actually blocks sign-in attempts is the account lockout and the TOTP lockout (see [Teams & Security](./security.mdx)).
+<Callout type="info">
+"Queued" and "disconnected" are different things: queued means the task has not been picked up yet, while disconnected only means your page temporarily lost sight of progress. After a reconnect the run is usually still going.
 </Callout>
 
-### Health Checks
+### Stages of a workflow run
 
-- `/api/v1/health` — public basic health check (used by the container HEALTHCHECK).
-- `/api/v1/admin/observability/system/health` — admin observability health (CPU/memory/disk/database/Redis/worker), requires `admin:dashboard:access`.
+1. **Submit**: through a run form, or triggered by an external call, a schedule, or a webhook. Only a published workflow can run for real; a draft can only be debugged.
+2. **Queue**: like chat, it waits for execution capacity; insufficient capacity shows up as longer queues.
+3. **Execute along the graph**: independent branches run at the same time; nodes whose dependencies are unmet wait for upstream. Each node records its inputs, outputs, status, and duration.
+4. **Wait for people**: at an approval node the whole run pauses at "waiting for approval" and continues from that point once feedback is submitted; completed nodes are not re-run.
+5. **Done**: the final output, each node's trace, durations, tokens, and errors can all be reviewed in the run details.
+
+### What replicas and scaling mean for you
+
+- **State is not in the page**: the platform can run several identical copies of the same services on different machines. Whichever copy handles your request, conversations and run records come from the same data, so a refresh, a device change, or being picked up by another copy after queueing shows exactly the same content.
+- **Scaling buys concurrency, not single-run speed**: more capacity means more people can run tasks at once; one run is still limited by the model and tools themselves. When capacity is short, the first symptom is longer queues.
+- **Different work queues separately**: chat runs, document processing, and workflow runs each have their own execution lane, and a deployment can scale one of them independently. Whether one backlog affects another depends on whether capacity is allocated in line with real usage.
+- **Results are reproducible**: a workflow's path is defined by its orchestration, so the same inputs and the same published version produce the same order and output regardless of which machine executes it.
+
+Capacity planning, replica counts, and high availability are covered in [High Availability and Scaling](../../self-host/operations/high-availability.mdx).
+
+### Permissions and data boundaries
+
+- Resources belong to teams: team members access them by role, and access outside the team is invisible by default.
+- Private resources are visible only to their creator; cross-team sharing is read-only by default (knowledge bases, for example).
+- Super admins can cross team boundaries but still leave an operation record.
+- Deleting, publishing, restoring versions, and approving are written to the audit log with the actor and the before/after content.
+
+See [Teams and Security](./security.mdx) and the [Permissions reference](/reference/permissions).
 
 ---
 
 See also:
-- [Deployment Architecture](../../self-host/architecture.mdx) — 3 images / 5 services topology and volumes
-- [Agent](./agent.mdx), [Workflow](./workflow.mdx), [Knowledge Base](./knowledge-base.mdx) — core resource concepts
-- [Teams & Security](./security.mdx) — multi-tenancy and permission boundaries
-- [Environment Variables Reference](../../self-host/configuration/environment-variables.mdx) — startup-level configuration
+- [Deployment Architecture](../../self-host/architecture.mdx) — service topology, data placement, and network entry points
+- [Agent](./agent.mdx), [Workflow](./workflow.mdx), [Knowledge Base](./knowledge-base.mdx) — the three core resources
+- [Teams and Security](./security.mdx) — multi-tenancy, roles, and audit
