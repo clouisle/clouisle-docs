@@ -94,13 +94,13 @@ import {
   </section>
 
   <section className="mt-14 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-    <div className="rounded-2xl bg-[#102d39] p-7 text-[#ecf7f8] sm:p-9 dark:border dark:border-white/10">
+    <div className="flex flex-col rounded-2xl bg-[#102d39] p-7 text-[#ecf7f8] sm:p-9 dark:border dark:border-white/10">
       <div className="flex items-center gap-3"><BookOpen className="size-5 text-[#7ed6e5]" aria-hidden="true" /><p className="text-sm font-semibold text-[#b8e8ee]">{'Suggested reading order'}</p></div>
       <h2 className="mt-5 text-2xl font-semibold tracking-tight">{'Start with one application, then master the platform'}</h2>
-      <ol className="mt-7 grid gap-5 sm:grid-cols-3">
-        <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">01</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Complete the '}<Link href="/usage/quick-start" className="text-[#a8e1e8] underline underline-offset-2">{'Quick Start'}</Link>{', then run your first conversation.'}</span></li>
-        <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">02</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Read the Agent, Knowledge Base, and Workflow concepts.'}</span></li>
-        <li className="flex gap-3"><span className="font-mono text-sm text-[#7ed6e5]">03</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Dive into the guides, API, or deployment docs as needed.'}</span></li>
+      <ol className="not-prose mt-7 grid flex-1 content-center gap-4">
+        <li className="flex items-baseline gap-3"><span className="w-6 shrink-0 font-mono text-sm text-[#7ed6e5] tabular-nums">01</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Complete the '}<Link href="/usage/quick-start" className="text-[#a8e1e8] underline underline-offset-2">{'Quick Start'}</Link>{', then run your first conversation.'}</span></li>
+        <li className="flex items-baseline gap-3"><span className="w-6 shrink-0 font-mono text-sm text-[#7ed6e5] tabular-nums">02</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Read the Agent, Knowledge Base, and Workflow concepts.'}</span></li>
+        <li className="flex items-baseline gap-3"><span className="w-6 shrink-0 font-mono text-sm text-[#7ed6e5] tabular-nums">03</span><span className="text-sm leading-6 text-[#d1e7e9]">{'Dive into the guides, API, or deployment docs as needed.'}</span></li>
       </ol>
     </div>
     <div className="rounded-2xl border border-fd-border bg-fd-card p-7 sm:p-9">
