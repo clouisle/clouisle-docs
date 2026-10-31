@@ -32,7 +32,31 @@ Chunks are listed on the left and chunk settings on the right.
 - The chunk list shows each chunk's index and content; you can **Edit Chunks**, add a chunk, or delete one. If a chunk has unsaved changes, the editor asks whether to save or discard before leaving.
 - When the status is failed, retry only the failed chunks instead of reprocessing the whole document.
 - For an unprocessed document, adjust **Chunk Size** (in characters), **Chunk Overlap**, **Custom Separator**, and **Clean Text** on the right, then start processing. After processing completes, changing those settings requires **Reprocess**.
-- **Preview Original** opens a read-only preview: images display directly, PDFs page through, DOCX files offer thumbnails, page numbers, and zoom, and spreadsheets (XLSX/CSV) show read-only sheet by sheet. Files over `20MB` are not previewed online — use **Download Original** instead.
+- **Preview Original** opens a read-only preview, described below.
+
+### Original File Preview
+
+Choose **Preview Original** to open the viewer on the right. The preview reads the protected original file and does not bypass chunk permissions; closing the viewer returns to the chunk list.
+
+<figure>
+  <img src="/images/document-preview.png" alt="PowerPoint original file preview" />
+  <figcaption>Original file preview: slide thumbnails, page number, zoom, and download, with chunk settings still visible</figcaption>
+</figure>
+
+| File type | Preview capabilities |
+| --- | --- |
+| **PDF** | Page rendering, thumbnail sidebar, page jump, zoom, rotation, text search |
+| **DOCX** | Paginated view, thumbnails, zoom, text search; comments and tracked changes |
+| **PPTX** | Slide thumbnails, previous/next, page jump, zoom |
+| **XLSX** | Read-only sheet-by-sheet view with column sorting, search, and cell inspection |
+| **CSV** | Grid view and text search, with UTF-8 / GB18030 decoding fallback |
+| **Image** | Original image display |
+| **HTML / Markdown / text** | Read-only text or rendered output |
+
+- Files over **`20MB`** are not previewed online; download the original and open it locally.
+- Viewers load on demand: a component is fetched only the first time that file type is opened, so the document list stays light.
+- Search, zoom, download, and close controls follow the UI language; dark mode follows the site theme.
+- Missing view/download permission, signed-out state, unsupported types, and parse failures produce a specific reason instead of a blank panel.
 - URL imports have no original file, so only the source address and chunks are available.
 
 When the preview cannot open, it names the reason: file too large, your account lacks view/download permission, not signed in, unsupported type, or parse failure. Retry after fixing permission or sign-in problems; format problems require downloading the file.

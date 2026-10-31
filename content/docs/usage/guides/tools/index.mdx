@@ -4,11 +4,25 @@ description: 添加、配置、测试和共享可执行能力
 icon: Wrench
 ---
 
-工具让 Agent 和工作流执行文本生成之外的动作：查时间、算数、搜索网页、调用外部 API、查询数据库或在沙箱里跑代码。按来源分为内置工具（平台注册，网页搜索由站点管理员统一配置）、团队自定义工具（HTTP、代码、数据库）、MCP 服务与 Skill 包。
+工具让 Agent 和工作流执行文本生成之外的动作：查时间、算数、搜索网页、调用外部 API、查询数据库或在沙箱里跑代码。按来源分为内置工具（平台注册，网页搜索由站点管理员统一配置）、团队自定义工具（HTTP、代码、数据库）、MCP 服务与 Skill 包。工具定义之外，还需要**连接**决定以谁的账号执行，以及**审批**决定是否需要调用者确认。
+
+<figure>
+  <img src="/images/capabilities-tools.png" alt="能力中心的工具列表" />
+  <figcaption>能力 → 工具：内置、自定义与 MCP 工具的统一入口</figcaption>
+</figure>
+
+## 常见使用场景
+
+- **日常小工具**：查时间、做单位换算、算表达式，不需要任何配置。
+- **查业务数据**：用数据库工具以只读账号查询订单、库存或报表。
+- **连接外部系统**：用 HTTP 或 MCP 工具创建工单、发消息、查日历。
+- **复用团队流程**：把固定步骤写进 Skill，让不同 Agent 按同一套规范工作。
 
 <Cards>
   <Card title="内置工具" href="/usage/guides/tools/built-in">启用时间、计算、网页搜索、网页抓取与订阅源等系统能力；站点托管的搜索引擎在这里配置。</Card>
   <Card title="自定义工具" href="/usage/guides/tools/custom-tools">创建 HTTP API、代码与数据库工具（PostgreSQL / MySQL / Redis / MongoDB），定义参数、测试连通性并共享给其他团队。</Card>
   <Card title="MCP 服务" href="/usage/guides/tools/mcp">通过 stdio、SSE 或 HTTP 连接 MCP Server。</Card>
   <Card title="Skills 与包" href="/usage/guides/tools/skills">从 Zip 或 Git 导入 Skill 包，沙箱测试后绑定到 Agent。</Card>
+  <Card title="工具连接" href="/usage/guides/tools/tool-connections">为外部工具和数据库准备个人或团队账号，让 Agent 自动使用正确的身份。</Card>
+  <Card title="工具审批" href="/usage/guides/tools/tool-approvals">决定哪些工具直接执行、哪些必须由调用者确认，以及暂停后如何恢复。</Card>
 </Cards>

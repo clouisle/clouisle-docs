@@ -19,6 +19,8 @@ MCP 工具在**能力** > **工具** > **创建工具** > **MCP 服务**中配�
 3. 选择**获取工具列表**，确认工具名称、说明和 JSON Schema 参数。
 4. 保存并在工具列表中运行测试。
 
+如果 MCP 服务需要登录，先在**个人设置 → 工具连接**里完成 OAuth 授权或填写声明的请求头；Agent 运行时会按默认/唯一连接规则取用。连接、重新授权与固定连接见[工具连接](./tool-connections.mdx)。
+
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/mcp-tool-dialog.png" alt="MCP 服务配置" />
   <figcaption>MCP 服务配置</figcaption>

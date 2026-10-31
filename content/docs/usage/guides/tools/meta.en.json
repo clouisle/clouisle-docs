@@ -5,6 +5,8 @@
     "built-in",
     "custom-tools",
     "mcp",
-    "skills"
+    "skills",
+    "tool-connections",
+    "tool-approvals"
   ]
 }

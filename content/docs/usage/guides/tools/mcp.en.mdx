@@ -19,6 +19,8 @@ MCP tools are configured in **Capabilities** > **Tools** > **Create Tool** > **M
 3. Select **Fetch Tool List** and confirm the tool names, descriptions, and JSON Schema parameters.
 4. Save and run a test in the tool list.
 
+If the MCP server requires sign-in, complete OAuth or the declared headers under **Profile → Tool Connections** first; Agent runs pick a connection using the default/only rule. See [Tool Connections](./tool-connections.mdx) for reconnect and fixed-connection behavior.
+
 <figure>
   <img src="https://rustfs-endpoint.yhnotes.com/content/mcp-tool-dialog.png" alt="MCP server configuration" />
   <figcaption>MCP server configuration</figcaption>

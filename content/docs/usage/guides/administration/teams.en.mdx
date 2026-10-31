@@ -41,7 +41,7 @@ The team switcher offers two entry points with completely different permissions 
 | Entry | Location | Requires | Purpose |
 | --- | --- | --- | --- |
 | **Manage all teams (system admin)** | **Admin** → **Teams** (`/teams`) | Team viewing permission in the Admin area | List every team (paged, searchable by name/description), create, edit, delete, bulk delete |
-| **Manage current team** | `/app/team` | Membership in the team; the entry link only appears for Super Admins or team owners/admins | Member management, editing team basics, leaving, transferring ownership, viewing authorized models (read-only) |
+| **Manage current team** | `/app/team` | Membership in the team; the entry link only appears for Super Admins or team owners/admins | Member management, editing team basics, leaving, transferring ownership, viewing authorized models (read-only), and centrally editing tool approval policies |
 
 The **Model Authorization** tab on `/app/team` is **read-only**: it shows the models authorized for the team, their enable state, and today's usage/limits, and notes that a system administrator assigns them. Every write operation on model authorization requires a Super Admin (see below).
 
@@ -60,6 +60,16 @@ The `/app/team` header shows the team avatar, name, a **default team** badge, an
 Model authorization is **Super Admin only**: team members can only view it. Authorizing, bulk authorizing, changing quotas, and revoking are done by an administrator in **Admin** → **Teams**, or reviewed (read-only) on the **Model Authorization** tab under **Manage current team**.
 
 Configurable values include daily/monthly token limits, daily/monthly request limits, enable state, and priority. Granting or revoking sends an in-app notification to the team. See [Managing Team Models](../models/manage-models.mdx) for details.
+
+### Tool Approvals
+
+The **Tool Approvals** tab lists built-in, custom, MCP, and shared tools visible to the team, with the current policy for each:
+
+- **Allow**, **Deny**, or **Require caller confirmation**.
+- MCP tools can add overrides by exact operation name (for example `tool:search`); unmatched operations inherit the default decision.
+- A private tool can only be edited by its creator; shared tools are managed by the owning team and are read-only here; viewers see no save action.
+
+This tab changes **each tool's own policy**; it does not create team, site, entry-point, or workflow approval layers. Approval decisions and policy changes are written to the audit log. See [Tool Approvals and Caller Confirmation](../tools/tool-approvals.mdx) for the full rules.
 
 ## Adding Members
 

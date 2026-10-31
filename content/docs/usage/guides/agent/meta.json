@@ -3,6 +3,7 @@
   "icon": "Bot",
   "pages": [
     "create-agent",
+    "api-access",
     "conversation",
     "monitor",
     "memory",

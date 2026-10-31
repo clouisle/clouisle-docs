@@ -1,6 +1,6 @@
 ---
 title: Site Settings
-description: Configure branding, registration policy, security, notifications, storage, and compliance entry points
+description: Configure branding, registration policy, security, notifications, storage, parsing, and compliance entry points
 icon: MonitorCog
 ---
 
@@ -20,6 +20,7 @@ Settings categories:
 - **Security**
 - **Notification channels**
 - **Storage**
+- **Parsing**
 - **Memory**
 - **Integrations** (login identity sources, email, Webhook, Feishu, WeChat iLink)
 
@@ -302,6 +303,27 @@ Administrators archive logs past the retention period manually; archived logs ar
 ### Audit Alerts
 
 The settings page has no working audit alert feature: no automatic detection of failed sign-ins or bulk deletions, and no alert delivery. For security alerts, use the security events and external channels in [Automatic notifications](./notifications.mdx).
+
+## Parsing Settings
+
+The **Parsing** page (`/site-settings/parsing`) controls whether images inside knowledge-base documents are sent to a vision or OCR model. The feature is off by default and only affects documents processed **after it is enabled**; existing documents are not reprocessed automatically.
+
+| Setting | Default | Range | Description |
+| --- | --- | --- | --- |
+| Enable document image parsing | Off | On/off | When off, images are never sent to a model |
+| Vision model | empty | Enabled image-input model | Produces text and visual descriptions; must be authorized for the document's team |
+| OCR model | empty | Enabled image-input model | Text-only extraction; empty reuses the vision model |
+| Fetch external images | Off | On/off | Whether to fetch image URLs referenced by documents, still subject to SSRF checks |
+| Max images per document | `8` | `1-20` | Images beyond this are not analyzed |
+| Max bytes per image | `10485760` | `1-52428800` | Larger images are rejected |
+| Max pixels per image | `20000000` | `1-40000000` | Images above this are rejected |
+| Concurrent image requests | `2` | `1-8` | Maximum simultaneous analysis requests per document |
+
+- Enabling requires a vision model, an OCR model, or both; clearing the last model fails to save.
+- Images go to the model provider, cost money, and may leave your deployment; confirm policy before processing sensitive documents.
+- Results include OCR text and factual descriptions, written into chunks with page, slide, or sheet references; original images remain behind the protected file endpoint.
+
+For the full flow, supported sources, and failure handling, see [Image and Scanned Document Parsing](../knowledge/image-understanding.mdx).
 
 ## Site Search
 

@@ -6,11 +6,19 @@ icon: Bot
 
 Agent 指南覆盖从创建到上线后的完整生命周期。
 
+## 常见使用场景
+
+- **客服答疑**：把产品手册和工单记录放进知识库，让 Agent 先回答常见问题，答不了再转人工。
+- **文档助手**：上传合同、报告或表格，让 Agent 读取并回答具体条款、数字和差异。
+- **内部流程自动化**：用工具连接查询业务库、创建工单或发送通知，让重复操作变成一句对话。
+- **对外服务**：发布后用[网页嵌入](./embed-and-share.mdx)放进官网，或用 [API](./api-access.mdx)接进自己的应用。
+
 <Cards>
   <Card title="创建与编排 Agent" href="/usage/guides/agent/create-agent">配置模型、提示词、变量、知识、工具和发布状态。</Card>
+  <Card title="把 Agent 接入应用（API）" href="/usage/guides/agent/api-access">用 API 密钥或登录令牌调用 Agent，接收流式回复并处理追问与工具确认。</Card>
   <Card title="对话与会话" href="/usage/guides/agent/conversation">发送消息、附件、版本分支、停止与日志。</Card>
   <Card title="Agent 监控看板" href="/usage/guides/agent/monitor">查看使用统计、执行健康度、首 Token 延迟与用户干预率。</Card>
-  <Card title="记忆与上下文" href="/usage/guides/agent/memory">区分跨会话记忆图谱与单次上下文摘要压缩。</Card>
+  <Card title="记忆与上下文" href="/usage/guides/agent/memory">区分跨会话记忆图谱与单次对话内的分层上下文管理。</Card>
   <Card title="附件与媒体" href="/usage/guides/agent/media">配置文件、参考图、图片和视频生成。</Card>
   <Card title="独立运行与网页嵌入" href="/usage/guides/agent/embed-and-share">使用 Chat / Run 页面运行，或用官方 embed.js 将 Agent 嵌入第三方网站。</Card>
 </Cards>

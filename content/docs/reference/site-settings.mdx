@@ -28,6 +28,23 @@ icon: Settings
 
 `kb_document_max_upload_size_mb` 默认 `50`，有效范围 `1-1024`。后端上传接口实时读取该值，超过限制返回校验错误。
 
+## 文档图片解析
+
+`knowledge_base_images` 是私有站点配置，只在文档处理时读取；只影响启用后新处理的文档，不做历史回填。
+
+| 配置键 | 类型 | 默认值 | 范围 / 说明 |
+| --- | --- | --- | --- |
+| `kb_image_understanding_enabled` | boolean | `false` | 开启后才会调用视觉/OCR 模型 |
+| `kb_image_understanding_model_id` | string (UUID) | `""` | 视觉模型；必须启用且支持图片输入 |
+| `kb_image_ocr_model_id` | string (UUID) | `""` | 可选 OCR 模型；为空时复用视觉模型 |
+| `kb_image_understanding_allow_external` | boolean | `false` | 是否抓取文档引用的外部图片，仍受 SSRF 校验 |
+| `kb_image_understanding_max_images` | int | `8` | `1-20`，每篇文档最多分析的图片数 |
+| `kb_image_understanding_max_image_bytes` | int | `10485760` | `1-52428800`，单图最大字节 |
+| `kb_image_understanding_max_image_pixels` | int | `20000000` | `1-40000000`，单图最大像素 |
+| `kb_image_understanding_concurrency` | int | `2` | `1-8`，单篇文档并发图片请求数 |
+
+开启时视觉模型与 OCR 模型至少配置一个；清空最后一个模型会被拒绝。模型还必须对文档所属团队授权，并对该团队计入配额。
+
 ## 主题颜色
 
 主题支持页面、卡片、边框、侧边栏、顶部导航、强调色、弱化色和图表色。颜色使用十六进制格式，例如 `#3b82f6` 或带透明度的 `#3b82f680`。

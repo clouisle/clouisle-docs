@@ -1,0 +1,150 @@
+---
+title: 把 Agent 接入应用（API）
+description: 用 API 密钥或登录令牌调用 Agent，接收流式回复并处理追问与工具确认
+icon: CodeXml
+---
+
+当 Agent 已经调好，下一步常常是把它放进另一个系统：官网客服窗口、内部工单页、微信群机器人背后的服务，或者你自己的自动化脚本。**访问 API** 页面把这件事拆成三样东西：调用地址、身份凭证、消息格式。
+
+你不需要自己保存对话历史。Clouisle 会把每次对话、运行状态和工具执行结果落库，接口只负责把新的回复流式推给你。
+
+<figure>
+  <img src="/images/agent-api-access.png" alt="Agent 的 API 访问页" />
+  <figcaption>Agent 的 API 访问页：端点、认证方式、请求参数与事件说明</figcaption>
+</figure>
+
+## 什么时候用
+
+- **已有系统想加一个 AI 助手**：你的页面负责界面，Clouisle 负责模型、知识库和工具。
+- **批量或后台任务**：脚本把问题提交给 Agent，再把结果写回业务系统。
+- **移动端或小程序**：没有浏览器登录态，用 API 密钥代表调用方。
+- **需要断线续传**：运行状态保存在服务端，网络中断后可以按运行 ID 重新订阅。
+
+如果只是把现成对话窗口嵌到网页里，不需要自己调接口，直接用[网页嵌入](./embed-and-share.mdx)。API 适合你想完全控制界面和交互流程的场景。
+
+## 打开 API 页面
+
+1. 进入**应用**，打开目标 Agent。
+2. 在左侧选择 **API 访问**（与**编排**、**日志**、**监控**并列）。
+3. 页面会显示当前 Agent 的流式端点、认证方式和参数表。
+
+草稿 Agent 也能被有权限的调用方访问；**草稿状态只影响发布和发现**。但 API 密钥的绑定列表只列出已发布 Agent，所以要让密钥访问它，先发布 Agent。
+
+## 准备身份凭证
+
+两种凭证二选一：
+
+| 凭证 | 适合谁 | 怎么获得 |
+| --- | --- | --- |
+| **登录令牌（JWT）** | 已经登录 Clouisle 的前端或内部系统 | 通过登录接口获取，按用户身份调用 |
+| **API 密钥** | 没有用户登录态的服务、脚本、第三方页面 | 在 **API 密钥**页面创建 `clou_` 开头的密钥 |
+
+使用 API 密钥时注意：
+
+- 密钥以**创建者身份**运行，创建者的角色、团队成员关系和 Agent 访问权都会生效。
+- 密钥必须**包含当前 Agent**；没有绑定或绑定到别的 Agent 会被拒绝。
+- 密钥可以批准或拒绝**它自己发起**的运行中暂停的工具调用；其他密钥、其他用户、已撤销的密钥都不行。
+
+<Callout type="warn" title="密钥不要写进前端代码">
+  API 密钥等同于创建者的权限。浏览器、移动端安装包和公开仓库都可能泄露它；需要公开访问时优先使用[网页嵌入](./embed-and-share.mdx)的嵌入密钥，并限制可访问对象。
+</Callout>
+
+## 发送第一条消息
+
+端点：
+
+```http
+POST /api/v1/agents/{agent_id}/chat/stream
+Authorization: Bearer YOUR_API_KEY
+Content-Type: application/json
+```
+
+请求体：
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `message` | 是 | 用户输入的消息 |
+| `conversation_id` | 否 | 多轮对话的会话 ID；首次留空，`message_start` 会返回新 ID |
+| `variables` | 否 | Agent 定义的自定义变量值 |
+| `images` | 否 | 图片输入；每项需要 `url`，也可以用 `asset_id` 或 `asset_ref` 复用已授权资源 |
+| `file_urls` | 否 | 上传接口返回的文件资源（`filename`、`url`、`mime_type`、`size`） |
+
+最小示例：
+
+```bash
+curl -N -X POST "https://your-domain.com/api/v1/agents/550e8400-e29b-41d4-a716-446655440000/chat/stream" \
+  -H "Authorization: Bearer clou_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"帮我总结这份合同的关键条款","variables":{}}'
+```
+
+响应是 **Server-Sent Events（SSE）**：每一行 `data:` 是一个 JSON 事件。文本会逐段到达，工具调用和状态变化也会作为事件出现。
+
+## 读懂事件流
+
+| 事件 | 你会拿到什么 |
+| --- | --- |
+| `message_start` | 会话 ID、消息 ID；后续轮次把它作为 `conversation_id` |
+| `content_delta` | 回复正文的增量 |
+| `reasoning_start` / `reasoning_delta` / `reasoning_end` | 模型的思考过程（如果模型提供且 Agent 没有隐藏） |
+| `rag_start` / `rag_context` | 知识库检索开始与命中的文档 |
+| `tool_call` / `tool_result` | 工具名称、原始参数、执行结果或错误 |
+| `compression_start` / `compression_end` | 上下文压缩开始与结束；不包含被压缩的内容 |
+| `message_end` | 用量、耗时、消息版本号 |
+| `run_start` / `run_status` / `run_end` | 运行生命周期；`run_end` 一定出现，状态为 `completed`、`stopped`、`failed` 或 `interrupted` |
+| `error` | 错误码和可读消息 |
+
+事件的具体字段和顺序见 [Agents API](/api/agents) 与 [Chat API](/api/chat)。
+
+## 处理暂停：追问与工具确认
+
+有些运行不会直接结束，而是进入 `waiting`。这时不要重新发送同一句话，否则会创建新运行。
+
+### Agent 向你提问（ask_user）
+
+`run_status` 的 `pending_tool_name` 为 `ask_user` 时，运行在等用户回答。把答案提交到：
+
+```http
+POST /api/v1/agents/{agent_id}/chat/runs/{run_id}/answers
+```
+
+请求体里用 `answers` 按问题 ID 填写答案；如果要整体跳过，发送 `{"skipped": true, "answers": {}}`。答案格式、必填校验和错误码见 [Chat API](/api/chat#提交-ask_user-答案)。
+
+### 工具需要调用者确认
+
+`run_status` 的 `pending_tool_input` 会带 `interaction_kind: "tool_approval"` 和 `execution_id`。此时工具还没有执行：
+
+- 用**发起这次运行的同一凭证**读取执行并提交决定。
+- JWT 只能决定该用户自己发起的运行；API 密钥只能决定同一密钥提交的运行。
+- 批准后 worker 从暂停点继续；拒绝会取消这次调用。
+- 多个工具同时暂停时，每个调用独立决定，按原顺序恢复。
+
+直接决定端点与请求体见 [Agents API](/api/agents) 的审批小节。工作流、嵌入和定时入口不会触发确认；遇到必须确认的工具会直接失败，不会替用户放行。
+
+## 需要长期运行的任务
+
+`/chat/stream` 会等到本轮结束才关闭连接。如果任务可能跑很久，或客户端经常断线，改用持久运行：
+
+1. `POST /api/v1/agents/{agent_id}/chat/runs` 创建运行，立即返回 `202` 和 `run_id`。
+2. `GET /api/v1/agents/{agent_id}/chat/runs/{run_id}/stream?after_sequence=N` 订阅事件；断线后带上最后收到的序号继续。
+3. 需要停止时调用 `/stop`。
+
+浏览器里的聊天页也使用同一套持久运行机制，所以刷新页面不会丢任务。
+
+## 常见错误
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `401` 或认证失败 | 密钥无效、已过期、已禁用，或令牌失效 | 检查 `Authorization` 头与密钥状态 |
+| `403` 或 Agent 不可用 | 密钥没有绑定该 Agent，或创建者已失去访问权 | 在 API 密钥里重新勾选 Agent，或换有权限的凭证 |
+| 第一次有回复，第二次没有上下文 | 没有把 `message_start` 的 `conversation_id` 带回 | 后续请求传同一个 `conversation_id` |
+| 运行停在 `waiting` | 在等 ask_user 答案或工具确认 | 提交答案或审批决定，不要重发消息 |
+| 工具调用被拒绝 | 团队策略要求调用者确认，或调用了不允许的工具 | 由调用者确认；非交互入口改用不需要确认的工具 |
+| 上下文压缩后回复变短 | 历史被摘要、旧工具结果被折叠 | 缩短单轮内容，或让 Agent 分步完成 |
+
+## 相关页面
+
+- [API 密钥](../administration/api-keys.mdx) — 创建、绑定与停用密钥
+- [独立运行与网页嵌入](./embed-and-share.mdx) — 不写代码的嵌入方式
+- [对话与会话](./conversation.mdx) — 聊天页里的追问、确认与版本
+- [工具连接与调用者确认](../tools/tool-approvals.mdx) — 审批策略与恢复规则

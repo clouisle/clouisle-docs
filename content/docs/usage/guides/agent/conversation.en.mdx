@@ -119,6 +119,12 @@ A reply may contain:
 
 Progress appears in the order it actually happens. Retrieval, context compression, reasoning, tool calls, media results, and the body may interleave; the UI does not force retrieval to the front.
 
+
+<figure>
+  <img src="/images/agent-chat-thought-trace.png" alt="Thinking timeline and tool calls in chat" />
+  <figcaption>Thinking timeline: retrieval, tool calls, and artifacts in the order they happened</figcaption>
+</figure>
+
 Source markers in the reply follow the sentence they support; the **source list shows only sources actually cited**, and markers that cannot be matched to a known source are not rendered as numbers. With the Agent's **Citations** switch off, neither markers nor the source list appear; the Agent only produces citations when it has knowledge base retrieval, attachments, or web tools.
 
 ### Interactive questions
@@ -131,6 +137,23 @@ When the Agent enables **Interactive questions** (off by default) under **Orches
 4. You can also **skip** the whole interaction and let the model continue with what it has.
 
 Limits: each question is at most `2000` characters, with up to `50` options of at most `500` characters each. Answers are consumed once: resubmitting the same interaction produces no second result. Pending questions are stored with the run, so refreshing the page or switching back to the conversation restores the form — **do not rely on a refresh to cancel a question**; submit or click stop instead.
+
+### Tool confirmation
+
+When the team sets a tool to **Require caller confirmation**, the run pauses before executing it:
+
+<figure>
+  <img src="/images/chat-tool-confirmation.png" alt="Tool confirmation card in chat" />
+  <figcaption>Confirmation card: tool name, description, redacted action details, and Allow / Decline</figcaption>
+</figure>
+
+1. A **Confirm this action** card appears above the composer with the tool name, description, and **View action details**; sensitive arguments are redacted.
+2. Choose **Allow** to execute this call, or **Decline** to cancel it.
+3. When several tools pause together, confirm each call independently; they resume in order.
+
+Only **the user who started the run** can decide; team members, team administrators, and superusers cannot decide on their behalf. Refreshing or returning to the conversation restores the pending card — do not refresh to cancel; decline or stop the run. Stopping a waiting run cancels the pending confirmation. Runs started with an API key can only be decided by that same key; in Feishu/WeChat, send `/approve <execution UUID>` or `/reject <execution UUID>`. Workflows never prompt for confirmation.
+
+For policies, legacy configuration, and audit records, see [Tool Approvals and Caller Confirmation](../tools/tool-approvals.mdx).
 
 ### Reply quality
 

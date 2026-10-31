@@ -1,16 +1,16 @@
 ---
 title: Memory and Context
-description: Configure cross-conversation memory graphs, background extraction, and single-summary compression for long conversations
+description: Configure cross-conversation memory graphs, background extraction, and tiered context management for long conversations
 icon: Brain
 ---
 
 Clouisle solves conversation continuity and cost with two layers:
 
-1. **In-conversation context (message branches + single context summary)**: the live history during a conversation. When the assembled request exceeds budget, earlier history is **compressed into one summary** while the most recent turns stay verbatim, keeping the model window from overflowing.
+1. **In-conversation context (message branches + tiered compression)**: the live history during a conversation. When the assembled request exceeds budget, earlier history is summarized, completed tool results fold into readable references, and tools are discovered on demand, keeping the model window from overflowing.
 2. **Cross-conversation memory graph (Memory Graph)**: a persistent knowledge network across conversations, capturing user preferences, project background, and core facts as entities and directed relations.
 
 <Callout type="info">
-  There is no separate “conversation summary” subsystem and no multi-stage (warning/selective/blocking) compression strategy: compression produces exactly one thing — a model-generated context summary. Memory itself is an entity/relation graph, not an accumulation of raw conversation text.
+  Compression produces a model view, not a replacement for stored history: original messages and tool records remain. Memory itself is an entity/relation graph, not an accumulation of raw conversation text.
 </Callout>
 
 ## Enable Cross-Conversation Memory
@@ -38,9 +38,10 @@ Persistent memory is not flat text; it is a directed knowledge network of **enti
 
 Explore and manage it under the personal menu > **My memory** (`/app/memories`) or in the admin console (`/memories`).
 
-<Callout type="info" title="Image placeholder: memory graph canvas">
-  File: `/images/memory-graph-canvas.png`. Content: the interactive memory graph canvas showing entity nodes, relation edges, layout switcher buttons (grid, hierarchical, radial), and the entity detail sidebar. Crop to the main canvas and outline the selected entity node in the theme color. The future image's `alt` and caption should both read "Memory graph canvas".
-</Callout>
+<figure>
+  <img src="/images/memory-graph-canvas.png" alt="Memory graph canvas" />
+  <figcaption>Memory graph canvas: entity nodes, relation edges, layout switching, and entity details</figcaption>
+</figure>
 
 ### Entity types
 
@@ -109,14 +110,36 @@ Administrators configure background memory extraction under **Site settings** > 
 
 ## How Long Conversations Compress
 
-Context compression is on by default and does exactly one thing: earlier history is handed to the model to **produce a summary**, which replaces that history while the most recent turns stay verbatim.
+Context compression is on by default. The goal is not to delete history but to give the model a **view that fits the window without losing the task**. Original messages, tool calls, and results remain in the conversation; compression only changes what the current request contains.
 
-- **Budget**: the available input budget comes from the model's own context window, minus output reserve and a safety margin; models without a configured window use a default.
-- **Keeping recent text**: the latest turn is always kept, and turns with unfinished tool calls are never cut apart. If the request still exceeds budget after compression, the run fails with an explicit error instead of retrying forever.
-- **Summary generation**: summary length is capped and truncated to what the budget allows; failures are retried a few times, and the turn ends with an explicit error if all attempts fail.
-- **Reuse**: the summary is stored on the conversation, and later turns reuse and incrementally update the same summary instead of stacking new ones.
+<figure>
+  <img src="/images/agent-context-compression.png" alt="Agent context compression settings" />
+  <figcaption>Agent orchestration → Context Compression: switch, summary token budget, and progress display</figcaption>
+</figure>
 
-Compression only affects the current request's context; it never deletes history, which stays visible in the conversation.
+| Setting | Default | Range | Description |
+| --- | --- | --- | --- |
+| Enable context compression | On | On/off | When off, requests are not trimmed and an over-window request fails |
+| Summary token budget | `1000` | `128-8000` | Target size of the history summary; larger keeps more detail but leaves less room for the conversation |
+| Show compression progress | On | On/off | Emits compression start/end events to the chat stream; off compresses silently |
+
+### Tiered order
+
+1. **History summary**: older turns are summarized into one entry that replaces the original history; the latest turn and unfinished tool calls are never split.
+2. **Active-round compaction**: results from repeated tool calls in the same round are folded by group, keeping the tool name, status, and a readable reference.
+3. **Result readback**: folded tool results are not deleted. The model can call a read tool to fetch part of the original result instead of loading everything at once.
+4. **On-demand tool discovery**: with many tools, only a necessary subset is exposed first; the model can search and load other authorized tools. Unauthorized tools are never discovered or executed.
+5. **Provider overflow retry**: when estimates differ from the provider count, a bounded reduction retry happens before streaming starts, and completed side effects are not replayed.
+
+### Behavior boundaries
+
+- **Original records stay**: messages, tool arguments, and results remain in the conversation; refreshing or reviewing history loses nothing.
+- **Consistent recovery**: after a pause (question or tool confirmation) or a worker restart, the same model view is rebuilt without re-running completed calls.
+- **Explicit failure**: if non-compressible content such as user instructions or pending calls still cannot fit, the turn fails with a clear error instead of silently dropping it.
+- **Branch isolation**: editing a message or switching versions compresses only the active branch; older branch records never leak in.
+- **Visible usage**: compression events show before/after token estimates, and persisted records remain visible after history reload.
+
+Compression only affects the current request; it never deletes history. Long-term facts across conversations belong to the memory graph, which is a separate mechanism.
 
 ## Troubleshooting
 

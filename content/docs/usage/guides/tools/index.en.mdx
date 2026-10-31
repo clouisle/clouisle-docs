@@ -4,11 +4,25 @@ description: Add, configure, test, and share executable capabilities
 icon: Wrench
 ---
 
-Tools let Agents and workflows do more than generate text: read the time, do math, search the web, call external APIs, query a database, or run code in a sandbox. By origin they are built-in tools (registered by the platform; web search is configured once by the site administrator), team custom tools (HTTP, code, database), MCP servers, and Skill packages.
+Tools let Agents and workflows do more than generate text: read the time, do math, search the web, call external APIs, query a database, or run code in a sandbox. By origin they are built-in tools (registered by the platform; web search is configured once by the site administrator), team custom tools (HTTP, code, database), MCP servers, and Skill packages. Beyond the definition, a **connection** decides which account executes, and **approval** decides whether the caller must confirm.
+
+<figure>
+  <img src="/images/capabilities-tools.png" alt="Tools in the Capabilities page" />
+  <figcaption>Capabilities → Tools: one entry point for built-in, custom, and MCP tools</figcaption>
+</figure>
+
+## Common scenarios
+
+- **Everyday utilities**: time lookup, unit conversion, and expression math need no configuration.
+- **Business data**: query orders, inventory, or reports through a read-only database tool.
+- **External systems**: create tickets, send messages, or read calendars through HTTP or MCP tools.
+- **Reusable team process**: put a fixed procedure into a Skill so different Agents follow the same rules.
 
 <Cards>
-  <Card title="Built-in Tools" href="/usage/guides/tools/built-in">Enable system capabilities such as time, computation, web search, page fetching, and feeds; this is where site-managed search engines are configured.</Card>
-  <Card title="Custom Tools" href="/usage/guides/tools/custom-tools">Create HTTP API, code, and database tools (PostgreSQL / MySQL / Redis / MongoDB), define parameters, test connectivity, and share them with other teams.</Card>
-  <Card title="MCP Servers" href="/usage/guides/tools/mcp">Connect MCP Servers over stdio, SSE, or HTTP.</Card>
-  <Card title="Skills and Packages" href="/usage/guides/tools/skills">Import Skill packages from Zip or Git, run sandbox tests, and bind them to Agents.</Card>
+  <Card title="Built-in Tools" href="/en/usage/guides/tools/built-in">Enable system capabilities such as time, computation, web search, page fetching, and feeds; this is where site-managed search engines are configured.</Card>
+  <Card title="Custom Tools" href="/en/usage/guides/tools/custom-tools">Create HTTP API, code, and database tools (PostgreSQL / MySQL / Redis / MongoDB), define parameters, test connectivity, and share them with other teams.</Card>
+  <Card title="MCP Servers" href="/en/usage/guides/tools/mcp">Connect MCP Servers over stdio, SSE, or HTTP.</Card>
+  <Card title="Skills and Packages" href="/en/usage/guides/tools/skills">Import Skill packages from Zip or Git, run sandbox tests, and bind them to Agents.</Card>
+  <Card title="Tool Connections" href="/en/usage/guides/tools/tool-connections">Prepare personal or team accounts for external tools and databases so Agents use the right identity.</Card>
+  <Card title="Tool Approvals" href="/en/usage/guides/tools/tool-approvals">Decide which tools run directly, which need caller confirmation, and how paused runs resume.</Card>
 </Cards>

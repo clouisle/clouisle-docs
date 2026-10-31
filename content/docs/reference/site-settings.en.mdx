@@ -28,6 +28,23 @@ Public settings are provided by the backend `PublicSiteSettingsResponse`. The fo
 
 `kb_document_max_upload_size_mb` defaults to `50` with a valid range of `1-1024`. The backend upload endpoint reads this value at runtime; exceeding the limit returns a validation error.
 
+## Document Image Parsing
+
+`knowledge_base_images` is a private site configuration read only during document processing. It affects documents processed after it is enabled and performs no historical backfill.
+
+| Key | Type | Default | Range / notes |
+| --- | --- | --- | --- |
+| `kb_image_understanding_enabled` | boolean | `false` | Enables vision/OCR model calls |
+| `kb_image_understanding_model_id` | string (UUID) | `""` | Vision model; must be enabled and accept image input |
+| `kb_image_ocr_model_id` | string (UUID) | `""` | Optional OCR model; empty reuses the vision model |
+| `kb_image_understanding_allow_external` | boolean | `false` | Whether to fetch external image URLs, still subject to SSRF checks |
+| `kb_image_understanding_max_images` | int | `8` | `1-20`, maximum images analyzed per document |
+| `kb_image_understanding_max_image_bytes` | int | `10485760` | `1-52428800`, maximum bytes per image |
+| `kb_image_understanding_max_image_pixels` | int | `20000000` | `1-40000000`, maximum pixels per image |
+| `kb_image_understanding_concurrency` | int | `2` | `1-8`, concurrent image requests per document |
+
+Enabling requires a vision model, an OCR model, or both; clearing the last model is rejected. The model must also be authorized for the document's team and counts against that team's quota.
+
 ## Theme Colors
 
 The theme supports page, card, border, sidebar, top navigation, accent, muted, and chart colors. Colors use hex format, for example `#3b82f6` or `#3b82f680` with transparency.

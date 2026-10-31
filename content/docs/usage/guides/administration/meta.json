@@ -10,6 +10,7 @@
     "sso",
     "notifications",
     "site-settings",
+    "activity-log",
     "audit-logs",
     "api-keys"
   ]

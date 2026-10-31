@@ -90,7 +90,9 @@ Two display switches live in **Agent Settings**: **Citations** (off by default) 
 
 Media generation covers **images and videos** only (no audio/TTS generation). Image and video generation both call the team's authorized models; with the switch off, the model does not see these capabilities.
 
-On context: long-conversation compression is a **single summary** — when the request exceeds budget, earlier history is replaced by one generated summary while the most recent turns stay verbatim. It applies to the current conversation only and is **not** cross-conversation memory. Memory is a separate **entity/relation** knowledge graph that persists across conversations.
+On context: long conversations use **tiered compression** — older history becomes a summary, completed tool results fold into readable references, and large tool catalogs are discovered on demand. Original messages and tool records remain; compression only changes what the model sees. It applies to the current conversation only and is **not** cross-conversation memory. Memory is a separate **entity/relation** knowledge graph that persists across conversations.
+
+Compression is configured under **Context Compression**: on by default; summary token budget defaults to `1000` (`128-8000`); **Show compression progress** is on by default. See [Memory and Context](./memory.mdx).
 
 See [Attachments and media](./media.mdx) and [Memory and context](./memory.mdx) for details.
 

@@ -157,7 +157,7 @@ Document management covers upload, processing, reprocessing, and deletion; see [
 | --- | --- |
 | Upload | Documents start as **Pending** and are not processed automatically |
 | URL import | After a security check, a URL document is created and you confirm its chunks on the preview page |
-| Supported formats | PDF, DOC/DOCX, PPTX, TXT, Markdown, HTML, CSV, XLS/XLSX, JSON, URL (no `.ppt`, archives, or OCR) |
+| Supported formats | PDF, DOC/DOCX, PPTX, TXT, Markdown, HTML, CSV, XLS/XLSX, JSON, URL, and images (no `.ppt` or archives; image parsing is configured by the site) |
 | Bulk actions | Select several documents: **Quick process** pending ones, **retry failed chunks** for failed ones, or **delete** |
 | Per-file limit | The site's document upload limit, `50MB` by default, range `1-1024MB` |
 
@@ -193,7 +193,7 @@ The knowledge base detail page shows statistic cards (documents, chunks, tokens,
 
 | Cause | Fix |
 | --- | --- |
-| Text extraction failed (corrupt, encrypted, image-only) | Convert the format or remove the password, then re-upload |
+| Text extraction failed (corrupt, encrypted, image-only without parsing) | Convert, remove the password, or enable [image parsing](./image-understanding.mdx) and reprocess |
 | Zero chunks | Confirm the file contains extractable text, or turn off text cleaning and retry |
 | Embedding failed (credentials, quota, dimension) | Check model authorization and vector dimension, then retry failed chunks |
 | Indexing failed | Ask an administrator to check the retrieval service |

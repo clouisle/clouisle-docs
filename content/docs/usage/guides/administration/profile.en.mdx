@@ -1,10 +1,10 @@
 ---
 title: Personal Account Settings
-description: Manage your profile, password, TOTP, connected accounts, and account deletion
+description: Manage your profile, password, TOTP, connected accounts, tool connections, and account deletion
 icon: UserRound
 ---
 
-Personal settings are a **dialog**, not a standalone page: open them from the avatar menu by selecting **Profile**; the dialog is titled **Settings** and has four tabs: **Profile**, **Account**, **WeChat**, and **Feishu**. The WeChat and Feishu tabs hold personal channel settings (WeChat knowledge collection authorization, Feishu notifications, and personal Agent conversation settings) — see [Messaging integrations](../integrations/index.mdx). Time zones, active session lists, data export, and privacy switches are not implemented (**Roadmap**).
+Personal settings are a **dialog**, not a standalone page: open them from the avatar menu by selecting **Profile**; the dialog is titled **Settings** and has five tabs: **Profile**, **Account**, **Tool Connections**, **WeChat iLink**, and **Feishu**. The WeChat and Feishu tabs hold personal channel settings (WeChat knowledge collection authorization, Feishu notifications, and personal Agent conversation settings) — see [Messaging integrations](../integrations/index.mdx). Time zones, active session lists, data export, and privacy switches are not implemented (**Roadmap**).
 
 This page covers interface actions and visible results. For the fields and error codes of the profile, password, and account endpoints see the [Users API](../../../api/users.mdx).
 
@@ -28,6 +28,18 @@ Maintains your avatar, username, and email.
 - A wrong or expired code rejects the save with an invalid-code message.
 - On success the address is marked verified immediately and an audit log entry is written.
 - Changing only the username or avatar needs no code; saving with no changes reports that there is nothing to save.
+
+## Tool Connections Tab
+
+Use this tab to manage external accounts that Agents and tool executions use in the **current team**. A connection separates credentials from the tool definition so passwords never end up inside an Agent.
+
+- The list shows the tool name, account label, level (personal/team), status (available / re-authorization required), and default badge.
+- **Add connection**: pick a tool that declares connection fields, then fill in API keys, headers, or database fields, or choose **Connect** to complete OAuth.
+- **Set default**: when a tool has several connections, mark one as default. With no default and exactly one personal connection, it is used automatically.
+- **Reconnect / disconnect / delete**: reconnect when OAuth expires; disconnect only revokes authorization, while delete removes credentials permanently.
+- Team connections are managed by team owners or administrators; only the owner can change a personal connection.
+
+For selection rules and security boundaries, see [Tool Connections](../tools/tool-connections.mdx).
 
 ## Account Tab
 

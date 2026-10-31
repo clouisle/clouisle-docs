@@ -97,7 +97,7 @@ On the document detail or preview page you can edit chunk content, add a chunk a
 
 | Symptom | Possible cause | Fix |
 | --- | --- | --- |
-| Text extraction failed | Corrupt, encrypted, image-only (no OCR), or unsupported format | Convert or re-export and re-upload |
+| Text extraction failed | Corrupt, encrypted, image-only without image parsing, or unsupported format | Convert, remove the password, or enable [image parsing](./image-understanding.mdx) and reprocess |
 | Zero chunks | Extraction produced empty or whitespace-only text | Confirm the file has extractable text |
 | Partial/all embedding failures | Embedding model credentials, quota, or dimension mismatch | Check model authorization and vector dimension, then **retry failed chunks** |
 | Full-text recall unavailable | Retrieval service problem | Ask an administrator to check the service and confirm documents are completed |

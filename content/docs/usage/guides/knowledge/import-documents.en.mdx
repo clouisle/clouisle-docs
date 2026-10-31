@@ -22,7 +22,7 @@ On the knowledge base detail page, select **Upload documents** to upload local f
 | Web page | `url` | Fetched server-side |
 
 <Callout type="warn" title="Unsupported cases">
-  Legacy `.ppt`, XML, archives (ZIP/TAR/GZ), and folder uploads are unsupported, and there is no OCR for scans or images — a PDF containing only images extracts nothing and fails processing.
+  Legacy `.ppt`, XML, archives (ZIP/TAR/GZ), and folder uploads are unsupported, and scans or images require site image parsing — a PDF containing only images extracts nothing and fails processing when parsing is disabled.
 </Callout>
 
 Markdown files (and documents that keep Markdown structure after conversion) skip recursive character splitting and are **chunked by structural blocks**: level 1-2 headings force a split, oversized tables split by row with the header repeated, and code blocks stay intact or get a closing fence, with each chunk recording its section and type. See [Chunking and document processing](./chunking.mdx) for details and tunable parameters.

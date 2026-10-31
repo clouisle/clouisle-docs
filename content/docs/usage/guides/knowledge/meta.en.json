@@ -4,6 +4,7 @@
   "pages": [
     "create-knowledge-base",
     "import-documents",
+    "image-understanding",
     "browse-documents",
     "chunking",
     "retrieval"
